@@ -1,0 +1,246 @@
+# 데이터 모델
+
+HTTP 파일 통합 기능에서 사용되는 데이터 모델을 정의합니다.
+
+## 설정 데이터 모델
+
+### FieldMappingConfig
+```python
+from typing import Dict, List, Optional, Union
+from dataclasses import dataclass
+
+@dataclass
+class FieldMappingConfig:
+    """필드 매핑 설정"""
+    source_field: str
+    target_field: str
+    data_type: str = "string"
+    required: bool = False
+    default_value: Optional[Union[str, int, float]] = None
+    transformation: Optional[str] = None
+```
+
+### HttpFileOptions
+```python
+@dataclass
+class HttpFileOptions:
+    """HTTP 파일 처리 옵션"""
+    provider: str = "google_cloud"
+    bucket_name: str
+    file_pattern: Optional[str] = None
+    supported_formats: List[str] = None
+    field_mapper: Dict[str, Union[str, Dict]] = None
+    default_vars: Dict[str, Union[str, int, float]] = None
+    
+    def __post_init__(self):
+        if self.supported_formats is None:
+            self.supported_formats = ["csv", "json", "parquet"]
+```
+
+## 파일 메타데이터 모델
+
+### FileMetadata
+```python
+@dataclass
+class FileMetadata:
+    """파일 메타데이터"""
+    file_path: str
+    file_name: str
+    file_size: int
+    file_format: str
+    compression: Optional[str] = None
+    last_modified: Optional[str] = None
+    content_type: Optional[str] = None
+```
+
+## 처리 결과 모델
+
+### ProcessingResult
+```python
+@dataclass
+class ProcessingResult:
+    """파일 처리 결과"""
+    file_metadata: FileMetadata
+    records_processed: int
+    records_success: int
+    records_failed: int
+    processing_time: float
+    errors: List[Dict] = None
+```
+
+### ProcessingMetrics
+```python
+@dataclass
+class ProcessingMetrics:
+    """처리 성능 메트릭"""
+    total_files: int
+    processed_files: int
+    failed_files: int
+    total_records: int
+    processing_time: float
+    average_file_size: float
+    throughput_records_per_second: float
+```
+
+## SpaceONE 표준 데이터 모델
+
+### CostData
+```python
+@dataclass
+class CostData:
+    """SpaceONE 표준 비용 데이터"""
+    cost: float
+    usage_quantity: Optional[float] = None
+    usage_unit: Optional[str] = None
+    provider: str = "google_cloud"
+    region_code: Optional[str] = None
+    product: Optional[str] = None
+    usage_type: Optional[str] = None
+    resource: Optional[str] = None
+    tags: Dict[str, str] = None
+    additional_info: Dict[str, any] = None
+    data: Dict[str, any] = None
+    billed_date: str = None  # YYYY-MM-DD format
+    currency: str = "USD"
+```
+
+## Google Cloud Billing 원본 데이터 모델
+
+### GoogleCloudBillingRecord
+```python
+@dataclass
+class GoogleCloudBillingRecord:
+    """Google Cloud Billing 원본 레코드"""
+    # 기본 비용 정보
+    cost: float
+    cost_at_list: Optional[float] = None
+    currency: str = "USD"
+    usage_start_time: str = None
+    usage_end_time: str = None
+    
+    # 프로젝트 정보
+    project_id: str = None
+    project_name: str = None
+    project_labels: Dict[str, str] = None
+    
+    # 서비스 정보
+    service_description: str = None
+    sku_description: str = None
+    
+    # 사용량 정보
+    usage_amount_in_pricing_units: Optional[float] = None
+    usage_pricing_unit: Optional[str] = None
+    
+    # 위치 정보
+    location_region: Optional[str] = None
+    location_zone: Optional[str] = None
+    
+    # 청구 정보
+    billing_account_id: str = None
+    invoice_month: str = None
+    cost_type: str = "REGULAR"
+    
+    # 크레딧 정보
+    credits: List[Dict] = None
+    
+    # 라벨 및 태그
+    labels: Dict[str, str] = None
+    tags: Dict[str, str] = None
+```
+
+## 매핑 규칙 모델
+
+### MappingRule
+```python
+@dataclass
+class MappingRule:
+    """단일 필드 매핑 규칙"""
+    source_path: str  # 예: "project.id"
+    target_field: str  # 예: "additional_info.project_id"
+    data_type: str = "string"
+    required: bool = False
+    default_value: any = None
+    transformation_function: Optional[str] = None
+
+@dataclass
+class MappingRuleSet:
+    """전체 매핑 규칙 세트"""
+    provider: str
+    rules: List[MappingRule]
+    auto_mapping_enabled: bool = True
+    
+    def get_rule_by_target(self, target_field: str) -> Optional[MappingRule]:
+        """대상 필드로 매핑 규칙 검색"""
+        return next((rule for rule in self.rules if rule.target_field == target_field), None)
+```
+
+## 에러 모델
+
+### ProcessingError
+```python
+@dataclass
+class ProcessingError:
+    """처리 오류 정보"""
+    error_type: str
+    error_message: str
+    file_name: Optional[str] = None
+    record_index: Optional[int] = None
+    field_name: Optional[str] = None
+    timestamp: str = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            from datetime import datetime
+            self.timestamp = datetime.utcnow().isoformat()
+```
+
+## 설정 검증 모델
+
+### ValidationResult
+```python
+@dataclass
+class ValidationResult:
+    """설정 검증 결과"""
+    is_valid: bool
+    errors: List[str] = None
+    warnings: List[str] = None
+    
+    def add_error(self, message: str):
+        if self.errors is None:
+            self.errors = []
+        self.errors.append(message)
+        self.is_valid = False
+    
+    def add_warning(self, message: str):
+        if self.warnings is None:
+            self.warnings = []
+        self.warnings.append(message)
+```
+
+## 통계 모델
+
+### FileProcessingStats
+```python
+@dataclass
+class FileProcessingStats:
+    """파일별 처리 통계"""
+    file_name: str
+    file_size: int
+    records_total: int
+    records_processed: int
+    records_failed: int
+    processing_start_time: str
+    processing_end_time: str
+    processing_duration_seconds: float
+    throughput_records_per_second: float
+    memory_usage_mb: Optional[float] = None
+    
+    @property
+    def success_rate(self) -> float:
+        """성공률 계산"""
+        if self.records_total == 0:
+            return 0.0
+        return (self.records_processed / self.records_total) * 100
+```
+
+이러한 데이터 모델들을 사용하여 타입 안전성을 보장하고, 명확한 데이터 구조를 유지할 수 있습니다.

@@ -5,3 +5,6 @@ schematics
 google-api-python-client
 pandas-gbq
 tqdm
+pyarrow
+fastparquet
+requests

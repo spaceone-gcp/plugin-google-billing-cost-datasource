@@ -1,0 +1,107 @@
+# Google Cloud Billing Export 데이터 소스 설정 예시
+# 이 파일은 Google Cloud Billing Export 데이터를 처리하기 위한 설정 예시입니다.
+
+options:
+  # Google Cloud Storage 버킷 설정 (Google Cloud Billing Export 데이터가 저장된 버킷)
+  bucket_name: "gcp-billing-export-bucket"
+  
+  # 클라우드 제공자 설정
+  provider: "google_cloud"
+  
+  # Google Cloud Billing Export 스키마에 맞는 필드 매핑
+  field_mapper:
+    # 기본 필수 필드 매핑
+    cost: "cost"
+    billed_date: "usage_start_time"  # usage_start_time을 billed_date로 사용
+    
+    # Google Cloud Billing 전용 필드 매핑
+    billing_account_id: "billing_account_id"
+    service_id: "service.id"
+    service_description: "service.description"
+    sku_id: "sku.id"
+    sku_description: "sku.description"
+    project_id: "project.id"
+    project_name: "project.name"
+    location_region: "location.region"
+    location_zone: "location.zone"
+    invoice_month: "invoice.month"
+    usage_start_time: "usage_start_time"
+    usage_end_time: "usage_end_time"
+    usage_amount: "usage.amount"
+    usage_unit: "usage.unit"
+    usage_pricing_unit: "usage.pricing_unit"
+    currency: "currency"
+    cost_type: "cost_type"
+    transaction_type: "transaction_type"
+    seller_name: "seller_name"
+    
+    # additional_info에 포함될 필드들
+    additional_info:
+      billing_account_id: "billing_account_id"
+      service_id: "service.id"
+      service_description: "service.description"
+      sku_id: "sku.id"
+      sku_description: "sku.description"
+      project_id: "project.id"
+      project_number: "project.number"
+      project_name: "project.name"
+      project_ancestry_numbers: "project.ancestry_numbers"
+      location_location: "location.location"
+      location_country: "location.country"
+      location_region: "location.region"
+      location_zone: "location.zone"
+      invoice_month: "invoice.month"
+      invoice_publisher_type: "invoice.publisher_type"
+      cost_type: "cost_type"
+      usage_amount: "usage.amount"
+      usage_unit: "usage.unit"
+      usage_amount_in_pricing_units: "usage.amount_in_pricing_units"
+      usage_pricing_unit: "usage.pricing_unit"
+      credits: "credits"
+      adjustment_info: "adjustment_info"
+      export_time: "export_time"
+      cost_at_list: "cost_at_list"
+      transaction_type: "transaction_type"
+      seller_name: "seller_name"
+      currency: "currency"
+      currency_conversion_rate: "currency_conversion_rate"
+      project_labels: "project.labels"
+      labels: "labels"
+      system_labels: "system_labels"
+      tags: "tags"
+  
+  # 기본 변수 설정
+  default_vars:
+    provider: "google_cloud"
+    currency: "USD"  # 기본 통화 설정
+  
+  # 타입 매핑 설정
+  type_mapper:
+    additional_info:
+      Account ID: "billing_account_id"  # billing_account_id를 Account ID로 매핑
+
+# 시크릿 데이터 설정 (Google Cloud Service Account 키 정보)
+secret_data:
+  type: "service_account"
+  project_id: "your-gcp-project-id"
+  private_key_id: "your-private-key-id"
+  private_key: |
+    -----BEGIN PRIVATE KEY-----
+    your-private-key-content
+    -----END PRIVATE KEY-----
+  client_email: "your-service-account@your-project.iam.gserviceaccount.com"
+  client_id: "your-client-id"
+  auth_uri: "https://accounts.google.com/o/oauth2/auth"
+  token_uri: "https://oauth2.googleapis.com/token"
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs"
+  client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
+
+# 작업별 옵션 설정
+task_options:
+  bucket_name: "gcp-billing-export-bucket"
+  # 특정 파일 패턴 필터링 (선택사항)
+  file_pattern: "gcp_billing_export_v1_*.csv"
+  # 특정 날짜 범위 필터링 (선택사항)
+  date_range:
+    start_date: "2024-01-01"
+    end_date: "2024-12-31"

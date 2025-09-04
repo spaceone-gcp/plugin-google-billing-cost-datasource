@@ -1,0 +1,41 @@
+GLOBAL:
+  ENVIRONMENT: dev
+  DEBUG: true
+  # gRPC 메시지 크기 제한 설정 (16MB로 증가)
+  GRPC_MAX_RECEIVE_MESSAGE_LENGTH: 16777216  # 16MB
+  GRPC_MAX_SEND_MESSAGE_LENGTH: 16777216     # 16MB
+
+DATABASES: {}
+
+CACHES: {}
+
+CONNECTORS: {}
+
+HANDLERS: {}
+
+LOG: {}
+
+SERVICE:
+  spaceone.cost_analysis.plugin.data_source.service:
+    - DataSourceService
+    - JobService
+    - CostService
+
+ENDPOINTS:
+  - service: spaceone.cost_analysis.plugin.data_source.service.DataSourceService
+    name: DataSource
+    endpoint: grpc://localhost:50051
+  - service: spaceone.cost_analysis.plugin.data_source.service.JobService
+    name: Job
+    endpoint: grpc://localhost:50051
+  - service: spaceone.cost_analysis.plugin.data_source.service.CostService
+    name: Cost
+    endpoint: grpc://localhost:50051
+
+SCHEDULERS: {}
+
+WORKERS: {}
+
+TOKEN: ""
+
+QUEUES: {}

@@ -1,10 +1,20 @@
 from typing import Generator
+
 from spaceone.cost_analysis.plugin.data_source.lib.server import DataSourcePluginServer
+
+from .manager.cost_manager import CostManager
 from .manager.data_source_manager import DataSourceManager
 from .manager.job_manager import JobManager
-from .manager.cost_manager import CostManager
 
 app = DataSourcePluginServer()
+
+
+# 실제 비즈니스 로직 함수들 (테스트 가능)
+def _data_source_init_logic(params: dict) -> dict:
+    """init plugin by options - 실제 로직"""
+    options = params["options"]
+    data_source_mgr = DataSourceManager()
+    return data_source_mgr.init_response(options)
 
 
 @app.route("DataSource.init")
@@ -22,10 +32,19 @@ def data_source_init(params: dict) -> dict:
             'metadata': 'dict'
         }
     """
+    return _data_source_init_logic(params)
+
+
+def _data_source_verify_logic(params: dict) -> None:
+    """verify plugin - 실제 로직"""
     options = params["options"]
+    secret_data = params["secret_data"]
+    secret_data["private_key"] = _clean_pem(secret_data["private_key"])
+    domain_id = params.get("domain_id")
+    schema = params.get("schema")
 
     data_source_mgr = DataSourceManager()
-    return data_source_mgr.init_response(options)
+    data_source_mgr.verify_plugin(options, secret_data, domain_id, schema)
 
 
 @app.route("DataSource.verify")
@@ -43,15 +62,24 @@ def data_source_verify(params: dict) -> None:
     Returns:
         None
     """
+    return _data_source_verify_logic(params)
 
+
+def _job_get_tasks_logic(params: dict) -> dict:
+    """get tasks - 실제 로직"""
+    domain_id = params["domain_id"]
     options = params["options"]
     secret_data = params["secret_data"]
-    secret_data['private_key'] = _clean_pem(secret_data['private_key'])
-    domain_id = params.get("domain_id")
-    schema = params.get("schema")
+    secret_data["private_key"] = _clean_pem(secret_data["private_key"])
 
-    data_source_mgr = DataSourceManager()
-    data_source_mgr.verify_plugin(options, secret_data, domain_id, schema)
+    schema = params.get("schema")
+    start = params.get("start")
+    last_synchronized_at = params.get("last_synchronized_at")
+
+    job_mgr = JobManager()
+    return job_mgr.get_tasks(
+        domain_id, options, secret_data, schema, start, last_synchronized_at
+    )
 
 
 @app.route("Job.get_tasks")
@@ -75,20 +103,23 @@ def job_get_tasks(params: dict) -> dict:
         }
 
     """
+    return _job_get_tasks_logic(params)
 
-    domain_id = params["domain_id"]
+
+def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
+    """get cost data - 실제 로직"""
     options = params["options"]
     secret_data = params["secret_data"]
-    secret_data['private_key'] = _clean_pem(secret_data['private_key'])
 
+    # private_key가 있는 경우에만 PEM 정리
+    if "private_key" in secret_data:
+        secret_data["private_key"] = _clean_pem(secret_data["private_key"])
+
+    task_options = params.get("task_options", {})
     schema = params.get("schema")
-    start = params.get("start")
-    last_synchronized_at = params.get("last_synchronized_at")
 
-    job_mgr = JobManager()
-    return job_mgr.get_tasks(
-        domain_id, options, secret_data, schema, start, last_synchronized_at
-    )
+    cost_mgr = CostManager()
+    return cost_mgr.get_data(options, secret_data, task_options, schema)
 
 
 @app.route("Cost.get_data")
@@ -121,21 +152,24 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             'billed_date': 'str'
         }
     """
+    return _cost_get_data_logic(params)
 
+
+def _cost_get_linked_accounts_logic(params: dict) -> dict:
+    """get linked accounts - 실제 로직"""
     options = params["options"]
     secret_data = params["secret_data"]
-    secret_data['private_key'] = _clean_pem(secret_data['private_key'])
+    secret_data["private_key"] = _clean_pem(secret_data["private_key"])
 
-    task_options = params.get("task_options", {})
     schema = params.get("schema")
 
     cost_mgr = CostManager()
-    return cost_mgr.get_data(options, secret_data, task_options, schema)
+    return cost_mgr.get_linked_accounts(options, secret_data, schema)
 
 
 @app.route("Cost.get_linked_accounts")
 def cost_get_linked_accounts(params: dict) -> dict:
-    """ get linked accounts
+    """get linked accounts
 
     Args:
         params: (CostGetLinkedAccountsRequest): {
@@ -151,15 +185,8 @@ def cost_get_linked_accounts(params: dict) -> dict:
             'name': 'str'
         }
     """
-    options = params["options"]
-    secret_data = params["secret_data"]
-    secret_data['private_key'] = _clean_pem(secret_data['private_key'])
-
-    schema = params.get("schema")
-
-    cost_mgr = CostManager()
-    return cost_mgr.get_linked_accounts(options, secret_data, schema)
+    return _cost_get_linked_accounts_logic(params)
 
 
 def _clean_pem(pem_key: str) -> str:
-    return pem_key.replace('\\n', '\n')
+    return pem_key.replace("\\n", "\n")
