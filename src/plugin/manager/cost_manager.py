@@ -9,6 +9,7 @@ from ..conf.cost_conf import (
     BIGQUERY_TABLE_PREFIX,
     DATA_SOURCE_TYPES,
     DEFAULT_DATA_SOURCE_TYPE,
+    DETAILED_USAGE_TABLE_PREFIX,
 )
 from ..connector.bigquery_connector import BigqueryConnector
 from ..connector.http_file_connector import HttpFileConnector
@@ -40,6 +41,8 @@ class CostManager(BaseManager):
         self.billing_export_project_id = None
         self.billing_dataset = None
         self.billing_table = None
+        self.select_cost_option = None  # select_cost 옵션 저장
+        self.is_detailed_usage = False  # 상세 사용량 데이터 여부
 
     def get_linked_accounts(
         self, options: dict, secret_data: dict, schema: str
@@ -92,6 +95,14 @@ class CostManager(BaseManager):
         self.bigquery_connector.create_session(options, secret_data, schema)
         self._check_bigquery_task_options(task_options)
 
+        # select_cost 옵션 설정 (task_options 우선, options 차순)
+        self.select_cost_option = task_options.get("select_cost") or options.get(
+            "select_cost", "cost"
+        )
+        _LOGGER.debug(
+            f"[get_data_from_bigquery] select_cost option: {self.select_cost_option}"
+        )
+
         start = task_options["start"]
         self.billing_export_project_id = task_options["billing_export_project_id"]
         self.billing_dataset = task_options["billing_dataset_id"]
@@ -121,6 +132,14 @@ class CostManager(BaseManager):
         try:
             # HTTP 파일 처리용 파라미터 검증
             self._check_http_file_task_options(task_options, options, secret_data)
+
+            # select_cost 옵션 설정 (task_options 우선, options 차순)
+            self.select_cost_option = task_options.get("select_cost") or options.get(
+                "select_cost", "cost"
+            )
+            _LOGGER.debug(
+                f"[get_data_from_http_file] select_cost option: {self.select_cost_option}"
+            )
 
             # base_url 또는 bucket_name 추출 (task_options 우선)
             base_url = task_options.get("base_url") or options.get("base_url")
@@ -166,7 +185,9 @@ class CostManager(BaseManager):
                     "field_mapper", {}
                 )
                 provider = options.get("provider", "google_cloud")
-                self.field_mapper = FieldMapper(mapping_config, provider)
+                self.field_mapper = FieldMapper(
+                    mapping_config, provider, self.select_cost_option
+                )
 
                 _LOGGER.debug(
                     f"[get_data_from_http_file] Detected format: {file_format}"
@@ -200,7 +221,9 @@ class CostManager(BaseManager):
                 # Field Mapper 초기화 (기본 매핑 사용)
                 mapping_config = task_options.get("field_mapping", {})
                 provider = options.get("provider", "google_cloud")
-                self.field_mapper = FieldMapper(mapping_config, provider)
+                self.field_mapper = FieldMapper(
+                    mapping_config, provider, self.select_cost_option
+                )
 
                 # 압축 처리를 위한 import
                 from ..utils.compression import CompressionHandler
@@ -321,8 +344,11 @@ class CostManager(BaseManager):
 
         try:
             if getattr(row, "product", "") not in EXCLUSIVE_PRODUCT:
+                # select_cost 옵션에 따라 적절한 비용 필드 선택
+                selected_cost = self._get_cost_field_by_option(row)
+
                 data = {
-                    "cost": getattr(row, "cost", 0.0),
+                    "cost": selected_cost,
                     "usage_quantity": getattr(row, "usage_quantity", 0.0),
                     "provider": "google_cloud",
                     "product": getattr(row, "description", "Unknown"),
@@ -356,6 +382,42 @@ class CostManager(BaseManager):
             raise e
 
         return {"results": costs_data}
+
+    def _get_cost_field_by_option(self, row) -> float:
+        """select_cost 옵션에 따라 적절한 비용 필드를 선택
+
+        Args:
+            row: BigQuery 또는 파일에서 읽은 데이터 행
+
+        Returns:
+            선택된 비용 값
+        """
+        select_cost = self.select_cost_option or "cost"
+
+        if select_cost == "list_price":
+            # 정가 (크레딧 적용 전 원가)
+            cost_value = getattr(row, "cost_at_list", 0.0)
+            _LOGGER.debug(f"[_get_cost_field_by_option] Using list_price: {cost_value}")
+            return cost_value
+        elif select_cost == "after_credits":
+            # 크레딧 적용 후 비용
+            cost_value = getattr(row, "cost_after_credits", 0.0)
+            _LOGGER.debug(
+                f"[_get_cost_field_by_option] Using after_credits: {cost_value}"
+            )
+            return cost_value
+        elif select_cost == "net_cost":
+            # 순 비용 (기본 cost와 동일)
+            cost_value = getattr(row, "cost", 0.0)
+            _LOGGER.debug(f"[_get_cost_field_by_option] Using net_cost: {cost_value}")
+            return cost_value
+        else:
+            # 기본값: cost (크레딧을 포함한 최종 비용)
+            cost_value = getattr(row, "cost", 0.0)
+            _LOGGER.debug(
+                f"[_get_cost_field_by_option] Using default cost: {cost_value}"
+            )
+            return cost_value
 
     @staticmethod
     def _check_bigquery_task_options(task_options):
@@ -409,10 +471,19 @@ class CostManager(BaseManager):
             for table_info in bigquery_tables_info
         ]
 
-        if self.billing_table not in bigquery_table_names:
+        # 먼저 상세 사용량 테이블 확인
+        detailed_table = f"{DETAILED_USAGE_TABLE_PREFIX}_{self.billing_account_id}"
+        if detailed_table in bigquery_table_names:
+            self.billing_table = detailed_table
+            self.is_detailed_usage = True
+            _LOGGER.info(f"Using detailed usage table: {detailed_table}")
+        elif self.billing_table not in bigquery_table_names:
             raise ERROR_REQUIRED_PARAMETER(
-                key=f"Table '{self.billing_table}' not found in dataset. Available tables: {bigquery_table_names}"
+                key=f"Neither detailed table '{detailed_table}' nor standard table '{self.billing_table}' found in dataset. Available tables: {bigquery_table_names}"
             )
+        else:
+            self.is_detailed_usage = False
+            _LOGGER.info(f"Using standard usage table: {self.billing_table}")
 
     def _create_google_sql(self, start):
         where_condition = f"""
@@ -420,6 +491,18 @@ class CostManager(BaseManager):
         """
         if self.target_project_id != "*":
             where_condition += f" AND project.id = '{self.target_project_id}'"
+
+        # 상세 사용량 데이터인 경우 리소스 정보 포함
+        if hasattr(self, "is_detailed_usage") and self.is_detailed_usage:
+            resource_fields = """
+              resource.name as resource_name,
+              resource.global_name as resource_global_name,"""
+            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+        else:
+            resource_fields = """
+              NULL as resource_name,
+              NULL as resource_global_name,"""
+            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
 
         query = f"""
             SELECT
@@ -436,7 +519,7 @@ class CostManager(BaseManager):
               currency,
               TO_JSON_STRING(labels) as labels,
               TO_JSON_STRING(IFNULL(tags, [])) as resource_tags,
-              TO_JSON_STRING(credits) as credits_detail,
+              TO_JSON_STRING(credits) as credits_detail,{resource_fields}
 
               SUM(cost) as cost_after_credits,
               SUM(IFNULL(cost_at_list, cost)) as cost_at_list,
@@ -448,7 +531,7 @@ class CostManager(BaseManager):
               SUM(usage.amount_in_pricing_units) as usage_quantity,
             FROM `{self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}`
             {where_condition}
-            GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+            GROUP BY {group_by_fields}
             ORDER BY billed_at desc
             ;
         """

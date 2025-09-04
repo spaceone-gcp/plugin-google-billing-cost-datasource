@@ -1,5 +1,6 @@
 DEFAULT_BILLING_DATASET = "spaceone_billing_data"
 BIGQUERY_TABLE_PREFIX = "gcp_billing_export_v1"
+DETAILED_USAGE_TABLE_PREFIX = "gcp_billing_export_resource_v1"
 SECRET_TYPE_DEFAULT = "MANUAL"
 
 GRANULARITY = {"DAILY": "DAILY", "MONTHLY": "MONTHLY"}

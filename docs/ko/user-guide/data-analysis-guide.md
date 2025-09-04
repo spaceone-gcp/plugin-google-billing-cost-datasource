@@ -4,16 +4,23 @@
 
 ## BigQuery Billing Export 데이터 스키마
 
-BigQuery로 내보내는 Google Cloud Billing 데이터는 `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>` 형식의 테이블에 저장됩니다. Google Cloud는 **표준 사용량 비용 데이터**와 **상세 사용량 비용 데이터** 두 가지 내보내기 유형을 제공합니다.
+BigQuery로 내보내는 Google Cloud Billing 데이터는 두 가지 테이블 형식으로 저장됩니다:
+
+- **표준 사용량 데이터**: `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`
+- **상세 사용량 데이터**: `gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>`
+
+Google Cloud는 **표준 사용량 비용 데이터**와 **상세 사용량 비용 데이터** 두 가지 내보내기 유형을 제공합니다.
 
 ### 데이터 내보내기 유형 비교
 
 | 구분 | 표준 사용량 비용 데이터 | 상세 사용량 비용 데이터 |
 |:---|:---|:---|
-| **테이블명** | `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>` | `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>` |
-| **데이터 세분화** | 계정, 프로젝트, 서비스, SKU 수준 | 리소스 수준까지 상세 분석 |
+| **테이블명** | `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>` | `gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>` |
+| **데이터 세분화** | 계정, 프로젝트, 서비스, SKU 수준 | **개별 리소스 수준**까지 상세 분석 |
+| **리소스 식별** | 제한적 | ✅ `resource.name`, `resource.global_name` |
 | **필드 수** | 기본 필드 (약 20개) | 확장 필드 포함 (약 30개+) |
 | **리소스별 비용** | ❌ 지원하지 않음 | ✅ 개별 리소스별 비용 추적 |
+| **GKE 지원** | 기본적 | ✅ `labels.key`를 통한 고급 필터링 |
 | **상세 라벨/태그** | 제한적 | 모든 리소스 라벨 및 태그 |
 
 > **⚠️ 중요 권장사항**: 
@@ -23,6 +30,7 @@ BigQuery로 내보내는 Google Cloud Billing 데이터는 `gcp_billing_export_v
 > - **[표준 데이터 내보내기 스키마 상세 보기](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage?hl=ko)**
 > - **[상세 데이터 내보내기 스키마 상세 보기](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage?hl=ko)**
 > - **[상세 사용량 비용 데이터 내보내기 설정 방법](https://cloud.google.com/billing/docs/how-to/export-data-bigquery#enable-detailed-usage-cost)**
+> - **[📋 상세 사용량 데이터 활용 가이드](./detailed-usage-export-guide.md)** - 리소스 수준 분석 방법
 
 ### 데이터 스키마 상세 설명
 
@@ -40,6 +48,8 @@ BigQuery로 내보내는 Google Cloud Billing 데이터는 `gcp_billing_export_v
 | `project.labels` | `RECORD` | 프로젝트에 할당된 라벨의 키-값 쌍입니다. | 조직의 비용 분류 체계(예: 팀, 환경)에 따라 비용을 분석할 때 유용합니다. |
 | `labels` | `RECORD` | 개별 리소스에 할당된 라벨의 키-값 쌍입니다. | 리소스 단위의 세밀한 비용 분석 및 추적에 사용됩니다. |
 | `location.region` | `STRING` | 리소스가 사용된 리전입니다. (예: `us-central1`) | 리전별 비용을 분석하여 특정 지역의 비용 집중도를 파악합니다. |
+| `resource.name` | `STRING` | **상세 데이터만** 개별 리소스의 고유 식별자입니다. | VM 인스턴스, 디스크, 네트워크 등 개별 리소스 식별 및 추적 |
+| `resource.global_name` | `STRING` | **상세 데이터만** 글로벌 리소스의 식별자입니다. | 글로벌 로드 밸런서, CDN 등 글로벌 리소스 식별 |
 | `cost` | `FLOAT` | **크레딧 적용 후**의 실제 청구 비용입니다. | 실제 지불해야 하는 최종 비용을 나타냅니다. |
 | `cost_at_list` | `FLOAT` | **크레딧 적용 전**의 정가(List Price)입니다. | 할인 및 크레딧의 효과를 계산하기 위한 기준 금액으로 사용됩니다. |
 | `currency` | `STRING` | 비용이 청구된 통화입니다. | 다중 통화를 사용하는 경우, 통화별 비용을 분석하거나 기준 통화로 환산합니다. |
@@ -220,4 +230,17 @@ ORDER BY
 
 - **[BigQuery로 Billing 데이터 내보내기](https://cloud.google.com/billing/docs/how-to/export-data-bigquery?hl=ko)**
 - **[표준 사용량 비용 데이터 스키마](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage?hl=ko)**
+- **[상세 사용량 비용 데이터 스키마](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage?hl=ko)**
 - **[결제 보고서 및 비용 추세 분석](https://cloud.google.com/billing/docs/how-to/reports?hl=ko)**
+
+## 관련 프로젝트 문서
+
+- **[🏗️ Cloud Billing 데이터를 BigQuery로 내보내기](./Cloud%20Billing%20데이터를%20BigQuery로%20내보내기.md)** - 내보내기 설정 및 연동 가이드
+- **[⚙️ BigQuery로 Cloud Billing 데이터 내보내기 설정](./BigQuery로%20Cloud%20Billing%20데이터%20내보내기%20설정.md)** - 단계별 설정 가이드
+- **[📊 BigQuery의 Cloud Billing 데이터 테이블 이해하기](./BigQuery의%20Cloud%20Billing%20데이터%20테이블%20이해하기.md)** - 테이블 구조 개요
+- **[📈 표준 데이터 내보내기의 구조](./표준%20데이터%20내보내기의%20구조.md)** - 표준 데이터 스키마
+- **[📋 자세한 데이터 내보내기의 구조](./자세한%20데이터%20내보내기의%20구조.md)** - 리소스 수준 세밀한 분석
+- **[💰 가격 책정 데이터 내보내기의 구조](./가격%20책정%20데이터%20내보내기의%20구조.md)** - 가격 데이터 스키마
+- **[🔍 Cloud Billing 데이터 내보내기의 쿼리 예시](./Cloud%20Billing%20데이터%20내보내기의%20쿼리%20예시.md)** - 실용적인 쿼리 모음
+- **[💰 Pricing Data Export 가이드](./pricing-data-export-guide.md)** - 가격 정보 분석
+- **[🔧 Billing Export 설정 가이드](./billing-export-setup.md)** - 내보내기 초기 설정
