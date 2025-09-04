@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Module Debug",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "spaceone.core.command",
+        "python": "${workspaceFolder}/venv/bin/python",
+        "env": {
+          "PYTHONPATH": "./src:"
+        },
+        "args": ["run", "plugin-server", "plugin"]
+      }
+    ]
+  }

@@ -11,14 +11,18 @@ _LOGGER = logging.getLogger("spaceone")
 class FieldMapper:
     """SpaceONE 비용 데이터 형식으로 필드 매핑을 수행하는 클래스"""
 
-    def __init__(self, mapping_config: dict, provider: str = None):
+    def __init__(
+        self, mapping_config: dict, provider: str = None, select_cost: str = None
+    ):
         """
         Args:
             mapping_config: 필드 매핑 설정
             provider: 클라우드 프로바이더 (aws, gcp, azure 등)
+            select_cost: 비용 선택 옵션 (cost, list_price, after_credits, net_cost)
         """
         self.mapping_config = mapping_config or {}
         self.provider = provider or "unknown"
+        self.select_cost = select_cost or "cost"
         self.compiled_mappings = {}
         self._compile_mappings()
 
@@ -32,8 +36,11 @@ class FieldMapper:
             SpaceONE 형식으로 변환된 데이터
         """
         try:
+            # select_cost 옵션에 따라 비용 필드 결정
+            cost_value = self._get_cost_by_option(source_data)
+
             mapped_data = {
-                "cost": self._map_field("cost", source_data, 0.0),
+                "cost": cost_value,
                 "usage_quantity": self._map_field("usage_quantity", source_data, 0.0),
                 "usage_unit": self._map_field("usage_unit", source_data, ""),
                 "provider": self.provider,
@@ -61,6 +68,40 @@ class FieldMapper:
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
             raise ERROR_INVALID_ARGUMENT(key=f"field_mapping_error: {str(e)}")
+
+    def _get_cost_by_option(self, source_data: dict) -> float:
+        """select_cost 옵션에 따라 적절한 비용 필드를 선택
+
+        Args:
+            source_data: 원본 데이터
+
+        Returns:
+            선택된 비용 값
+        """
+        if self.select_cost == "list_price":
+            # 정가 관련 필드들을 시도
+            cost_value = (
+                self._map_field("cost_at_list", source_data, 0.0)
+                or self._map_field("list_price", source_data, 0.0)
+                or self._map_field("list_price_total", source_data, 0.0)
+            )
+            # _LOGGER.debug(f"[FieldMapper] Using list_price: {cost_value}")
+            return cost_value
+        elif self.select_cost == "after_credits":
+            # 크레딧 적용 후 비용
+            cost_value = self._map_field("cost_after_credits", source_data, 0.0)
+            # _LOGGER.debug(f"[FieldMapper] Using after_credits: {cost_value}")
+            return cost_value
+        elif self.select_cost == "net_cost":
+            # 순 비용 (기본 cost와 동일)
+            cost_value = self._map_field("cost", source_data, 0.0)
+            # _LOGGER.debug(f"[FieldMapper] Using net_cost: {cost_value}")
+            return cost_value
+        else:
+            # 기본값: cost
+            cost_value = self._map_field("cost", source_data, 0.0)
+            # _LOGGER.debug(f"[FieldMapper] Using default cost: {cost_value}")
+            return cost_value
 
     def _map_tags_field(self, source_data: dict) -> dict:
         """tags 필드 특별 처리 - 문자열인 경우 JSON 파싱"""
@@ -317,6 +358,15 @@ class FieldMapper:
                     "invoice_month": "invoice_month",
                     "cost_type": "cost_type",
                     "project_name": "project_name",
+                    # 🆕 신규: 리소스 식별 필드 (상세 사용량 데이터)
+                    "resource_name": "resource_name",
+                    "resource_global_name": "resource_global_name",
+                    # 🆕 신규: Pricing 관련 필드 추가
+                    "list_price": "list_price",
+                    "discount_rate": "discount_rate",
+                    "pricing_tier": "pricing_tier",
+                    "service_id": "service_id",
+                    "sku_id": "sku_id",
                 },
             }
 
