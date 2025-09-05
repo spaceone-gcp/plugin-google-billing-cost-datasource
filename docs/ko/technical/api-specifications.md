@@ -166,6 +166,101 @@ def compare_billing_vs_pricing(
     """
 ```
 
+## Concurrency Management API
+
+### 동시성 관리자
+```python
+class ConcurrencyManager:
+    """파일 처리 동시성 제어 및 세션 캐싱"""
+    
+    def acquire_file_lock(
+        self, 
+        bucket_name: str, 
+        file_path: str, 
+        timeout: float = 30.0
+    ) -> ContextManager:
+        """
+        파일 처리를 위한 락 획득 (컨텍스트 매니저)
+        
+        Args:
+            bucket_name: GCS 버킷 이름
+            file_path: 파일 경로
+            timeout: 락 획득 타임아웃 (초)
+            
+        Returns:
+            컨텍스트 매니저 객체
+            
+        Raises:
+            TimeoutError: 타임아웃 내 락 획득 실패
+        """
+    
+    def cache_session(
+        self, 
+        project_id: str, 
+        bucket_name: str, 
+        session_data: Dict
+    ) -> None:
+        """
+        GCS 세션 캐싱
+        
+        Args:
+            project_id: Google Cloud 프로젝트 ID
+            bucket_name: GCS 버킷 이름
+            session_data: 캐시할 세션 데이터
+        """
+    
+    def get_cached_session(
+        self, 
+        project_id: str, 
+        bucket_name: str, 
+        max_age: float = 300.0
+    ) -> Optional[Dict]:
+        """
+        캐시된 GCS 세션 조회
+        
+        Args:
+            project_id: Google Cloud 프로젝트 ID
+            bucket_name: GCS 버킷 이름
+            max_age: 최대 캐시 유지 시간 (초, 기본 5분)
+            
+        Returns:
+            캐시된 세션 데이터 또는 None
+        """
+```
+
+### 중복 요청 방지
+```python
+class RequestDeduplicator:
+    """중복 요청 감지 및 방지"""
+    
+    def generate_request_hash(
+        self, 
+        options: Dict, 
+        task_options: Dict
+    ) -> str:
+        """
+        요청의 고유 해시 생성
+        
+        Args:
+            options: 데이터소스 옵션
+            task_options: 작업 옵션
+            
+        Returns:
+            MD5 해시 문자열
+        """
+    
+    def is_duplicate_request(self, request_hash: str) -> bool:
+        """
+        중복 요청 확인
+        
+        Args:
+            request_hash: 요청 해시
+            
+        Returns:
+            중복 요청 여부
+        """
+```
+
 ## HTTP File Connector API
 
 ### 파일 목록 조회

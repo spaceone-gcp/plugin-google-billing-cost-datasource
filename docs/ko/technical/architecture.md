@@ -82,6 +82,15 @@ Google Cloud Billing 플러그인의 전체 시스템 아키텍처를 설명합�
   - **JSONParser**: JSON/JSONL 파일 파싱  
   - **ParquetParser**: Parquet 파일 파싱
 
+### Concurrency Management Layer (신규)
+- **ConcurrencyManager**: 파일 처리 동시성 제어 및 세션 캐싱
+  - 파일별 락 관리로 중복 처리 방지
+  - GCS 세션 캐싱으로 성능 최적화 (TTL 5분)
+  - 처리 상태 추적 및 통계 제공
+- **RequestDeduplicator**: 중복 요청 감지 및 방지
+  - 요청 해시 생성 및 TTL 기반 중복 제거 (기본 60초)
+  - 동일 파라미터 요청 방지로 리소스 효율성 향상
+
 ## 데이터 플로우
 
 ### BigQuery 모드 (표준 청구 데이터)
@@ -91,7 +100,7 @@ SpaceONE → CostManager → BigqueryConnector → BigQuery → 데이터 반환
 
 ### HTTP 파일 모드 (파일 기반 청구 데이터)
 ```
-SpaceONE → CostManager → HttpFileConnector → GCS/HTTP 파일 → CompressionHandler → FileProcessorFactory → Parser → FieldMapper → 데이터 반환
+SpaceONE → CostManager → HttpFileConnector (세션 캐싱) → ConcurrencyManager (락 관리) → GCS/HTTP 파일 → CompressionHandler → FileProcessorFactory → Parser → FieldMapper → 데이터 반환
 ```
 
 ### Pricing 데이터 모드 (가격 정보 조회)
@@ -105,11 +114,12 @@ SpaceONE → CostManager → BigqueryConnector (청구 데이터) + PricingConne
 ```
 
 #### 상세 플로우
-1. **HttpFileConnector**: GCS 버킷 또는 HTTP URL에서 파일 다운로드
-2. **CompressionHandler**: 압축된 파일 자동 감지 및 해제 (gzip, snappy, zstd)
-3. **FileProcessorFactory**: 파일 형식 자동 감지 및 적절한 파서 생성
-4. **Parser**: CSV, JSON, Parquet 파일을 스트리밍 방식으로 파싱
-5. **FieldMapper**: 프로바이더별 필드 매핑 및 SpaceONE 형식으로 변환
+1. **ConcurrencyManager**: 요청 중복 검사 및 파일 처리 락 획득
+2. **HttpFileConnector**: GCS 버킷 또는 HTTP URL에서 파일 다운로드 (캐시된 세션 재사용)
+3. **CompressionHandler**: 압축된 파일 자동 감지 및 해제 (gzip, snappy, zstd)
+4. **FileProcessorFactory**: 파일 형식 자동 감지 및 적절한 파서 생성
+5. **Parser**: CSV, JSON, Parquet 파일을 스트리밍 방식으로 파싱
+6. **FieldMapper**: 프로바이더별 필드 매핑 및 SpaceONE 형식으로 변환
 
 ## 확장성 고려사항
 

@@ -68,3 +68,24 @@ SpaceONE용 Google Cloud Billing 데이터 수집 플러그인 문서입니다.
 - ✅ **보안 강화**: 환경변수 기반 설정 및 자동 검증 도구 ⭐ **NEW**
 - ✅ **가격 분석**: 실제 비용 vs 정가 비교 및 할인율 계산 ⭐ **NEW**
 - ✅ **자동화 도구**: 설정 검증 및 보안 검사 스크립트 ⭐ **NEW**
+- ✅ **동시성 제어**: 파일별 락 관리 및 세션 캐싱 (30-50% 성능 향상) ⭐ **NEW**
+- ✅ **중복 처리 방지**: 동일 요청 자동 감지 및 스킵으로 리소스 절약 ⭐ **NEW**
+- ✅ **gRPC 최적화**: 16MB 메시지 크기 지원으로 대용량 데이터 처리 ⭐ **NEW**
+
+## 📚 상세 문서
+
+### 사용자 가이드
+- **[통합 가이드](./user-guide/integration-guide.md)** - 전체 설정 및 사용 방법
+- **[Billing Export 설정](./user-guide/billing-export-setup.md)** - Google Cloud 설정 방법
+- **[데이터 분석 가이드](./user-guide/data-analysis-guide.md)** - 비용 데이터 활용법
+
+### 개발자 문서
+- **[PRD](./development/prd.md)** - 제품 요구사항 명세서
+- **[구현 로드맵](./development/implementation-roadmap.md)** - 단계별 구현 계획
+- **[동시성 관리](./development/concurrency-management.md)** - 성능 최적화 시스템 ⭐ **NEW**
+- **[Field Mapper 가이드](./development/field-mapper-guide.md)** - 필드 매핑 구현
+
+### 기술 문서
+- **[아키텍처 설계](./technical/architecture.md)** - 시스템 구조 및 설계
+- **[API 명세서](./technical/api-specifications.md)** - 상세 API 문서
+- **[데이터 모델](./technical/data-models.md)** - 데이터 구조 정의

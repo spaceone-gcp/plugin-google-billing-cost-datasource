@@ -10,6 +10,7 @@ from spaceone.core.error import ERROR_INVALID_ARGUMENT, ERROR_REQUIRED_PARAMETER
 
 from ..conf.cost_conf import HTTP_FILE_CONFIG
 from ..error.cost import ERROR_FILE_DOWNLOAD_FAILED
+from ..utils.concurrency_manager import concurrency_manager
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -26,13 +27,27 @@ class HttpFileConnector(BaseConnector):
         self.project_id = None
 
     def create_session(self, options: dict, secret_data: dict, schema: str):
-        """GCS 클라이언트 세션 생성"""
+        """GCS 클라이언트 세션 생성 (캐시된 세션 재사용 지원)"""
         if not secret_data:
             raise ERROR_REQUIRED_PARAMETER(key="secret_data")
 
         self._check_secret_data(secret_data)
         self.project_id = secret_data["project_id"]
+        bucket_name = options.get("bucket_name", "")
 
+        # 캐시된 세션 확인
+        cached_session = concurrency_manager.get_cached_session(
+            self.project_id, bucket_name
+        )
+        if cached_session:
+            self.credentials = cached_session["credentials"]
+            self.gcs_client = cached_session["gcs_client"]
+            _LOGGER.debug(
+                f"[HttpFileConnector] Reusing cached GCS session for project: {self.project_id}"
+            )
+            return
+
+        # 새 세션 생성
         # private_key의 \n 문자열을 실제 개행 문자로 변환
         processed_secret_data = secret_data.copy()
         if "private_key" in processed_secret_data:
@@ -48,8 +63,12 @@ class HttpFileConnector(BaseConnector):
             credentials=self.credentials, project=self.project_id
         )
 
+        # 세션 캐싱
+        session_data = {"credentials": self.credentials, "gcs_client": self.gcs_client}
+        concurrency_manager.cache_session(self.project_id, bucket_name, session_data)
+
         _LOGGER.debug(
-            f"[HttpFileConnector] GCS session created for project: {self.project_id}"
+            f"[HttpFileConnector] New GCS session created and cached for project: {self.project_id}"
         )
 
     def list_files(self, bucket_name: str, pattern: str = None) -> List[Dict]:

@@ -15,6 +15,7 @@ from ..connector.bigquery_connector import BigqueryConnector
 from ..connector.http_file_connector import HttpFileConnector
 from ..factory.file_processor_factory import FileProcessorFactory
 from ..manager.field_mapper import FieldMapper
+from ..utils.concurrency_manager import concurrency_manager, request_deduplicator
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -139,8 +140,18 @@ class CostManager(BaseManager):
     def _get_data_from_http_file(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
-        """HTTP 파일에서 데이터 조회 (신규)"""
+        """HTTP 파일에서 데이터 조회 (신규) - 동시성 제어 및 중복 요청 처리"""
         try:
+            # 요청 중복 제거 검사
+            request_hash = request_deduplicator.generate_request_hash(
+                options, task_options
+            )
+            if request_deduplicator.is_duplicate_request(request_hash):
+                _LOGGER.warning(
+                    f"[get_data_from_http_file] Skipping duplicate request: {request_hash}"
+                )
+                return
+
             # HTTP 파일 처리용 파라미터 검증
             self._check_http_file_task_options(task_options, options, secret_data)
 
@@ -273,65 +284,78 @@ class CostManager(BaseManager):
                     f"[get_data_from_http_file] Processing {len(files_to_process)} files from bucket: {bucket_name}"
                 )
 
-                # 각 파일을 순차적으로 처리
+                # 각 파일을 순차적으로 처리 (동시성 제어 적용)
                 for file_info in files_to_process:
+                    file_name = file_info["name"]
+
+                    # 파일이 이미 처리 중인지 확인
+                    if concurrency_manager.is_file_processing(bucket_name, file_name):
+                        _LOGGER.info(
+                            f"[get_data_from_http_file] Skipping file already being processed: {file_name}"
+                        )
+                        continue
+
                     _LOGGER.info(
-                        f"[get_data_from_http_file] Processing file: {file_info['name']} ({file_info['size']} bytes, format: {file_info.get('format', 'auto-detect')})"
+                        f"[get_data_from_http_file] Processing file: {file_name} ({file_info['size']} bytes, format: {file_info.get('format', 'auto-detect')})"
                     )
 
                     try:
-                        # 파일 다운로드
-                        file_stream = self.http_file_connector.download_file_stream(
-                            bucket_name, file_info["name"]
-                        )
-
-                        # 파일 내용 샘플 읽기 (파일 형식 감지를 위해)
-                        file_stream.seek(0)
-                        content_sample = file_stream.read(1024)  # 처음 1KB 읽기
-                        file_stream.seek(0)  # 스트림 위치 리셋
-
-                        # 파일 형식 감지 (내용 샘플 포함)
-                        file_format = file_info.get(
-                            "format"
-                        ) or FileProcessorFactory.detect_file_format(
-                            file_info["name"], content_sample
-                        )
-
-                        # 압축 해제 (필요한 경우)
-                        compression_type = CompressionHandler.detect_compression(
-                            file_info["name"], content_sample
-                        )
-                        if compression_type:
-                            _LOGGER.debug(
-                                f"[get_data_from_http_file] Decompressing {compression_type} file: {file_info['name']}"
-                            )
-                            file_stream = CompressionHandler.decompress_stream(
-                                file_stream, compression_type
-                            )
-
-                        _LOGGER.debug(
-                            f"[get_data_from_http_file] Detected format: {file_format}"
-                        )
-
-                        # 파서 생성 및 데이터 처리
-                        parser = FileProcessorFactory.create_parser(file_format)
-
-                        # 파싱 옵션 설정
-                        parsing_options = task_options.get("parsing_options", {})
-
-                        # 데이터 스트림 처리
-                        for batch_result in parser.parse_stream(
-                            file_stream, self.field_mapper, **parsing_options
+                        # 파일 처리 락 획득
+                        with concurrency_manager.acquire_file_lock(
+                            bucket_name, file_name, timeout=60.0
                         ):
-                            yield batch_result
+                            # 파일 다운로드
+                            file_stream = self.http_file_connector.download_file_stream(
+                                bucket_name, file_name
+                            )
 
-                        _LOGGER.info(
-                            f"[get_data_from_http_file] Successfully processed file: {file_info['name']}"
-                        )
+                            # 파일 내용 샘플 읽기 (파일 형식 감지를 위해)
+                            file_stream.seek(0)
+                            content_sample = file_stream.read(1024)  # 처음 1KB 읽기
+                            file_stream.seek(0)  # 스트림 위치 리셋
+
+                            # 파일 형식 감지 (내용 샘플 포함)
+                            file_format = file_info.get(
+                                "format"
+                            ) or FileProcessorFactory.detect_file_format(
+                                file_name, content_sample
+                            )
+
+                            # 압축 해제 (필요한 경우)
+                            compression_type = CompressionHandler.detect_compression(
+                                file_name, content_sample
+                            )
+                            if compression_type:
+                                _LOGGER.debug(
+                                    f"[get_data_from_http_file] Decompressing {compression_type} file: {file_name}"
+                                )
+                                file_stream = CompressionHandler.decompress_stream(
+                                    file_stream, compression_type
+                                )
+
+                            _LOGGER.debug(
+                                f"[get_data_from_http_file] Detected format: {file_format}"
+                            )
+
+                            # 파서 생성 및 데이터 처리
+                            parser = FileProcessorFactory.create_parser(file_format)
+
+                            # 파싱 옵션 설정
+                            parsing_options = task_options.get("parsing_options", {})
+
+                            # 데이터 스트림 처리
+                            for batch_result in parser.parse_stream(
+                                file_stream, self.field_mapper, **parsing_options
+                            ):
+                                yield batch_result
+
+                            _LOGGER.info(
+                                f"[get_data_from_http_file] Successfully processed file: {file_name}"
+                            )
 
                     except Exception as file_error:
                         _LOGGER.error(
-                            f"[get_data_from_http_file] Failed to process file {file_info['name']}: {file_error}"
+                            f"[get_data_from_http_file] Failed to process file {file_name}: {file_error}"
                         )
                         # 개별 파일 처리 실패 시 다음 파일로 계속 진행
                         continue

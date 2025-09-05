@@ -16,9 +16,11 @@ HANDLERS: {}
 LOG: {}
 
 SERVICE:
-  spaceone.cost_analysis.plugin.data_source.service:
+  spaceone.cost_analysis.plugin.data_source.service.data_source_service:
     - DataSourceService
+  spaceone.cost_analysis.plugin.data_source.service.job_service:
     - JobService
+  spaceone.cost_analysis.plugin.data_source.service.cost_service:
     - CostService
 
 ENDPOINTS:

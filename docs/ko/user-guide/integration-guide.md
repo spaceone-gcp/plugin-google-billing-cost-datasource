@@ -646,9 +646,12 @@ Message: grpc: received message larger than max (4211270 vs. 4194304)
    }
    ```
 
-3. **서버 설정 조정**: `config.yaml`에서 gRPC 메시지 크기 제한 증가:
+3. **서버 설정 조정**: `config.yaml`에서 gRPC 메시지 크기 제한 증가 (현재 적용됨):
    ```yaml
    GLOBAL:
+     ENVIRONMENT: dev
+     DEBUG: true
+     # gRPC 메시지 크기 제한 설정 (16MB로 증가)
      GRPC_MAX_RECEIVE_MESSAGE_LENGTH: 16777216  # 16MB
      GRPC_MAX_SEND_MESSAGE_LENGTH: 16777216     # 16MB
    ```
