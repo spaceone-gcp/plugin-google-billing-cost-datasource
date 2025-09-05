@@ -77,13 +77,22 @@ class HttpFileConnector(BaseConnector):
         """버킷에서 파일 목록 조회"""
         try:
             bucket = self.gcs_client.bucket(bucket_name)
-            blobs = (
-                bucket.list_blobs(prefix=pattern) if pattern else bucket.list_blobs()
-            )
+
+            if pattern:
+                _LOGGER.info(
+                    f"[HttpFileConnector] Listing files with pattern: {pattern}"
+                )
+                blobs = bucket.list_blobs(prefix=pattern)
+            else:
+                _LOGGER.info("[HttpFileConnector] Listing all files in bucket")
+                blobs = bucket.list_blobs()
 
             files = []
             count = 0
+            total_scanned = 0
+
             for blob in blobs:
+                total_scanned += 1
                 if self._is_supported_file(blob.name):
                     files.append(
                         {
@@ -100,8 +109,9 @@ class HttpFileConnector(BaseConnector):
                     if limit and count >= limit:
                         break
 
-            _LOGGER.debug(
-                f"[HttpFileConnector] Found {len(files)} supported files in bucket: {bucket_name}"
+            pattern_info = f" with pattern '{pattern}'" if pattern else ""
+            _LOGGER.info(
+                f"[HttpFileConnector] Found {len(files)} supported files out of {total_scanned} total files in bucket: {bucket_name}{pattern_info}"
             )
             return files
 

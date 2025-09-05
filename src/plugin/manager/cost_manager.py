@@ -1,8 +1,8 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Generator
+from typing import Generator, List
 
-from spaceone.core.error import ERROR_INVALID_ARGUMENT, ERROR_REQUIRED_PARAMETER
+from spaceone.core.error import ERROR_REQUIRED_PARAMETER
 from spaceone.core.manager import BaseManager
 
 from ..conf.cost_conf import (
@@ -263,16 +263,71 @@ class CostManager(BaseManager):
                 # 압축 처리를 위한 import
                 from ..utils.compression import CompressionHandler
 
-                # 버킷에서 지원 파일 목록 조회
-                file_pattern = task_options.get("file_pattern")  # 선택적 파일 패턴
-                files = self.http_file_connector.list_files(bucket_name, file_pattern)
+                # 경로 패턴 생성: bucket_name/project_id/date_range 구조
+                project_id = task_options.get("project_id") or options.get("project_id")
+                start_period = task_options.get("start")
+
+                # 사용자 정의 패턴이 있으면 우선 적용
+                custom_pattern = task_options.get("file_pattern")
+                if custom_pattern:
+                    file_pattern = custom_pattern
+                    _LOGGER.info(
+                        f"[get_data_from_http_file] Using custom pattern: {file_pattern}"
+                    )
+                    files = self.http_file_connector.list_files(
+                        bucket_name, file_pattern
+                    )
+                elif project_id and start_period:
+                    # start부터 현재 월까지의 날짜 범위로 파일 수집
+                    all_files = []
+                    date_patterns = self._generate_date_range_patterns(
+                        project_id, start_period
+                    )
+
+                    for pattern in date_patterns:
+                        _LOGGER.info(
+                            f"[get_data_from_http_file] Searching with pattern: {pattern}"
+                        )
+                        pattern_files = self.http_file_connector.list_files(
+                            bucket_name, pattern
+                        )
+                        all_files.extend(pattern_files)
+
+                    # 중복 제거 (파일명 기준)
+                    seen_files = set()
+                    files = []
+                    for file_info in all_files:
+                        if file_info["name"] not in seen_files:
+                            files.append(file_info)
+                            seen_files.add(file_info["name"])
+
+                    _LOGGER.info(
+                        f"[get_data_from_http_file] Found {len(files)} unique files across {len(date_patterns)} date patterns"
+                    )
+                elif project_id:
+                    file_pattern = f"{project_id}/"
+                    _LOGGER.info(
+                        f"[get_data_from_http_file] Using project pattern: {file_pattern}"
+                    )
+                    files = self.http_file_connector.list_files(
+                        bucket_name, file_pattern
+                    )
+                else:
+                    # 패턴 없이 모든 파일 검색
+                    files = self.http_file_connector.list_files(bucket_name, None)
 
                 if not files:
-                    error_msg = f"No supported files found in bucket: {bucket_name}"
-                    if file_pattern:
-                        error_msg += f" with pattern: {file_pattern}"
-                    _LOGGER.error(f"[get_data_from_http_file] {error_msg}")
-                    raise ERROR_INVALID_ARGUMENT(key=error_msg)
+                    warning_msg = f"No supported files found in bucket: {bucket_name}"
+                    if custom_pattern:
+                        warning_msg += f" with pattern: {custom_pattern}"
+                    elif project_id and start_period:
+                        warning_msg += f" for project: {project_id} from {start_period} to current month"
+                    elif project_id:
+                        warning_msg += f" for project: {project_id}"
+                    _LOGGER.warning(f"[get_data_from_http_file] {warning_msg}")
+                    # 파일이 없을 때는 빈 결과를 반환 (에러가 아닌 정상적인 상황일 수 있음)
+                    yield {"results": []}
+                    return
 
                 # 여러 파일 처리 지원
                 max_files = int(
@@ -691,3 +746,84 @@ class CostManager(BaseManager):
             f"[_get_data_source_type] Using default: {DEFAULT_DATA_SOURCE_TYPE}"
         )
         return DEFAULT_DATA_SOURCE_TYPE
+
+    def _generate_date_range_patterns(
+        self, project_id: str, start_period: str
+    ) -> List[str]:
+        """start부터 현재 월까지의 디렉토리 패턴 목록 생성
+
+        Args:
+            project_id: 프로젝트 ID
+            start_period: 시작 기간 (YYYY-MM 형식)
+
+        Returns:
+            List[str]: 디렉토리 패턴 목록 (예: ["project/2024-01", "project/2024-02", ...])
+        """
+        import re
+        from datetime import datetime
+
+        # start_period 형식 검증 및 파싱
+        if not start_period or not re.match(r"^\d{4}-\d{2}$", start_period):
+            _LOGGER.warning(
+                f"[_generate_date_range_patterns] Invalid start_period format: {start_period}"
+            )
+            return [f"{project_id}/"]
+
+        try:
+            start_year, start_month = map(int, start_period.split("-"))
+
+            # 월 범위 검증
+            if not (1 <= start_month <= 12):
+                _LOGGER.warning(
+                    f"[_generate_date_range_patterns] Invalid month: {start_month}"
+                )
+                return [f"{project_id}/"]
+
+            current_date = datetime.now()
+            current_year = current_date.year
+            current_month = current_date.month
+
+            patterns = []
+
+            # start부터 현재 월까지 반복
+            year = start_year
+            month = start_month
+
+            while (year < current_year) or (
+                year == current_year and month <= current_month
+            ):
+                # 년도/월 형식으로 디렉토리 패턴 생성 (예: mkkang-project/2024/02)
+                pattern = f"{project_id}/{year:04d}/{month:02d}"
+                patterns.append(pattern)
+
+                # 다음 달로 이동
+                month += 1
+                if month > 12:
+                    month = 1
+                    year += 1
+
+                # 무한 루프 방지 (너무 많은 패턴 생성 방지)
+                if len(patterns) > 120:  # 10년치
+                    _LOGGER.warning(
+                        f"[_generate_date_range_patterns] Too many patterns generated, stopping at {len(patterns)}"
+                    )
+                    break
+
+            if patterns:
+                _LOGGER.info(
+                    f"[_generate_date_range_patterns] Generated {len(patterns)} patterns from {start_period} to {current_year:04d}-{current_month:02d} (YYYY/MM format)"
+                )
+            else:
+                _LOGGER.warning(
+                    f"[_generate_date_range_patterns] No valid patterns generated for {start_period}"
+                )
+                return [f"{project_id}/"]
+
+            return patterns
+
+        except Exception as e:
+            _LOGGER.error(
+                f"[_generate_date_range_patterns] Failed to generate patterns: {e}"
+            )
+            # 오류 시 기본 project 패턴 반환
+            return [f"{project_id}/"]
