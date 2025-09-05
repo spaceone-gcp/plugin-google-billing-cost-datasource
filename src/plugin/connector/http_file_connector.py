@@ -71,7 +71,9 @@ class HttpFileConnector(BaseConnector):
             f"[HttpFileConnector] New GCS session created and cached for project: {self.project_id}"
         )
 
-    def list_files(self, bucket_name: str, pattern: str = None) -> List[Dict]:
+    def list_files(
+        self, bucket_name: str, pattern: str = None, limit: int = None
+    ) -> List[Dict]:
         """버킷에서 파일 목록 조회"""
         try:
             bucket = self.gcs_client.bucket(bucket_name)
@@ -80,6 +82,7 @@ class HttpFileConnector(BaseConnector):
             )
 
             files = []
+            count = 0
             for blob in blobs:
                 if self._is_supported_file(blob.name):
                     files.append(
@@ -91,6 +94,11 @@ class HttpFileConnector(BaseConnector):
                             "bucket": bucket_name,
                         }
                     )
+                    count += 1
+
+                    # limit이 지정된 경우 해당 수만큼만 반환
+                    if limit and count >= limit:
+                        break
 
             _LOGGER.debug(
                 f"[HttpFileConnector] Found {len(files)} supported files in bucket: {bucket_name}"
