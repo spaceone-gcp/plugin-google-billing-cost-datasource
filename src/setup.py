@@ -14,7 +14,7 @@
 #   limitations under the License.
 
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("VERSION", "r") as f:
     VERSION = f.read().strip()
@@ -34,9 +34,15 @@ setup(
         "spaceone-core",
         "spaceone-api",
         "spaceone-cost-analysis",
+        "schematics",
         "google-api-python-client",
+        "google-cloud-storage",
+        "google-auth",
         "pandas-gbq",
         "tqdm",
+        "pyarrow",
+        "fastparquet",
+        "requests",
     ],
     zip_safe=False,
 )

@@ -3,6 +3,8 @@ spaceone-api
 spaceone-cost-analysis
 schematics
 google-api-python-client
+google-cloud-storage
+google-auth
 pandas-gbq
 tqdm
 pyarrow
