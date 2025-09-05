@@ -49,6 +49,14 @@ class JobManager(BaseManager):
         data_source_type = self._get_data_source_type(options)
 
         _LOGGER.debug(f"[get_tasks] data_source_type: {data_source_type}")
+        _LOGGER.debug(f"[get_tasks] options keys: {list(options.keys())}")
+
+        # HTTP 파일 모드 강제 실행 (source=gcs인 경우)
+        if "source" in options and options["source"] == "gcs":
+            _LOGGER.debug("[get_tasks] Executing HTTP file mode for source=gcs")
+            return self._get_http_file_tasks(
+                domain_id, options, secret_data, schema, start, last_synchronized_at
+            )
 
         if data_source_type == DATA_SOURCE_TYPES["http_file"]:
             return self._get_http_file_tasks(
@@ -188,6 +196,8 @@ class JobManager(BaseManager):
     ) -> dict:
         """HTTP 파일 기반 작업 생성 (신규)"""
 
+        _LOGGER.debug(f"[_get_http_file_tasks] Called with start={start}")
+
         try:
             # HTTP 파일 커넥터 세션 생성
             self.http_file_connector.create_session(options, secret_data, schema)
@@ -254,9 +264,25 @@ class JobManager(BaseManager):
 
                 tasks.append({"task_options": task_options})
 
-            # 변경 사항 기록
+            # 변경 사항 기록 - start 필드 포함 (TasksResponse 스키마 요구사항)
             current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            changed.append({"timestamp": current_time, "file_count": len(tasks)})
+            start_value = (
+                start or current_time
+            )  # start 파라미터가 없으면 현재 시간 사용
+
+            changed_item = {
+                "start": start_value,
+                "timestamp": current_time,
+                "file_count": len(tasks),
+            }
+            changed.append(changed_item)
+
+            _LOGGER.debug(
+                f"[_get_http_file_tasks] created changed item: {changed_item}"
+            )
+            _LOGGER.debug(
+                f"[_get_http_file_tasks] returning tasks count: {len(tasks)}, changed count: {len(changed)}"
+            )
 
             _LOGGER.info(
                 f"[get_http_file_tasks] Generated {len(tasks)} HTTP file tasks"
@@ -275,13 +301,18 @@ class JobManager(BaseManager):
         # 1. 명시적 data_source_type 확인
         data_source_type = options.get("data_source_type")
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
+            _LOGGER.debug(
+                f"[_get_data_source_type] Using explicit data_source_type: {data_source_type}"
+            )
             return data_source_type
 
         # 2. 레거시 'source' 파라미터 지원
         source = options.get("source")
         if source == "gcs":
+            _LOGGER.debug("[_get_data_source_type] Using source=gcs -> http_file")
             return DATA_SOURCE_TYPES["http_file"]
         elif source == "bigquery":
+            _LOGGER.debug("[_get_data_source_type] Using source=bigquery -> bigquery")
             return DATA_SOURCE_TYPES["bigquery"]
 
         # 3. 파라미터 기반 자동 감지
@@ -289,12 +320,21 @@ class JobManager(BaseManager):
         has_bucket = "bucket_name" in options
         has_bigquery_params = all(key in options for key in REQUIRED_OPTIONS)
 
+        _LOGGER.debug(
+            f"[_get_data_source_type] has_bucket={has_bucket}, has_bigquery_params={has_bigquery_params}"
+        )
+
         if has_bucket and not has_bigquery_params:
+            _LOGGER.debug("[_get_data_source_type] Auto-detected http_file mode")
             return DATA_SOURCE_TYPES["http_file"]
         elif has_bigquery_params:
+            _LOGGER.debug("[_get_data_source_type] Auto-detected bigquery mode")
             return DATA_SOURCE_TYPES["bigquery"]
 
         # 4. 기본값 반환 (하위 호환성)
+        _LOGGER.debug(
+            f"[_get_data_source_type] Using default: {DEFAULT_DATA_SOURCE_TYPE}"
+        )
         return DEFAULT_DATA_SOURCE_TYPE
 
     def _check_http_file_options(self, options: dict):
