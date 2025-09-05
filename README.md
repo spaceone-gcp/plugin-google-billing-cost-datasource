@@ -31,6 +31,8 @@ SpaceONE plugin for collecting Google Cloud Billing data with support for both B
 - ✅ **Security Enhanced**: Environment variable-based configuration with validation tools ⭐ **NEW**
 - ✅ **Price Analysis**: Actual cost vs. list price comparison and discount rate calculation ⭐ **NEW**
 - ✅ **Automation Tools**: Configuration validation and security check scripts ⭐ **NEW**
+- ✅ **Schema Compliance**: SpaceONE Job schema validation with automatic field length restriction ⭐ **NEW**
+- ✅ **Error Handling**: Enhanced error management with ValidationError prevention ⭐ **NEW**
 
 ## Documentation
 

@@ -114,6 +114,7 @@ class JobManager(BaseManager):
                 }
             )
 
+        # SpaceONE Job 스키마의 start 필드 길이 제한 준수 (YYYY-MM 형식, 7자)
         changed.append({"start": start_month})
 
         return {"tasks": tasks, "changed": changed}
@@ -266,9 +267,13 @@ class JobManager(BaseManager):
 
             # 변경 사항 기록 - start 필드 포함 (TasksResponse 스키마 요구사항)
             current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            start_value = (
-                start or current_time
-            )  # start 파라미터가 없으면 현재 시간 사용
+
+            # SpaceONE Job 스키마의 start 필드 길이 제한 준수 (최대 7자)
+            # start 파라미터가 있으면 사용, 없으면 현재 월(YYYY-MM) 형식 사용
+            if start:
+                start_value = start[:7]  # YYYY-MM 형식으로 제한
+            else:
+                start_value = datetime.utcnow().strftime("%Y-%m")  # YYYY-MM 형식
 
             changed_item = {
                 "start": start_value,

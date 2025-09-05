@@ -533,3 +533,43 @@ logger.info(
     }
 )
 ```
+
+## 📋 최근 업데이트 (v2.1)
+
+### SpaceONE Job 스키마 준수 강화 ⭐ **NEW**
+
+#### ValidationError 방지
+- **문제**: `ERROR_DB_QUERY ValidationError (start.String value is too long)` 오류 발생
+- **원인**: SpaceONE Job 스키마의 `start` 필드 길이 제한(최대 7자) 위반
+- **해결**: 자동 필드 길이 제한 및 YYYY-MM 형식 강제 적용
+
+#### Job Manager 개선사항
+```python
+# HTTP 파일 작업 - start 필드 길이 자동 제한
+if start:
+    start_value = start[:7]  # YYYY-MM 형식으로 제한
+else:
+    start_value = datetime.utcnow().strftime("%Y-%m")  # 현재 월
+
+changed_item = {
+    "start": start_value,  # 최대 7자로 제한됨
+    "timestamp": current_time,
+    "file_count": len(tasks),
+}
+```
+
+#### 스키마 검증 결과
+- ✅ **BigQuery 작업**: 기존 YYYY-MM 형식 유지 (7자)
+- ✅ **HTTP 파일 작업**: 자동 길이 제한 적용 (7자)
+- ✅ **하위 호환성**: 기존 기능 완전 보존
+- ✅ **오류 방지**: ValidationError 완전 해결
+
+#### 테스트 검증
+```bash
+# 모든 테스트 통과
+✅ start 필드 길이 제한 로직 성공: '2024-01' (길이: 7)
+✅ start 필드 기본값 생성 로직 성공: '2025-09' (길이: 7)  
+✅ BigQuery start_month 형식 확인: '2024-03' (길이: 7)
+✅ start 필드 경계 조건 테스트 통과
+✅ 형식 길이 확인 - 긴 형식: 19자, 짧은 형식: 7자
+```

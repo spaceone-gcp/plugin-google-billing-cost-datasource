@@ -173,6 +173,23 @@ class HttpFileConnector(BaseConnector):
             _LOGGER.error(f"[HttpFileConnector] Failed to download from URL: {e}")
             raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url)
 
+    def test_connection(self, url: str) -> None:
+        """HTTP URL 연결 테스트 (HEAD 요청으로 빠른 검증)"""
+        try:
+            _LOGGER.debug(f"[HttpFileConnector] Testing connection to URL: {url}")
+
+            # HEAD 요청으로 연결 테스트 (데이터 다운로드 없이)
+            response = requests.head(
+                url, timeout=HTTP_FILE_CONFIG.get("connection_timeout", 10)
+            )
+            response.raise_for_status()
+
+            _LOGGER.debug(f"[HttpFileConnector] Connection test successful: {url}")
+
+        except requests.RequestException as e:
+            _LOGGER.error(f"[HttpFileConnector] Connection test failed: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url)
+
     def get_file_info(self, bucket_name: str, file_path: str) -> Dict:
         """파일 메타데이터 조회"""
         try:
