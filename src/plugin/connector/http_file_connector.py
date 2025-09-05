@@ -33,9 +33,16 @@ class HttpFileConnector(BaseConnector):
         self._check_secret_data(secret_data)
         self.project_id = secret_data["project_id"]
 
+        # private_key의 \n 문자열을 실제 개행 문자로 변환
+        processed_secret_data = secret_data.copy()
+        if "private_key" in processed_secret_data:
+            processed_secret_data["private_key"] = processed_secret_data[
+                "private_key"
+            ].replace("\\n", "\n")
+
         # Service Account 인증 정보로 GCS 클라이언트 생성
         self.credentials = service_account.Credentials.from_service_account_info(
-            secret_data
+            processed_secret_data
         )
         self.gcs_client = storage.Client(
             credentials=self.credentials, project=self.project_id

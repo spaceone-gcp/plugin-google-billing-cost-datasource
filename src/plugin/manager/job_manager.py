@@ -33,6 +33,7 @@ class JobManager(BaseManager):
         self.billing_export_project_id = None
         self.billing_dataset = None
         self.billing_table = None
+        self.billing_account_id = None
 
     def get_tasks(
         self,
@@ -73,11 +74,11 @@ class JobManager(BaseManager):
         self._check_options(options)
 
         self.billing_export_project_id = options["billing_export_project_id"]
-        self.billing_dataset = options["billing_dataset_id"]
-        billing_account_id = options["billing_account_id"]
+        self.billing_dataset = self._extract_dataset_id(options["billing_dataset_id"])
+        self.billing_account_id = options["billing_account_id"]
 
         self.billing_table = (
-            f"{BIGQUERY_TABLE_PREFIX}_{billing_account_id.replace('-', '_')}"
+            f"{BIGQUERY_TABLE_PREFIX}_{self.billing_account_id.replace('-', '_')}"
         )
         self._validate_table_exists()
 
@@ -97,7 +98,7 @@ class JobManager(BaseManager):
                         "project_id": row.id,
                         "billing_export_project_id": self.billing_export_project_id,
                         "billing_dataset_id": self.billing_dataset,
-                        "billing_account_id": billing_account_id,
+                        "billing_account_id": self.billing_account_id,
                         "data_source_type": DATA_SOURCE_TYPES[
                             "bigquery"
                         ],  # 명시적 설정
@@ -271,11 +272,29 @@ class JobManager(BaseManager):
 
     def _get_data_source_type(self, options: dict) -> str:
         """데이터 소스 타입 결정"""
+        # 1. 명시적 data_source_type 확인
         data_source_type = options.get("data_source_type")
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
             return data_source_type
 
-        # 기본값 반환 (하위 호환성)
+        # 2. 레거시 'source' 파라미터 지원
+        source = options.get("source")
+        if source == "gcs":
+            return DATA_SOURCE_TYPES["http_file"]
+        elif source == "bigquery":
+            return DATA_SOURCE_TYPES["bigquery"]
+
+        # 3. 파라미터 기반 자동 감지
+        # HTTP 파일 모드 감지: bucket_name이 있고 BigQuery 필수 파라미터가 없는 경우
+        has_bucket = "bucket_name" in options
+        has_bigquery_params = all(key in options for key in REQUIRED_OPTIONS)
+
+        if has_bucket and not has_bigquery_params:
+            return DATA_SOURCE_TYPES["http_file"]
+        elif has_bigquery_params:
+            return DATA_SOURCE_TYPES["bigquery"]
+
+        # 4. 기본값 반환 (하위 호환성)
         return DEFAULT_DATA_SOURCE_TYPE
 
     def _check_http_file_options(self, options: dict):
@@ -313,3 +332,20 @@ class JobManager(BaseManager):
             bucket_name = options["bucket_name"]
             if not bucket_name or bucket_name.strip() == "":
                 raise ERROR_INVALID_PARAMETER(key="options.bucket_name")
+
+    @staticmethod
+    def _extract_dataset_id(billing_dataset_id: str) -> str:
+        """
+        billing_dataset_id에서 실제 데이터셋 ID만 추출합니다.
+
+        Args:
+            billing_dataset_id: 'project.dataset' 또는 'dataset' 형식의 문자열
+
+        Returns:
+            str: 데이터셋 ID만 포함된 문자열
+        """
+        if "." in billing_dataset_id:
+            # 'project.dataset' 형식인 경우 dataset 부분만 반환
+            return billing_dataset_id.split(".")[-1]
+        # 이미 dataset만 있는 경우 그대로 반환
+        return billing_dataset_id

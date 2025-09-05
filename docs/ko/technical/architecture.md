@@ -32,10 +32,11 @@ Google Cloud Billing 플러그인의 전체 시스템 아키텍처를 설명합�
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                Connector Layer                              │
-│  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │   BigQuery      │  │  HTTP File      │                  │
-│  │  Connector      │  │  Connector      │ ← 신규 추가       │
-│  └─────────────────┘  └─────────────────┘                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
+│  │   BigQuery      │  │  HTTP File      │  │   Pricing   │  │
+│  │  Connector      │  │  Connector      │  │  Connector  │  │
+│  │                 │  │                 │  │ (신규 추가) │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────┘  │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -62,7 +63,16 @@ Google Cloud Billing 플러그인의 전체 시스템 아키텍처를 설명합�
 
 ### Connector Layer
 - **BigqueryConnector**: BigQuery 데이터베이스 연동 (기존)
-- **HttpFileConnector**: HTTP 파일 다운로드 및 처리 (신규)
+  - 향상된 private_key 검증 및 정리 기능
+  - 테스트 모드 지원으로 개발 환경 호환성 개선
+  - 상세한 인증 오류 진단 및 메시지 제공
+- **HttpFileConnector**: HTTP 파일 다운로드 및 처리 (기존)
+  - GCS 버킷 및 HTTP URL 다운로드 지원
+  - 파일 크기 제한 및 압축 형식 자동 감지
+- **PricingConnector**: Google Cloud Pricing Data Export 연동 (신규)
+  - cloud_pricing_export 테이블 직접 조회
+  - 실제 청구 데이터와 정가 비교 분석
+  - 서비스별 가격 정보 요약 제공
 
 ### File Processing Layer (신규)
 - **CompressionHandler**: 압축 파일 감지 및 해제 (gzip, snappy, zstd)
@@ -74,14 +84,24 @@ Google Cloud Billing 플러그인의 전체 시스템 아키텍처를 설명합�
 
 ## 데이터 플로우
 
-### BigQuery 모드
+### BigQuery 모드 (표준 청구 데이터)
 ```
 SpaceONE → CostManager → BigqueryConnector → BigQuery → 데이터 반환
 ```
 
-### HTTP 파일 모드
+### HTTP 파일 모드 (파일 기반 청구 데이터)
 ```
 SpaceONE → CostManager → HttpFileConnector → GCS/HTTP 파일 → CompressionHandler → FileProcessorFactory → Parser → FieldMapper → 데이터 반환
+```
+
+### Pricing 데이터 모드 (가격 정보 조회)
+```
+SpaceONE → CostManager → PricingConnector → cloud_pricing_export 테이블 → 가격 데이터 반환
+```
+
+### 비용 비교 분석 플로우
+```
+SpaceONE → CostManager → BigqueryConnector (청구 데이터) + PricingConnector (정가 데이터) → 비교 분석 → 할인율 계산 → 결과 반환
 ```
 
 #### 상세 플로우
@@ -96,11 +116,24 @@ SpaceONE → CostManager → HttpFileConnector → GCS/HTTP 파일 → Compressi
 ### 수평 확장
 - 파일 단위 병렬 처리 지원
 - 커넥터별 독립적인 스케일링
+- 다중 데이터 소스 동시 처리 (BigQuery + 파일 + Pricing)
 
 ### 수직 확장
 - 메모리 효율적인 스트리밍 처리
 - 청크 기반 데이터 처리
+- 압축 해제 및 파싱 최적화
 
 ### 모듈화
 - 파일 형식별 독립적인 파서
 - 프로바이더별 Field Mapper 확장 가능
+- 커넥터 레이어의 플러그인 아키텍처
+
+### 보안 및 신뢰성
+- 향상된 인증 키 검증 및 오류 진단
+- 테스트 모드를 통한 개발 환경 지원
+- 파일 크기 제한 및 타임아웃 관리
+
+### 성능 최적화
+- 스트리밍 기반 대용량 파일 처리
+- 압축 형식별 최적화된 해제 알고리즘
+- 메모리 사용량 최소화를 위한 배치 처리

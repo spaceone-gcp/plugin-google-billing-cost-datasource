@@ -7,28 +7,32 @@ SpaceONE의 Google Cloud Billing 비용 데이터 소스 플러그인 사용법�
 2. [사전 준비](#2-사전-준비)
 3. [BigQuery 모드 설정](#3-bigquery-모드-설정)
 4. [HTTP 파일 모드 설정](#4-http-파일-모드-설정)
-5. [Field Mapper 설정](#5-field-mapper-설정)
-6. [비용 선택 옵션 (select_cost)](#6-비용-선택-옵션-select_cost)
-7. [비용 메트릭 옵션 (cost_metric)](#7-비용-메트릭-옵션-cost_metric)
-8. [비용 분석 활용](#8-비용-분석-활용)
-9. [고급 설정](#9-고급-설정)
-10. [문제 해결](#10-문제-해결)
+5. [Pricing 데이터 연동 설정 (신규)](#5-pricing-데이터-연동-설정-신규)
+6. [Field Mapper 설정](#6-field-mapper-설정)
+7. [비용 선택 옵션 (select_cost)](#7-비용-선택-옵션-select_cost)
+8. [비용 메트릭 옵션 (cost_metric)](#8-비용-메트릭-옵션-cost_metric)
+9. [비용 분석 활용](#9-비용-분석-활용)
+10. [고급 설정](#10-고급-설정)
+11. [문제 해결](#11-문제-해결)
 
 ## 1. 개요
 
 ### 지원 데이터 소스
 1. **BigQuery**: 실시간 쿼리를 통한 상세한 분석 (기존 기능)
-2. **HTTP 파일**: Google Cloud Storage에 저장된 Billing Export 파일 직접 처리 (신규 기능)
+2. **HTTP 파일**: Google Cloud Storage에 저장된 Billing Export 파일 직접 처리 (기존 기능)
+3. **Pricing 데이터**: Google Cloud Pricing Export 데이터를 통한 정가 분석 및 할인율 계산 (신규 기능)
 
 ### 지원 파일 형식
 - CSV, JSON, Parquet
 - 압축 파일 (.gz, .snappy, .zstd 등)
 
 ### 핵심 기능
-- **이중 데이터 소스 지원**: BigQuery와 HTTP 파일 모두 지원
+- **다중 데이터 소스 지원**: BigQuery, HTTP 파일, Pricing 데이터 모두 지원
 - **유연한 필드 매핑**: Field Mapper를 통한 커스터마이징
 - **크레딧, 유효 할인 등 복잡한 비용 구조 분석 지원**
 - **라벨, 태그를 활용한 세분화된 비용 추적**
+- **정가 대비 할인율 분석**: 실제 청구 금액과 정가 비교 (신규)
+- **향상된 인증 처리**: private_key 자동 검증 및 정리 (신규)
 
 > **[데이터 구조 이해]**  
 > 효과적인 사용을 위해 [Google Cloud Billing 데이터 분석 가이드](./data-analysis-guide.md)를 먼저 읽어보시기를 권장합니다.
@@ -52,6 +56,15 @@ SpaceONE의 Google Cloud Billing 비용 데이터 소스 플러그인 사용법�
    - **보고서 접두사**: `billing-export/` (권장)
    - **파일 형식**: CSV, JSON, Parquet 중 선택 (Parquet 권장)
 
+#### 가격 정보 내보내기 설정 (Pricing 모드용, 신규)
+1. **Google Cloud 콘솔**에서 **결제 > 가격 정보 내보내기**로 이동합니다.
+2. **BigQuery 내보내기** 탭에서 다음과 같이 설정합니다:
+   - **프로젝트**: Pricing 데이터셋을 생성할 프로젝트 선택
+   - **데이터셋 ID**: `pricing_export` (권장)
+   - **테이블 이름**: `cloud_pricing_export` (자동 생성)
+
+> **📋 참고**: 가격 정보 내보내기는 Google Cloud의 공식 정가 데이터를 제공하며, 실제 청구 데이터와 비교하여 할인율을 계산할 수 있습니다.
+
 #### 내보내기 활성화 후 주의사항
 - **데이터 지연**: 내보내기 활성화 후 첫 데이터는 **다음 날**부터 생성됩니다.
 - **과거 데이터**: 활성화 이전 데이터는 내보내지지 않습니다.
@@ -62,7 +75,10 @@ SpaceONE의 Google Cloud Billing 비용 데이터 소스 플러그인 사용법�
 2. 필요한 역할을 부여합니다:
    - **BigQuery 모드**: `BigQuery Data Viewer`, `BigQuery Job User`
    - **HTTP 파일 모드**: `Storage Object Viewer`
+   - **Pricing 모드**: `BigQuery Data Viewer`, `BigQuery Job User` (pricing_export 데이터셋 접근)
 3. 서비스 계정 키(JSON 형식)를 생성하고 다운로드합니다.
+
+> **🔒 보안 개선**: 최신 버전에서는 private_key가 자동으로 검증되고 정리되어 인증 오류를 최소화합니다.
 
 ## 3. BigQuery 모드 설정
 
@@ -138,7 +154,100 @@ options:
       chunk_size: 10000
 ```
 
-## 5. Field Mapper 설정
+## 5. Pricing 데이터 연동 설정 (신규)
+
+Google Cloud Pricing Export 데이터를 활용하여 정가 정보 조회 및 할인율 분석을 수행합니다.
+
+### 5.1. 기본 설정
+
+```yaml
+# options 설정
+options:
+  data_source_type: "pricing"              # Pricing 모드 활성화
+  pricing_export_project_id: "your-pricing-project-id"  # Pricing Export 프로젝트 ID
+  pricing_dataset_id: "pricing_export"     # Pricing 데이터셋 ID (기본값)
+
+# secret_data 설정
+secret_data:
+  type: "service_account"
+  project_id: "your-project-id"
+  private_key: "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+  client_email: "service-account@your-project.iam.gserviceaccount.com"
+  token_uri: "https://oauth2.googleapis.com/token"
+```
+
+### 5.2. 주요 기능
+
+#### 5.2.1. 서비스별 가격 정보 조회
+```yaml
+# 특정 서비스의 가격 정보 조회
+task_options:
+  service_id: "6F81-5844-456A"  # Compute Engine 서비스 ID
+  date: "2024-07-01"           # 특정 날짜 (선택사항)
+```
+
+#### 5.2.2. SKU별 상세 가격 조회
+```yaml
+# 특정 SKU의 가격 정보 조회
+task_options:
+  sku_id: "CP-COMPUTEENGINE-VMIMAGE-N1-STANDARD-1"
+  date: "2024-07-01"
+```
+
+#### 5.2.3. 실제 청구 데이터와 정가 비교
+```yaml
+# 청구 데이터와 정가 비교 분석
+task_options:
+  enable_pricing_comparison: true  # 비교 분석 활성화
+  pricing_date: "2024-07-01"      # 비교할 정가 기준 날짜
+```
+
+### 5.3. 비교 분석 결과
+
+Pricing 데이터를 활용한 비교 분석 시 다음과 같은 추가 정보가 제공됩니다:
+
+```json
+{
+  "cost": 72.00,                    # 실제 청구 금액
+  "additional_info": {
+    "pricing_comparison": {
+      "comparison_available": true,
+      "actual_cost": 72.00,
+      "list_price_total": 100.00,   # 정가 총액
+      "discount_amount": 28.00,     # 할인 금액
+      "discount_rate_percent": 28.0, # 할인율
+      "usage_amount": 100.0,        # 사용량
+      "list_price_per_unit": 1.0    # 단위당 정가
+    }
+  }
+}
+```
+
+### 5.4. 활용 시나리오
+
+#### 5.4.1. 할인율 분석
+- 실제 청구 금액 대비 정가 할인율 계산
+- 서비스별, 프로젝트별 할인 혜택 비교
+- 시간대별 할인율 변화 추이 분석
+
+#### 5.4.2. 비용 최적화
+- 정가 기준으로 최대 절약 가능 금액 산정
+- 할인 프로그램 효과 측정
+- 예산 계획 수립 시 정가 기준 예측
+
+#### 5.4.3. 크레딧 효과 분석
+- 프로모션 크레딧의 실제 가치 측정
+- 크레딧 사용 패턴 분석
+- 크레딧 소진 시점 예측
+
+### 5.5. 주의사항
+
+- **데이터 가용성**: Pricing Export가 활성화된 후의 데이터만 조회 가능
+- **지연 시간**: 가격 정보는 일반적으로 하루 지연되어 업데이트됨
+- **매칭 정확도**: 서비스 ID와 SKU ID가 정확히 일치하는 경우에만 비교 가능
+- **리전별 차이**: 동일한 서비스도 리전에 따라 가격이 다를 수 있음
+
+## 6. Field Mapper 설정
 
 > **주의**: Field Mapper는 **HTTP 파일 모드에서만** 사용됩니다.
 
@@ -416,9 +525,9 @@ options:
 - **우선순위**: `cost_metric` 설정 시 `select_cost` 옵션은 완전히 무시됩니다.
 - **BigQuery**: SQL 쿼리에서 `credits_amount`는 크레딧 총액의 절대값(`ABS(SUM(...))`)으로 계산됩니다.
 
-## 8. 비용 분석 활용
+## 9. 비용 분석 활용
 
-### 8.1. 크레딧(Credits) 분석
+### 9.1. 크레딧(Credits) 분석
 `credits` 필드 매핑으로 할인 내역을 상세히 분석할 수 있습니다:
 
 ```json
@@ -435,7 +544,7 @@ options:
 - `additional_info.credits.type`으로 할인 유형별 그룹화
 - 특정 프로모션 크레딧 효과 측정
 
-### 8.2. 유효 할인율 분석
+### 9.2. 유효 할인율 분석
 `cost`와 `cost_at_list` 필드를 모두 수집하여 실질적인 할인 혜택을 분석:
 
 ```yaml
@@ -449,20 +558,20 @@ field_mapper:
 - `(cost_at_list - cost) / cost_at_list × 100` 공식으로 할인율 계산
 - 서비스별, 프로젝트별 할인율 비교
 
-### 8.3. 다차원 분석
+### 9.3. 다차원 분석
 매핑된 모든 필드를 활용한 유연한 그룹화 및 필터링:
 - **그룹화**: `project.name`, `service.description`, `labels.key` 등
 - **필터링**: 특정 프로젝트, 라벨, 태그 값으로 비용 필터링
 
-## 9. 고급 설정
+## 10. 고급 설정
 
-### 9.1. 파일 패턴 필터링
+### 10.1. 파일 패턴 필터링
 ```yaml
 task_options:
   file_pattern: "gcp_billing_export_v1_01XXXX-XXXXXX-XXXXXX_202407.csv"
 ```
 
-### 9.2. 날짜 범위 필터링
+### 10.2. 날짜 범위 필터링
 ```yaml
 task_options:
   date_range:
@@ -470,7 +579,7 @@ task_options:
     end_date: "2024-07-31"
 ```
 
-### 9.3. 성능 최적화
+### 10.3. 성능 최적화
 ```yaml
 task_options:
   max_files: 10        # 처리할 최대 파일 수
@@ -481,25 +590,37 @@ options:
       chunk_size: 10000  # 청크 크기 조정
 ```
 
-## 10. 문제 해결
+## 11. 문제 해결
 
-### 10.1. 공통 문제
+### 11.1. 공통 문제
 - **인증 오류**: 서비스 계정 키가 올바른지, 만료되지 않았는지 확인
 - **데이터 누락**: Billing Export 활성화 시점 이후 데이터만 수집됨
 
-### 10.2. BigQuery 모드 문제
+### 11.2. 향상된 인증 처리 (신규)
+- **private_key 형식 오류**: 자동으로 PEM 형식 검증 및 정리됨
+- **이스케이프 문자 문제**: `\n` 문자열이 자동으로 실제 개행으로 변환됨
+- **Base64 패딩 오류**: 누락된 패딩이 자동으로 수정됨
+- **상세한 오류 진단**: 구체적인 인증 실패 원인 메시지 제공
+
+### 11.3. BigQuery 모드 문제
 - **테이블 없음**: BigQuery에 billing export 테이블 생성 확인
 - **권한 오류**: `BigQuery Data Viewer`, `BigQuery Job User` 역할 확인
 - **쿼리 오류**: `billing_export_project_id`, `billing_dataset_id`, `billing_account_id` 설정 확인
 
-### 10.3. HTTP 파일 모드 문제
+### 11.4. HTTP 파일 모드 문제
 - **파일 접근 오류**: `Storage Object Viewer` 역할 확인
 - **파일 형식 오류**: 지원 형식(CSV, JSON, Parquet) 확인
 - **필드 매핑 오류**: 필수 필드(`cost`, `billed_date`, `currency`) 매핑 확인
 - **압축 파일 오류**: 지원 압축 형식(.gz, .snappy, .zstd) 확인
 - **메모리 부족**: `max_files` 값 조정
 
-### 10.4. gRPC 메시지 크기 제한 문제
+### 11.5. Pricing 데이터 모드 문제 (신규)
+- **Pricing Export 미설정**: Google Cloud 콘솔에서 가격 정보 내보내기 활성화 확인
+- **데이터셋 접근 오류**: `pricing_export_project_id`와 `pricing_dataset_id` 설정 확인
+- **매칭 실패**: 서비스 ID와 SKU ID가 정확히 일치하는지 확인
+- **날짜 불일치**: 청구 데이터와 가격 데이터의 날짜 범위 확인
+
+### 11.6. gRPC 메시지 크기 제한 문제
 ```
 ERROR: ResourceExhausted
 Message: grpc: received message larger than max (4211270 vs. 4194304)

@@ -1,6 +1,170 @@
 # API 명세서
 
-HTTP 파일 통합 기능의 상세 API 명세를 설명합니다.
+Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. 주요 커넥터들의 API와 새로운 기능들을 포함합니다.
+
+## BigQuery Connector API
+
+### 세션 생성 (향상된 인증 처리)
+```python
+def create_session(
+    self,
+    options: dict,
+    secret_data: dict,
+    schema: str
+) -> None:
+    """
+    BigQuery 클라이언트 세션을 생성합니다.
+    
+    Args:
+        options: 설정 옵션
+        secret_data: 서비스 계정 인증 정보
+        schema: 스키마 정보
+        
+    Features:
+        - 향상된 private_key 검증 및 자동 정리
+        - 상세한 인증 오류 진단 메시지
+        
+    Raises:
+        ValueError: private_key 형식 오류
+        AuthenticationError: 서비스 계정 인증 실패
+    """
+```
+
+### private_key 검증 및 정리
+```python
+@staticmethod
+def _validate_and_clean_private_key(private_key: str) -> str:
+    """
+    private_key를 검증하고 올바른 PEM 형식으로 정리합니다.
+    
+    Args:
+        private_key: 원본 private_key 문자열
+        
+    Returns:
+        정리된 PEM 형식의 private_key
+        
+    Features:
+        - 이스케이프된 개행 문자 처리
+        - PEM 헤더/푸터 검증
+        - Base64 내용 검증 및 패딩 수정
+        - 64자 단위 줄바꿈으로 정리
+        
+    Raises:
+        ValueError: 잘못된 PEM 형식
+    """
+```
+
+## Pricing Connector API (신규)
+
+### 세션 생성
+```python
+def create_session(
+    self,
+    options: dict,
+    secret_data: dict,
+    schema: str
+) -> None:
+    """
+    Pricing 데이터 조회용 BigQuery 세션을 생성합니다.
+    
+    Args:
+        options: 설정 옵션
+            - pricing_export_project_id: Pricing Export 프로젝트 ID
+            - pricing_dataset_id: Pricing 데이터셋 ID (기본값: pricing_export)
+        secret_data: 서비스 계정 인증 정보
+        schema: 스키마 정보
+    """
+```
+
+### 가격 정보 조회
+```python
+def get_pricing_data(
+    self,
+    service_id: Optional[str] = None,
+    sku_id: Optional[str] = None,
+    date: Optional[str] = None,
+) -> Generator[Dict, None, None]:
+    """
+    cloud_pricing_export 테이블에서 가격 정보를 조회합니다.
+    
+    Args:
+        service_id: 특정 서비스 ID로 필터링 (선택사항)
+        sku_id: 특정 SKU ID로 필터링 (선택사항)
+        date: 특정 날짜의 가격 정보 (YYYY-MM-DD 형식, 선택사항)
+        
+    Yields:
+        가격 정보 딕셔너리
+        - service_id, service_description
+        - sku_id, sku_description
+        - region, tiered_rates
+        - base_price_usd
+        
+    Raises:
+        ERROR_INVALID_ARGUMENT: 쿼리 실행 실패
+    """
+```
+
+### 서비스별 가격 요약
+```python
+def get_service_pricing_summary(
+    self,
+    date: Optional[str] = None
+) -> Dict[str, List[Dict]]:
+    """
+    서비스별 가격 정보 요약을 조회합니다.
+    
+    Args:
+        date: 특정 날짜의 가격 정보 (YYYY-MM-DD 형식, 선택사항)
+        
+    Returns:
+        서비스별 가격 정보 요약 딕셔너리
+        {
+            "서비스명": [
+                {
+                    "sku_id": "...",
+                    "sku_description": "...",
+                    "pricing_unit": "...",
+                    "base_price_usd": 0.0,
+                    "region": "..."
+                }
+            ]
+        }
+        
+    Raises:
+        ERROR_INVALID_ARGUMENT: 쿼리 실행 실패
+    """
+```
+
+### 청구 데이터와 정가 비교
+```python
+def compare_billing_vs_pricing(
+    self,
+    billing_data: Dict,
+    pricing_date: Optional[str] = None
+) -> Dict:
+    """
+    실제 청구 데이터와 정가를 비교 분석합니다.
+    
+    Args:
+        billing_data: 실제 청구 데이터
+            - service_id, sku_id
+            - cost, usage_amount
+        pricing_date: 비교할 가격 정보 날짜
+        
+    Returns:
+        비교 분석 결과
+        {
+            "comparison_available": bool,
+            "actual_cost": float,
+            "list_price_total": float,
+            "discount_amount": float,
+            "discount_rate_percent": float,
+            "usage_amount": float,
+            "list_price_per_unit": float,
+            "reason": str  # 비교 불가능한 경우
+        }
+    """
+```
 
 ## HTTP File Connector API
 
@@ -172,10 +336,16 @@ class CompressionHandler:
 
 ### 에러 분류
 
-#### 연결 관련 에러
-- `ConnectionError`: GCS 연결 실패
-- `AuthenticationError`: 인증 실패
+#### 인증 관련 에러 (향상됨)
+- `AuthenticationError`: 서비스 계정 인증 실패
+  - `InvalidData`: private_key 손상 또는 잘못된 형식
+  - `Could not deserialize key data`: private_key 데이터 무효
+  - `invalid_grant`: 서비스 계정 존재하지 않음 또는 비활성화
 - `PermissionError`: 권한 부족
+
+#### 연결 관련 에러
+- `ConnectionError`: GCS/BigQuery 연결 실패
+- `TimeoutError`: 요청 시간 초과
 
 #### 파일 처리 에러
 - `FileNotFoundError`: 파일 없음
@@ -186,6 +356,10 @@ class CompressionHandler:
 - `MappingError`: 필드 매핑 실패
 - `ValidationError`: 데이터 검증 실패
 - `ConversionError`: 타입 변환 실패
+
+#### Pricing 관련 에러 (신규)
+- `ERROR_INVALID_ARGUMENT`: Pricing 쿼리 실행 실패
+- `ERROR_REQUIRED_PARAMETER`: 필수 매개변수 누락
 
 ### 재시도 로직
 ```python
@@ -198,7 +372,28 @@ def download_file_with_retry(self, file_url: str) -> IO:
     """재시도 로직이 적용된 파일 다운로드"""
 ```
 
+
 ## 성능 최적화
+
+### 향상된 비용 필드 선택
+```python
+def _get_cost_field_by_option(self, row) -> float:
+    """
+    select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택합니다.
+    
+    Args:
+        row: BigQuery 또는 파일에서 읽은 데이터 행
+        
+    Returns:
+        선택된 비용 값
+        
+    Options:
+        - cost_metric="AmortizedCost": credits_amount 사용
+        - select_cost="list_price": cost_at_list 사용
+        - select_cost="after_credits": cost_after_credits 사용
+        - select_cost="net_cost": cost 사용 (기본값)
+    """
+```
 
 ### 병렬 처리
 ```python

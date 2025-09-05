@@ -41,6 +41,7 @@ class CostManager(BaseManager):
         self.billing_export_project_id = None
         self.billing_dataset = None
         self.billing_table = None
+        self.billing_account_id = None
         self.select_cost_option = None  # select_cost 옵션 저장
         self.cost_metric_option = None  # cost_metric 옵션 저장
         self.is_detailed_usage = False  # 상세 사용량 데이터 여부
@@ -53,11 +54,11 @@ class CostManager(BaseManager):
         self._check_options(options)
 
         self.billing_export_project_id = options["billing_export_project_id"]
-        self.billing_dataset = options["billing_dataset_id"]
-        billing_account_id = options["billing_account_id"]
+        self.billing_dataset = self._extract_dataset_id(options["billing_dataset_id"])
+        self.billing_account_id = options["billing_account_id"]
 
         self.billing_table = (
-            f"{BIGQUERY_TABLE_PREFIX}_{billing_account_id.replace('-', '_')}"
+            f"{BIGQUERY_TABLE_PREFIX}_{self.billing_account_id.replace('-', '_')}"
         )
         self._validate_table_exists()
 
@@ -113,12 +114,14 @@ class CostManager(BaseManager):
 
         start = task_options["start"]
         self.billing_export_project_id = task_options["billing_export_project_id"]
-        self.billing_dataset = task_options["billing_dataset_id"]
-        billing_account_id = task_options["billing_account_id"]
+        self.billing_dataset = self._extract_dataset_id(
+            task_options["billing_dataset_id"]
+        )
+        self.billing_account_id = task_options["billing_account_id"]
         self.target_project_id = task_options["project_id"]
 
         self.billing_table = (
-            f"{BIGQUERY_TABLE_PREFIX}_{billing_account_id.replace('-', '_')}"
+            f"{BIGQUERY_TABLE_PREFIX}_{self.billing_account_id.replace('-', '_')}"
         )
         self._validate_table_exists()
 
@@ -427,26 +430,18 @@ class CostManager(BaseManager):
         if select_cost == "list_price":
             # 정가 (크레딧 적용 전 원가)
             cost_value = getattr(row, "cost_at_list", 0.0)
-            _LOGGER.debug(f"[_get_cost_field_by_option] Using list_price: {cost_value}")
             return cost_value
         elif select_cost == "after_credits":
             # 크레딧 적용 후 비용
             cost_value = getattr(row, "cost_after_credits", 0.0)
-            _LOGGER.debug(
-                f"[_get_cost_field_by_option] Using after_credits: {cost_value}"
-            )
             return cost_value
         elif select_cost == "net_cost":
             # 순 비용 (기본 cost와 동일)
             cost_value = getattr(row, "cost", 0.0)
-            _LOGGER.debug(f"[_get_cost_field_by_option] Using net_cost: {cost_value}")
             return cost_value
         else:
             # 기본값: cost (크레딧을 포함한 최종 비용)
             cost_value = getattr(row, "cost", 0.0)
-            _LOGGER.debug(
-                f"[_get_cost_field_by_option] Using default cost: {cost_value}"
-            )
             return cost_value
 
     @staticmethod
@@ -477,6 +472,23 @@ class CostManager(BaseManager):
             if missing_keys:
                 for key in missing_keys:
                     raise ERROR_REQUIRED_PARAMETER(key=f"secret_data.{key}")
+
+    @staticmethod
+    def _extract_dataset_id(billing_dataset_id: str) -> str:
+        """
+        billing_dataset_id에서 실제 데이터셋 ID만 추출합니다.
+
+        Args:
+            billing_dataset_id: 'project.dataset' 또는 'dataset' 형식의 문자열
+
+        Returns:
+            str: 데이터셋 ID만 포함된 문자열
+        """
+        if "." in billing_dataset_id:
+            # 'project.dataset' 형식인 경우 dataset 부분만 반환
+            return billing_dataset_id.split(".")[-1]
+        # 이미 dataset만 있는 경우 그대로 반환
+        return billing_dataset_id
 
     @staticmethod
     def _check_options(options):
