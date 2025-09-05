@@ -12,6 +12,36 @@ SpaceONE 비용 데이터 처리를 위한 필수 필드는 다음과 같습니�
 - `currency`: 통화 (예: USD, KRW)
 - `billed_date`: 청구 날짜 (YYYY-MM-DD 형식)
 
+## 비용 선택 옵션 (select_cost)
+
+Google Cloud Billing 데이터에는 여러 종류의 비용 정보가 포함되어 있습니다. `select_cost` 옵션을 통해 어떤 비용 값을 사용할지 선택할 수 있습니다.
+
+### 지원하는 비용 타입
+
+| 옵션 값 | 대상 필드 | 설명 |
+|:--------|:----------|:-----|
+| `cost` (기본값) | `cost` | 크레딧을 포함한 최종 실제 비용 |
+| `list_price` | `cost_at_list` | 정가 (크레딧 적용 전 원가) |
+| `after_credits` | `cost_after_credits` | 크레딧 적용 후 비용 |
+| `net_cost` | `cost` | 순 비용 (기본 cost와 동일) |
+
+### 설정 예시
+
+```json
+{
+  "options": {
+    "select_cost": "list_price"
+  },
+  "field_mapper": {
+    "cost": "cost",
+    "currency": "currency",
+    "billed_date": "usage_start_time"
+  }
+}
+```
+
+> **참고**: `select_cost` 옵션은 Field Mapper의 `cost` 필드 매핑과 독립적으로 작동합니다. 이 옵션은 매핑된 비용 필드에서 어떤 값을 사용할지만 결정합니다.
+
 ## 기본 설정 예제
 
 ### 1. 간단한 필드 매핑

@@ -42,6 +42,7 @@ class CostManager(BaseManager):
         self.billing_dataset = None
         self.billing_table = None
         self.select_cost_option = None  # select_cost 옵션 저장
+        self.cost_metric_option = None  # cost_metric 옵션 저장
         self.is_detailed_usage = False  # 상세 사용량 데이터 여부
 
     def get_linked_accounts(
@@ -99,8 +100,15 @@ class CostManager(BaseManager):
         self.select_cost_option = task_options.get("select_cost") or options.get(
             "select_cost", "cost"
         )
+        # cost_metric 옵션 설정 (task_options 우선, options 차순)
+        self.cost_metric_option = task_options.get("cost_metric") or options.get(
+            "cost_metric"
+        )
         _LOGGER.debug(
             f"[get_data_from_bigquery] select_cost option: {self.select_cost_option}"
+        )
+        _LOGGER.debug(
+            f"[get_data_from_bigquery] cost_metric option: {self.cost_metric_option}"
         )
 
         start = task_options["start"]
@@ -137,8 +145,15 @@ class CostManager(BaseManager):
             self.select_cost_option = task_options.get("select_cost") or options.get(
                 "select_cost", "cost"
             )
+            # cost_metric 옵션 설정 (task_options 우선, options 차순)
+            self.cost_metric_option = task_options.get("cost_metric") or options.get(
+                "cost_metric"
+            )
             _LOGGER.debug(
                 f"[get_data_from_http_file] select_cost option: {self.select_cost_option}"
+            )
+            _LOGGER.debug(
+                f"[get_data_from_http_file] cost_metric option: {self.cost_metric_option}"
             )
 
             # base_url 또는 bucket_name 추출 (task_options 우선)
@@ -186,7 +201,10 @@ class CostManager(BaseManager):
                 )
                 provider = options.get("provider", "google_cloud")
                 self.field_mapper = FieldMapper(
-                    mapping_config, provider, self.select_cost_option
+                    mapping_config,
+                    provider,
+                    self.select_cost_option,
+                    self.cost_metric_option,
                 )
 
                 _LOGGER.debug(
@@ -222,7 +240,10 @@ class CostManager(BaseManager):
                 mapping_config = task_options.get("field_mapping", {})
                 provider = options.get("provider", "google_cloud")
                 self.field_mapper = FieldMapper(
-                    mapping_config, provider, self.select_cost_option
+                    mapping_config,
+                    provider,
+                    self.select_cost_option,
+                    self.cost_metric_option,
                 )
 
                 # 압축 처리를 위한 import
@@ -384,7 +405,7 @@ class CostManager(BaseManager):
         return {"results": costs_data}
 
     def _get_cost_field_by_option(self, row) -> float:
-        """select_cost 옵션에 따라 적절한 비용 필드를 선택
+        """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
 
         Args:
             row: BigQuery 또는 파일에서 읽은 데이터 행
@@ -392,6 +413,15 @@ class CostManager(BaseManager):
         Returns:
             선택된 비용 값
         """
+        # cost_metric이 AmortizedCost인 경우 credits_amount 사용
+        if self.cost_metric_option == "AmortizedCost":
+            cost_value = getattr(row, "credits_amount", 0.0)
+            _LOGGER.debug(
+                f"[_get_cost_field_by_option] Using AmortizedCost (credits_amount): {cost_value}"
+            )
+            return cost_value
+
+        # 기존 select_cost 로직
         select_cost = self.select_cost_option or "cost"
 
         if select_cost == "list_price":
@@ -527,6 +557,11 @@ class CostManager(BaseManager):
                 + SUM(IFNULL((SELECT SUM(c.amount)
                               FROM UNNEST(credits) c), 0))
                 AS cost,
+              
+              -- AmortizedCost를 위한 credits_amount 계산 (크레딧 총액의 절대값)
+              ABS(SUM(IFNULL((SELECT SUM(c.amount)
+                              FROM UNNEST(credits) c), 0)))
+                AS credits_amount,
 
               SUM(usage.amount_in_pricing_units) as usage_quantity,
             FROM `{self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}`

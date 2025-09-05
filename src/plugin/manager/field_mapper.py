@@ -12,17 +12,23 @@ class FieldMapper:
     """SpaceONE 비용 데이터 형식으로 필드 매핑을 수행하는 클래스"""
 
     def __init__(
-        self, mapping_config: dict, provider: str = None, select_cost: str = None
+        self,
+        mapping_config: dict,
+        provider: str = None,
+        select_cost: str = None,
+        cost_metric: str = None,
     ):
         """
         Args:
             mapping_config: 필드 매핑 설정
             provider: 클라우드 프로바이더 (aws, gcp, azure 등)
             select_cost: 비용 선택 옵션 (cost, list_price, after_credits, net_cost)
+            cost_metric: 비용 메트릭 옵션 (AmortizedCost 등)
         """
         self.mapping_config = mapping_config or {}
         self.provider = provider or "unknown"
         self.select_cost = select_cost or "cost"
+        self.cost_metric = cost_metric
         self.compiled_mappings = {}
         self._compile_mappings()
 
@@ -70,7 +76,7 @@ class FieldMapper:
             raise ERROR_INVALID_ARGUMENT(key=f"field_mapping_error: {str(e)}")
 
     def _get_cost_by_option(self, source_data: dict) -> float:
-        """select_cost 옵션에 따라 적절한 비용 필드를 선택
+        """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
 
         Args:
             source_data: 원본 데이터
@@ -78,6 +84,13 @@ class FieldMapper:
         Returns:
             선택된 비용 값
         """
+        # cost_metric이 AmortizedCost인 경우 credits_amount 사용
+        if self.cost_metric == "AmortizedCost":
+            cost_value = self._map_field("credits_amount", source_data, 0.0)
+            # _LOGGER.debug(f"[FieldMapper] Using AmortizedCost (credits_amount): {cost_value}")
+            return cost_value
+
+        # 기존 select_cost 로직
         if self.select_cost == "list_price":
             # 정가 관련 필드들을 시도
             cost_value = (
@@ -349,6 +362,7 @@ class FieldMapper:
                 "additional_info": {
                     "cost_at_list": "cost_at_list",
                     "cost_after_credits": "cost_after_credits",
+                    "credits_amount": "credits_amount",  # AmortizedCost용
                     "credits": {"field": "credits_detail", "transform": "json_parse"},
                     "resource_tags": {
                         "field": "resource_tags",

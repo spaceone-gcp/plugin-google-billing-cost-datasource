@@ -8,9 +8,11 @@ SpaceONE의 Google Cloud Billing 비용 데이터 소스 플러그인 사용법�
 3. [BigQuery 모드 설정](#3-bigquery-모드-설정)
 4. [HTTP 파일 모드 설정](#4-http-파일-모드-설정)
 5. [Field Mapper 설정](#5-field-mapper-설정)
-6. [비용 분석 활용](#6-비용-분석-활용)
-7. [고급 설정](#7-고급-설정)
-8. [문제 해결](#8-문제-해결)
+6. [비용 선택 옵션 (select_cost)](#6-비용-선택-옵션-select_cost)
+7. [비용 메트릭 옵션 (cost_metric)](#7-비용-메트릭-옵션-cost_metric)
+8. [비용 분석 활용](#8-비용-분석-활용)
+9. [고급 설정](#9-고급-설정)
+10. [문제 해결](#10-문제-해결)
 
 ## 1. 개요
 
@@ -185,9 +187,238 @@ field_mapper:
 > **[상세 가이드]**  
 > Field Mapper의 고급 기능은 [Field Mapper 개발 가이드](../development/field-mapper-guide.md)를 참고하세요.
 
-## 6. 비용 분석 활용
+## 6. 비용 선택 옵션 (select_cost)
 
-### 6.1. 크레딧(Credits) 분석
+Google Cloud Billing 데이터에는 여러 종류의 비용 정보가 포함되어 있습니다. `select_cost` 옵션을 통해 분석 목적에 맞는 비용 값을 선택할 수 있습니다.
+
+### 6.1. 지원하는 비용 타입
+
+| 옵션 값 | 대상 필드 | 설명 | 권장 사용 시나리오 |
+|:--------|:----------|:-----|:------------------|
+| `cost` (기본값) | `cost` | 크레딧을 포함한 최종 실제 비용 | 실제 청구 금액 분석, 일반적인 비용 리포팅 |
+| `list_price` | `cost_at_list` | 정가 (크레딧 적용 전 원가) | 할인 효과 분석, 예산 계획 수립 |
+| `after_credits` | `cost_after_credits` | 크레딧 적용 후 비용 | 크레딧 사용량 분석, 프로모션 효과 측정 |
+| `net_cost` | `cost` | 순 비용 (기본 cost와 동일) | 회계 목적 순비용 분석 |
+
+### 6.2. 설정 방법
+
+#### 6.2.1. options에서 설정 (전역 설정)
+```yaml
+options:
+  select_cost: "list_price"  # 정가를 기준으로 분석
+  # 또는
+  select_cost: "after_credits"  # 크레딧 적용 후 비용으로 분석
+```
+
+#### 6.2.2. task_options에서 설정 (작업별 설정, 우선순위 높음)
+```yaml
+task_options:
+  select_cost: "cost"  # 기본 실제 비용 사용
+  start: "2024-07"
+  # 기타 작업 옵션...
+```
+
+### 6.3. 실제 사용 예시
+
+#### 6.3.1. 실제 청구 금액 분석 (기본값)
+```yaml
+# 실제 지불한 비용으로 분석
+options:
+  select_cost: "cost"  # 또는 생략 (기본값)
+```
+
+**결과**: 크레딧, 할인, 프로모션이 모든 적용된 최종 청구 금액
+
+#### 6.3.2. 할인 효과 분석
+```yaml
+# 정가를 기준으로 분석하여 할인 효과 측정
+options:
+  select_cost: "list_price"
+```
+
+**결과**: 할인 전 정가로 분석하여 실제 절약 효과를 별도로 계산 가능
+
+#### 6.3.3. 크레딧 사용량 분석
+```yaml
+# 크레딧 적용 후 비용으로 분석
+options:
+  select_cost: "after_credits"
+```
+
+**결과**: 크레딧만 적용된 비용으로 크레딧 효과를 정확히 측정
+
+### 6.4. 비용 타입별 비교 예시
+
+동일한 Google Cloud Compute Engine 사용에 대한 비용 타입별 값:
+
+```json
+{
+  "service": "Compute Engine",
+  "sku": "N1 Standard Instance Core running in Americas",
+  "cost_at_list": 100.00,      # 정가
+  "cost_after_credits": 80.00,  # 크레딧 적용 후 (20달러 프로모션 크레딧)
+  "cost": 72.00,               # 최종 실제 비용 (추가 8달러 지속 사용 할인)
+  "credits": [
+    {"type": "PROMOTION", "amount": -20.00},
+    {"type": "SUSTAINED_USE", "amount": -8.00}
+  ]
+}
+```
+
+이 경우 `select_cost` 옵션에 따른 결과:
+- `list_price`: **100.00** (할인 효과 분석에 유용)
+- `after_credits`: **80.00** (프로모션 크레딧 효과 분석)
+- `cost` 또는 `net_cost`: **72.00** (실제 청구 금액)
+
+### 6.5. 활용 시나리오별 권장 설정
+
+#### 재무 보고 및 예산 관리
+```yaml
+options:
+  select_cost: "cost"  # 실제 청구 금액 기준
+```
+- 실제 지출 금액으로 예산 대비 분석
+- CFO 보고서, 재무 감사 등에 활용
+
+#### 비용 최적화 분석
+```yaml
+options:
+  select_cost: "list_price"  # 정가 기준
+```
+- 할인 전 정가로 분석하여 최대 절약 가능 금액 산정
+- 리소스 사용량 최적화 효과 측정
+
+#### 크레딧 및 프로모션 효과 분석
+```yaml
+options:
+  select_cost: "after_credits"  # 크레딧 적용 후
+```
+- 프로모션 크레딧 사용 현황 분석
+- 크레딧 소진 예측 및 관리
+
+### 6.6. 주의사항
+
+1. **데이터 일관성**: 분석 기간 동안 동일한 `select_cost` 옵션을 사용해야 정확한 트렌드 분석이 가능합니다.
+
+2. **BigQuery vs HTTP 파일**: 두 모드 모두 `select_cost` 옵션을 지원하며 동일한 결과를 제공합니다.
+
+3. **필드 매핑과의 관계**: `select_cost` 옵션은 Field Mapper의 `cost` 필드와 독립적으로 작동합니다.
+
+4. **크레딧 세부 정보**: 크레딧의 상세 내역을 분석하려면 `additional_info.credits` 필드도 함께 매핑하는 것을 권장합니다.
+
+## 7. 비용 메트릭 옵션 (cost_metric)
+
+`cost_metric` 옵션은 특별한 비용 계산 방식을 지정할 때 사용합니다. 이 옵션이 설정되면 `select_cost` 옵션보다 우선 적용됩니다.
+
+### 7.1. 지원 메트릭 타입
+
+| 메트릭 | 사용 필드 | 설명 | 활용 시나리오 |
+|-------|----------|------|-------------|
+| `AmortizedCost` | `credits_amount` | 크레딧 절대값 기준 비용 | 크레딧 사용량 분석, 프로모션 효과 측정 |
+
+### 7.2. AmortizedCost 설정
+
+AmortizedCost는 크레딧의 절대값을 비용으로 사용하여, 크레딧 사용량 자체를 분석할 때 유용합니다.
+
+#### 7.2.1. options에서 설정 (전역 설정)
+```yaml
+options:
+  cost_metric: "AmortizedCost"  # 크레딧 절대값을 비용으로 사용
+```
+
+#### 7.2.2. task_options에서 설정 (작업별 설정, 우선순위 높음)
+```yaml
+task_options:
+  cost_metric: "AmortizedCost"  # 작업별로 크레딧 분석 모드 적용
+  start: "2024-07"
+  # 기타 작업 옵션...
+```
+
+### 7.3. AmortizedCost 사용 예시
+
+#### 7.3.1. 크레딧 사용량 분석
+```yaml
+# 크레딧 사용량을 비용으로 분석
+options:
+  cost_metric: "AmortizedCost"
+```
+
+**결과**: 각 서비스별로 사용된 크레딧의 절대값이 비용으로 표시됩니다.
+
+```json
+{
+  "service": "Compute Engine",
+  "sku": "N1 Standard Instance Core running in Americas",
+  "cost": 25.00,  # credits_amount (크레딧 절대값)
+  "additional_info": {
+    "cost_at_list": 100.00,
+    "cost_after_credits": 75.00,
+    "credits_amount": 25.00,  # 원본 크레딧 절대값
+    "credits": [
+      {"type": "PROMOTION", "amount": -15.00},
+      {"type": "SUSTAINED_USE", "amount": -10.00}
+    ]
+  }
+}
+```
+
+#### 7.3.2. 프로모션 크레딧 효과 측정
+```yaml
+# 프로모션 크레딧 사용 현황 분석
+options:
+  cost_metric: "AmortizedCost"
+  # 추가 필터링으로 프로모션 크레딧만 분석 가능
+```
+
+### 7.4. 우선순위 및 조합
+
+#### 7.4.1. 옵션 우선순위
+1. **`cost_metric`** (최우선) - 특별한 비용 계산 방식
+2. **`select_cost`** - 일반적인 비용 필드 선택
+
+```yaml
+# cost_metric이 설정되면 select_cost는 무시됨
+options:
+  cost_metric: "AmortizedCost"  # 이것이 적용됨
+  select_cost: "list_price"     # 무시됨
+```
+
+#### 7.4.2. 설정 위치별 우선순위
+1. **`task_options.cost_metric`** (최우선)
+2. **`options.cost_metric`**
+3. **`task_options.select_cost`**
+4. **`options.select_cost`**
+5. **기본값**: `cost`
+
+### 7.5. 활용 시나리오
+
+#### 크레딧 소진 예측 및 관리
+```yaml
+options:
+  cost_metric: "AmortizedCost"
+```
+- 각 서비스별 크레딧 사용량을 정확히 측정
+- 크레딧 소진 시점 예측
+- 크레딧 효율성 분석
+
+#### 프로모션 효과 분석
+```yaml
+options:
+  cost_metric: "AmortizedCost"
+```
+- 프로모션 크레딧의 실제 사용 패턴 분석
+- 서비스별 크레딧 활용도 측정
+- 크레딧 최적화 전략 수립
+
+### 7.6. 주의사항
+
+- **데이터 가용성**: `credits_amount` 필드는 크레딧이 적용된 항목에서만 0이 아닌 값을 가집니다.
+- **우선순위**: `cost_metric` 설정 시 `select_cost` 옵션은 완전히 무시됩니다.
+- **BigQuery**: SQL 쿼리에서 `credits_amount`는 크레딧 총액의 절대값(`ABS(SUM(...))`)으로 계산됩니다.
+
+## 8. 비용 분석 활용
+
+### 8.1. 크레딧(Credits) 분석
 `credits` 필드 매핑으로 할인 내역을 상세히 분석할 수 있습니다:
 
 ```json
@@ -204,7 +435,7 @@ field_mapper:
 - `additional_info.credits.type`으로 할인 유형별 그룹화
 - 특정 프로모션 크레딧 효과 측정
 
-### 6.2. 유효 할인율 분석
+### 8.2. 유효 할인율 분석
 `cost`와 `cost_at_list` 필드를 모두 수집하여 실질적인 할인 혜택을 분석:
 
 ```yaml
@@ -218,20 +449,20 @@ field_mapper:
 - `(cost_at_list - cost) / cost_at_list × 100` 공식으로 할인율 계산
 - 서비스별, 프로젝트별 할인율 비교
 
-### 6.3. 다차원 분석
+### 8.3. 다차원 분석
 매핑된 모든 필드를 활용한 유연한 그룹화 및 필터링:
 - **그룹화**: `project.name`, `service.description`, `labels.key` 등
 - **필터링**: 특정 프로젝트, 라벨, 태그 값으로 비용 필터링
 
-## 7. 고급 설정
+## 9. 고급 설정
 
-### 7.1. 파일 패턴 필터링
+### 9.1. 파일 패턴 필터링
 ```yaml
 task_options:
   file_pattern: "gcp_billing_export_v1_01XXXX-XXXXXX-XXXXXX_202407.csv"
 ```
 
-### 7.2. 날짜 범위 필터링
+### 9.2. 날짜 범위 필터링
 ```yaml
 task_options:
   date_range:
@@ -239,7 +470,7 @@ task_options:
     end_date: "2024-07-31"
 ```
 
-### 7.3. 성능 최적화
+### 9.3. 성능 최적화
 ```yaml
 task_options:
   max_files: 10        # 처리할 최대 파일 수
@@ -250,25 +481,25 @@ options:
       chunk_size: 10000  # 청크 크기 조정
 ```
 
-## 8. 문제 해결
+## 10. 문제 해결
 
-### 8.1. 공통 문제
+### 10.1. 공통 문제
 - **인증 오류**: 서비스 계정 키가 올바른지, 만료되지 않았는지 확인
 - **데이터 누락**: Billing Export 활성화 시점 이후 데이터만 수집됨
 
-### 8.2. BigQuery 모드 문제
+### 10.2. BigQuery 모드 문제
 - **테이블 없음**: BigQuery에 billing export 테이블 생성 확인
 - **권한 오류**: `BigQuery Data Viewer`, `BigQuery Job User` 역할 확인
 - **쿼리 오류**: `billing_export_project_id`, `billing_dataset_id`, `billing_account_id` 설정 확인
 
-### 8.3. HTTP 파일 모드 문제
+### 10.3. HTTP 파일 모드 문제
 - **파일 접근 오류**: `Storage Object Viewer` 역할 확인
 - **파일 형식 오류**: 지원 형식(CSV, JSON, Parquet) 확인
 - **필드 매핑 오류**: 필수 필드(`cost`, `billed_date`, `currency`) 매핑 확인
 - **압축 파일 오류**: 지원 압축 형식(.gz, .snappy, .zstd) 확인
 - **메모리 부족**: `max_files` 값 조정
 
-### 8.4. gRPC 메시지 크기 제한 문제
+### 10.4. gRPC 메시지 크기 제한 문제
 ```
 ERROR: ResourceExhausted
 Message: grpc: received message larger than max (4211270 vs. 4194304)
