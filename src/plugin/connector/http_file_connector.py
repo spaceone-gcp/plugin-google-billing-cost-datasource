@@ -141,9 +141,25 @@ class HttpFileConnector(BaseConnector):
             blob.download_to_file(file_content)
             file_content.seek(0)
 
+            # 실제 다운로드된 크기 확인
+            actual_size = file_content.tell()
+            file_content.seek(0)  # 다시 처음으로 이동
+
+            # 상세한 디버깅 정보
+            blob_size_str = f"{blob.size}" if blob.size is not None else "None"
             _LOGGER.debug(
-                f"[HttpFileConnector] Downloaded file: {bucket_name}/{file_path} ({blob.size} bytes)"
+                f"[HttpFileConnector] Downloaded file: {bucket_name}/{file_path} (expected: {blob_size_str} bytes, actual: {actual_size} bytes)"
             )
+
+            # 크기 불일치 또는 None 경고
+            if blob.size is None:
+                _LOGGER.warning(
+                    f"[HttpFileConnector] Blob size is None for {file_path}, actual downloaded: {actual_size} bytes"
+                )
+            elif actual_size != blob.size:
+                _LOGGER.warning(
+                    f"[HttpFileConnector] File size mismatch for {file_path}: expected {blob.size}, got {actual_size}"
+                )
             return file_content
 
         except Exception as e:

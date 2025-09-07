@@ -63,11 +63,13 @@ class ConcurrencyManager:
 
         try:
             with self._main_lock:
+                # 락 획득 후 다시 한 번 확인 (race condition 방지)
                 if file_key in self._processing_files:
                     _LOGGER.info(
-                        f"[ConcurrencyManager] File {file_key} is already being processed by another request"
+                        f"[ConcurrencyManager] File {file_key} is already being processed by another request, skipping"
                     )
-                    # 이미 처리 중인 파일은 건너뛰기
+                    # 이미 처리 중인 파일은 None을 yield하여 건너뛰기
+                    yield None
                     return
 
                 self._processing_files.add(file_key)
@@ -159,7 +161,7 @@ class ConcurrencyManager:
 class RequestDeduplicator:
     """요청 중복 제거 관리"""
 
-    def __init__(self, ttl: float = 60.0):
+    def __init__(self, ttl: float = 30.0):
         self.ttl = ttl
         self._requests: Dict[str, float] = {}
         self._lock = threading.RLock()

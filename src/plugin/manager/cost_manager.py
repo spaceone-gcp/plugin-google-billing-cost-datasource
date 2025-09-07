@@ -78,9 +78,41 @@ class CostManager(BaseManager):
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
         """데이터 소스 타입에 따라 처리 분기"""
+        # 요청 중복 제거를 위한 해시 생성
+        import hashlib
+        import json
+
+        # secret_data 제외하고 요청 식별을 위한 핵심 데이터만 사용
+        request_data = {
+            "bucket_name": options.get("bucket_name"),
+            "project_id": options.get("project_id"),
+            "file_path": task_options.get("file_path"),
+            "data_source_type": task_options.get("data_source_type"),
+            "select_cost": options.get("select_cost"),
+            "field_mapper": options.get("field_mapper"),
+        }
+        request_hash = hashlib.md5(
+            json.dumps(request_data, sort_keys=True).encode()
+        ).hexdigest()
+
+        # 중복 요청 확인
+        from ..utils.concurrency_manager import request_deduplicator
+
+        _LOGGER.debug(
+            f"[get_data] Generated request_hash: {request_hash[:8]} for data: {request_data}"
+        )
+
+        if request_deduplicator.is_duplicate_request(request_hash):
+            _LOGGER.info(
+                f"[get_data] Duplicate request detected, skipping: {request_hash[:8]}"
+            )
+            return
+
         data_source_type = self._get_data_source_type(options, task_options)
 
-        _LOGGER.debug(f"[get_data] data_source_type: {data_source_type}")
+        _LOGGER.debug(
+            f"[get_data] data_source_type: {data_source_type}, request_hash: {request_hash[:8]}"
+        )
 
         if data_source_type == DATA_SOURCE_TYPES["http_file"]:
             yield from self._get_data_from_http_file(
@@ -96,6 +128,11 @@ class CostManager(BaseManager):
     ) -> Generator[dict, None, None]:
         """BigQuery에서 데이터 조회 (기존 로직)"""
         self.bigquery_connector.create_session(options, secret_data, schema)
+
+        # options에 BigQuery 관련 필드가 있으면 검증
+        if any(key in options for key in REQUIRED_OPTIONS):
+            self._check_options(options)  # options 필드 검증 추가
+
         self._check_bigquery_task_options(task_options)
 
         # select_cost 옵션 설정 (task_options 우선, options 차순)
@@ -354,11 +391,24 @@ class CostManager(BaseManager):
                         f"[get_data_from_http_file] Processing file: {file_name} ({file_info['size']} bytes, format: {file_info.get('format', 'auto-detect')})"
                     )
 
+                    # 동시성 관리 상태 로깅
+                    stats = concurrency_manager.get_processing_stats()
+                    _LOGGER.debug(
+                        f"[get_data_from_http_file] Concurrency stats before processing {file_name}: {stats}"
+                    )
+
                     try:
                         # 파일 처리 락 획득
                         with concurrency_manager.acquire_file_lock(
                             bucket_name, file_name, timeout=60.0
-                        ):
+                        ) as lock_result:
+                            # 락 획득 실패 시 (이미 처리 중인 파일) 건너뛰기
+                            if lock_result is None:
+                                _LOGGER.info(
+                                    f"[get_data_from_http_file] File {file_name} is being processed by another request, skipping"
+                                )
+                                continue
+
                             # 파일 다운로드
                             file_stream = self.http_file_connector.download_file_stream(
                                 bucket_name, file_name
@@ -571,10 +621,26 @@ class CostManager(BaseManager):
 
     @staticmethod
     def _check_options(options):
+        """BigQuery options 필드 검증"""
+        # 필수 필드 검증
         missing_keys = [key for key in REQUIRED_OPTIONS if key not in options]
         if missing_keys:
             for key in missing_keys:
                 raise ERROR_REQUIRED_PARAMETER(key=f"options.{key}")
+
+        # data_source_type 검증 (있는 경우)
+        data_source_type = options.get("data_source_type")
+        if data_source_type and data_source_type not in ["bigquery", "http_file"]:
+            raise ERROR_REQUIRED_PARAMETER(
+                key=f"options.data_source_type (invalid value: {data_source_type})"
+            )
+
+        # provider 검증 (있는 경우)
+        provider = options.get("provider")
+        if provider and provider != "google_cloud":
+            raise ERROR_REQUIRED_PARAMETER(
+                key=f"options.provider (invalid value: {provider})"
+            )
 
     def _validate_table_exists(self):
         bigquery_tables_info = self.bigquery_connector.list_tables(
@@ -740,6 +806,17 @@ class CostManager(BaseManager):
         ):
             _LOGGER.debug("[_get_data_source_type] Auto-detected http_file type")
             return DATA_SOURCE_TYPES["http_file"]
+
+        # BigQuery 필수 파라미터 확인 (task_options에서)
+        bigquery_required_in_task = all(
+            key in task_options
+            for key in REQUIRED_TASK_OPTIONS[1:]  # 'start' 제외
+        )
+        if bigquery_required_in_task:
+            _LOGGER.debug(
+                "[_get_data_source_type] Auto-detected bigquery type from task_options"
+            )
+            return DATA_SOURCE_TYPES["bigquery"]
 
         # 기본값 반환 (하위 호환성)
         _LOGGER.debug(
