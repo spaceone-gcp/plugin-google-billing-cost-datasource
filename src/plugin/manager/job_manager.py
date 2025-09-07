@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta
+from typing import Dict, List
 
 from spaceone.core.error import (
     ERROR_INVALID_PARAMETER,
@@ -48,24 +49,40 @@ class JobManager(BaseManager):
 
         data_source_type = self._get_data_source_type(options)
 
-        _LOGGER.debug(f"[get_tasks] data_source_type: {data_source_type}")
+        _LOGGER.info(
+            f"[get_tasks] 🚀 Starting task generation with data_source_type: {data_source_type}"
+        )
+        print(
+            f"[DEBUG] get_tasks called with data_source_type: {data_source_type}, start: {start}"
+        )
         _LOGGER.debug(f"[get_tasks] options keys: {list(options.keys())}")
 
         # HTTP 파일 모드 강제 실행 (source=gcs인 경우)
         if "source" in options and options["source"] == "gcs":
             _LOGGER.debug("[get_tasks] Executing HTTP file mode for source=gcs")
-            return self._get_http_file_tasks(
+            result = self._get_http_file_tasks(
                 domain_id, options, secret_data, schema, start, last_synchronized_at
             )
-
-        if data_source_type == DATA_SOURCE_TYPES["http_file"]:
-            return self._get_http_file_tasks(
+        elif data_source_type == DATA_SOURCE_TYPES["http_file"]:
+            result = self._get_http_file_tasks(
                 domain_id, options, secret_data, schema, start, last_synchronized_at
             )
         else:
-            return self._get_bigquery_tasks(
+            result = self._get_bigquery_tasks(
                 domain_id, options, secret_data, schema, start, last_synchronized_at
             )
+
+        # 전체 작업 생성 결과 로깅
+        task_count = len(result.get("tasks", []))
+        changed_count = len(result.get("changed", []))
+
+        _LOGGER.info(
+            f"[get_tasks] Task generation completed - "
+            f"Total tasks: {task_count}, Changed items: {changed_count}, "
+            f"Data source type: {data_source_type}"
+        )
+
+        return result
 
     def _get_bigquery_tasks(
         self,
@@ -116,6 +133,13 @@ class JobManager(BaseManager):
 
         # SpaceONE Job 스키마의 start 필드 길이 제한 준수 (YYYY-MM 형식, 7자)
         changed.append({"start": start_month})
+
+        _LOGGER.info(
+            f"[get_bigquery_tasks] Generated {len(tasks)} BigQuery tasks for {len(tasks)} projects"
+        )
+        _LOGGER.debug(
+            f"[get_bigquery_tasks] Task details: start_month={start_month}, billing_account_id={self.billing_account_id}"
+        )
 
         return {"tasks": tasks, "changed": changed}
 
@@ -197,7 +221,8 @@ class JobManager(BaseManager):
     ) -> dict:
         """HTTP 파일 기반 작업 생성 (신규)"""
 
-        _LOGGER.debug(f"[_get_http_file_tasks] Called with start={start}")
+        _LOGGER.info(f"[_get_http_file_tasks] 🚀 Called with start={start}")
+        print(f"[DEBUG] _get_http_file_tasks called with start={start}")
 
         try:
             # HTTP 파일 커넥터 세션 생성
@@ -232,7 +257,30 @@ class JobManager(BaseManager):
                 bucket_name = options["bucket_name"]
                 file_pattern = options.get("file_pattern")
 
+                # 모든 파일 목록 가져오기
                 files = self.http_file_connector.list_files(bucket_name, file_pattern)
+
+                # start 파라미터 기반 파일 필터링
+                _LOGGER.info(
+                    f"[_get_http_file_tasks] Before filtering: {len(files)} files, start parameter: {start}"
+                )
+                if start:
+                    validated_start = self._validate_and_fix_date_range(start)
+                    _LOGGER.info(
+                        f"[_get_http_file_tasks] Validated start date: {validated_start}"
+                    )
+                    # project_id 기반 필터링 추가
+                    project_id = secret_data.get("project_id") if secret_data else None
+                    files = self._filter_files_by_date_and_project(
+                        files, validated_start, project_id
+                    )
+                    _LOGGER.info(
+                        f"[_get_http_file_tasks] After filtering: {len(files)} files for date: {validated_start}, project: {project_id}"
+                    )
+                else:
+                    _LOGGER.info(
+                        "[_get_http_file_tasks] No start parameter provided, using all files"
+                    )
 
                 for file_info in files:
                     task_options = {
@@ -268,10 +316,9 @@ class JobManager(BaseManager):
             # 변경 사항 기록 - start 필드 포함 (TasksResponse 스키마 요구사항)
             current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-            # SpaceONE Job 스키마의 start 필드 길이 제한 준수 (최대 7자)
-            # start 파라미터가 있으면 사용, 없으면 현재 월(YYYY-MM) 형식 사용
+            # start 파라미터 처리 - get_data와 동일한 로직 적용
             if start:
-                start_value = start[:7]  # YYYY-MM 형식으로 제한
+                start_value = self._validate_and_fix_date_range(start)
             else:
                 start_value = datetime.utcnow().strftime("%Y-%m")  # YYYY-MM 형식
 
@@ -290,7 +337,7 @@ class JobManager(BaseManager):
             )
 
             _LOGGER.info(
-                f"[get_http_file_tasks] Generated {len(tasks)} HTTP file tasks"
+                f"[get_http_file_tasks] Generated {len(tasks)} HTTP file tasks from {len(tasks)} files"
             )
 
             return {"tasks": tasks, "changed": changed}
@@ -377,6 +424,112 @@ class JobManager(BaseManager):
             bucket_name = options["bucket_name"]
             if not bucket_name or bucket_name.strip() == "":
                 raise ERROR_INVALID_PARAMETER(key="options.bucket_name")
+
+    @staticmethod
+    def _filter_files_by_date(files: List[Dict], start_date: str) -> List[Dict]:
+        """start_date를 기반으로 파일 목록 필터링
+
+        Args:
+            files: 파일 목록 (각 파일은 'name' 키를 가진 딕셔너리)
+            start_date: YYYY-MM 형식의 시작 날짜
+
+        Returns:
+            List[Dict]: 필터링된 파일 목록
+        """
+        try:
+            # YYYY-MM 형식에서 년도와 월 추출
+            year, month = start_date.split("-")
+            year_month_pattern = f"{year}/{month.zfill(2)}"
+
+            filtered_files = []
+
+            for file_info in files:
+                file_path = file_info.get("name", "")
+
+                # 파일 경로에서 연/월 패턴 확인
+                # 예: aramco/2025/09/billing_data_202509-000000000000.parquet
+                # 예: mkkang-project/2025/09/billing_data_202509-000000000001.parquet
+                if year_month_pattern in file_path:
+                    filtered_files.append(file_info)
+                    _LOGGER.info(
+                        f"[_filter_files_by_date] ✅ Matched file: {file_path}"
+                    )
+                else:
+                    _LOGGER.info(
+                        f"[_filter_files_by_date] ❌ Skipped file: {file_path}"
+                    )
+
+            _LOGGER.info(
+                f"[_filter_files_by_date] Filtered {len(filtered_files)}/{len(files)} files for {start_date}"
+            )
+            return filtered_files
+
+        except Exception as e:
+            _LOGGER.error(
+                f"[_filter_files_by_date] Failed to filter files for {start_date}: {e}"
+            )
+            # 오류 시 원본 파일 목록 반환
+            return files
+
+    @staticmethod
+    def _validate_and_fix_date_range(start_date: str) -> str:
+        """날짜 범위 검증 및 미래 날짜 보정
+
+        Args:
+            start_date: YYYY-MM 또는 YYYY-MM-DD 형식의 시작 날짜
+
+        Returns:
+            str: 검증된 시작 날짜 (미래 날짜인 경우 현재 날짜로 보정)
+        """
+        try:
+            # 현재 날짜
+            current_date = datetime.now()
+            current_year_month = current_date.strftime("%Y-%m")
+
+            # 입력 날짜 파싱 - YYYY-MM-DD 형식도 지원
+            if not start_date:
+                _LOGGER.warning(
+                    "[_validate_and_fix_date_range] Empty date, using current month"
+                )
+                return current_year_month
+
+            # YYYY-MM-DD 형식인 경우 YYYY-MM로 변환
+            if len(start_date) == 10 and start_date.count("-") == 2:
+                start_date = start_date[:7]  # YYYY-MM 부분만 추출
+            elif len(start_date) != 7:  # YYYY-MM 형식 검증
+                _LOGGER.warning(
+                    f"[_validate_and_fix_date_range] Invalid date format: {start_date}, using current month"
+                )
+                return current_year_month
+
+            start_year, start_month = map(int, start_date.split("-"))
+            start_datetime = datetime(start_year, start_month, 1)
+
+            # 미래 날짜 검증
+            if start_datetime > current_date:
+                _LOGGER.warning(
+                    f"[_validate_and_fix_date_range] Future date detected: {start_date}, "
+                    f"adjusting to current month: {current_year_month}"
+                )
+                return current_year_month
+
+            # 너무 과거 날짜 검증 (5년 이전)
+            five_years_ago = current_date - timedelta(days=365 * 5)
+            if start_datetime < five_years_ago:
+                safe_start = five_years_ago.strftime("%Y-%m")
+                _LOGGER.warning(
+                    f"[_validate_and_fix_date_range] Date too far in past: {start_date}, "
+                    f"adjusting to: {safe_start}"
+                )
+                return safe_start
+
+            # 유효한 날짜인 경우 YYYY-MM 형식으로 반환
+            return start_date
+
+        except Exception as e:
+            _LOGGER.error(f"[_validate_and_fix_date_range] Date validation failed: {e}")
+            # 오류 시 안전한 기본값 반환 (현재 월)
+            return datetime.now().strftime("%Y-%m")
 
     @staticmethod
     def _extract_dataset_id(billing_dataset_id: str) -> str:
