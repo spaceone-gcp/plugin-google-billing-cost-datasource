@@ -166,15 +166,30 @@ class FieldMapper:
                 field_name = mapping_rule["field"]
                 transform = mapping_rule.get("transform")
                 default_value = mapping_rule.get("default", "")
+                fallback_field = mapping_rule.get("fallback")
 
-                return (
-                    lambda data,
+                def field_mapper_with_fallback(
+                    data,
                     field=field_name,
                     trans=transform,
-                    default=default_value: self._apply_transform(
-                        data.get(field, default), trans
-                    )
-                )
+                    default=default_value,
+                    fallback=fallback_field,
+                ):
+                    # 주 필드 시도
+                    value = data.get(field)
+                    if value:
+                        return self._apply_transform(value, trans)
+
+                    # fallback 필드 시도
+                    if fallback:
+                        fallback_value = data.get(fallback)
+                        if fallback_value:
+                            return self._apply_transform(fallback_value, trans)
+
+                    # 기본값 사용
+                    return self._apply_transform(default, trans) if default else ""
+
+                return field_mapper_with_fallback
 
             elif "expression" in mapping_rule:
                 # 표현식 매핑: {"expression": "field1 + field2"}
@@ -375,8 +390,9 @@ class FieldMapper:
 
     def _format_date(self, value: Any) -> str:
         """날짜 형식 변환"""
-        if not value:
-            return ""
+        if not value or str(value).strip() == "" or str(value) == "today":
+            # 빈 값이거나 "today"일 경우 현재 날짜를 기본값으로 사용
+            return datetime.now().strftime("%Y-%m-%d")
 
         try:
             if isinstance(value, datetime):
@@ -387,6 +403,8 @@ class FieldMapper:
                     "%Y-%m-%d",
                     "%Y-%m-%d %H:%M:%S",
                     "%Y-%m-%dT%H:%M:%S",
+                    "%Y-%m-%d %H:%M:%S UTC",  # Google Cloud usage_start_time 형식
+                    "%Y-%m-%d %H:%M:%S.%f UTC",  # Google Cloud export_time 형식
                     "%Y/%m/%d",
                     "%m/%d/%Y",
                 ]
@@ -419,7 +437,12 @@ class FieldMapper:
                 "usage_type": "sku_description",
                 "resource": "project_id",
                 "currency": "currency",
-                "billed_date": {"field": "billed_at", "transform": "date_format"},
+                "billed_date": {
+                    "field": "usage_start_time",
+                    "transform": "date_format",
+                    "fallback": "export_time",
+                    "default": "today",
+                },
                 "tags": {"field": "labels", "transform": "json_parse"},
                 "additional_info": {
                     "cost_at_list": "cost_at_list",

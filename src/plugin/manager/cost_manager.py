@@ -8,7 +8,6 @@ from spaceone.core.manager import BaseManager
 from ..conf.cost_conf import (
     BIGQUERY_TABLE_PREFIX,
     DATA_SOURCE_TYPES,
-    DEFAULT_DATA_SOURCE_TYPE,
     DETAILED_USAGE_TABLE_PREFIX,
 )
 from ..connector.bigquery_connector import BigqueryConnector
@@ -129,10 +128,10 @@ class CostManager(BaseManager):
         """BigQuery에서 데이터 조회 (기존 로직)"""
         self.bigquery_connector.create_session(options, secret_data, schema)
 
-        # options에 BigQuery 관련 필드가 있으면 검증
-        if any(key in options for key in REQUIRED_OPTIONS):
-            self._check_options(options)  # options 필드 검증 추가
+        # options 검증 (항상 실행)
+        self._check_options(options)
 
+        # task_options 검증 (항상 실행)
         self._check_bigquery_task_options(task_options)
 
         # select_cost 옵션 설정 (task_options 우선, options 차순)
@@ -622,11 +621,17 @@ class CostManager(BaseManager):
     @staticmethod
     def _check_options(options):
         """BigQuery options 필드 검증"""
-        # 필수 필드 검증
-        missing_keys = [key for key in REQUIRED_OPTIONS if key not in options]
-        if missing_keys:
-            for key in missing_keys:
-                raise ERROR_REQUIRED_PARAMETER(key=f"options.{key}")
+        # options가 비어있으면 통과 (task_options에서 처리)
+        if not options:
+            return
+
+        # BigQuery 관련 필드가 하나라도 있으면 모든 필수 필드 검증
+        has_bigquery_fields = any(key in options for key in REQUIRED_OPTIONS)
+        if has_bigquery_fields:
+            missing_keys = [key for key in REQUIRED_OPTIONS if key not in options]
+            if missing_keys:
+                for key in missing_keys:
+                    raise ERROR_REQUIRED_PARAMETER(key=f"options.{key}")
 
         # data_source_type 검증 (있는 경우)
         data_source_type = options.get("data_source_type")
@@ -798,12 +803,15 @@ class CostManager(BaseManager):
             f"[_get_data_source_type] bucket_name in task_options: {bucket_name_in_task_options}"
         )
 
-        if (
+        # HTTP 파일 관련 파라미터가 명확히 있는 경우에만 HTTP 파일로 결정
+        has_http_file_params = (
             base_url_in_options
             or base_url_in_task_options
             or bucket_name_in_options
             or bucket_name_in_task_options
-        ):
+        )
+
+        if has_http_file_params:
             _LOGGER.debug("[_get_data_source_type] Auto-detected http_file type")
             return DATA_SOURCE_TYPES["http_file"]
 
@@ -818,11 +826,27 @@ class CostManager(BaseManager):
             )
             return DATA_SOURCE_TYPES["bigquery"]
 
-        # 기본값 반환 (하위 호환성)
-        _LOGGER.debug(
-            f"[_get_data_source_type] Using default: {DEFAULT_DATA_SOURCE_TYPE}"
+        # options에 BigQuery 필수 파라미터 확인
+        bigquery_required_in_options = all(key in options for key in REQUIRED_OPTIONS)
+        if bigquery_required_in_options:
+            _LOGGER.debug(
+                "[_get_data_source_type] Auto-detected bigquery type from options"
+            )
+            return DATA_SOURCE_TYPES["bigquery"]
+
+        # 명시적 데이터 소스 타입이 없고 자동 감지도 실패한 경우 에러
+        _LOGGER.error(
+            "[_get_data_source_type] Cannot determine data source type - no valid parameters found"
         )
-        return DEFAULT_DATA_SOURCE_TYPE
+        _LOGGER.error(
+            f"[_get_data_source_type] Available options keys: {list(options.keys())}"
+        )
+        _LOGGER.error(
+            f"[_get_data_source_type] Available task_options keys: {list(task_options.keys())}"
+        )
+        raise ERROR_REQUIRED_PARAMETER(
+            key="data_source_type (cannot auto-detect from available parameters)"
+        )
 
     def _generate_date_range_patterns(
         self, project_id: str, start_period: str
