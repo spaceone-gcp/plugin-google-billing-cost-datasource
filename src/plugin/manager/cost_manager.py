@@ -486,18 +486,18 @@ class CostManager(BaseManager):
 
         return {"results": costs_data}
 
-    def _get_cost_field_by_option(self, row) -> float:
+    def _get_cost_field_by_option(self, row):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
 
         Args:
             row: BigQuery 또는 파일에서 읽은 데이터 행
 
         Returns:
-            선택된 비용 값
+            선택된 비용 값 (원본 타입 유지)
         """
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric_option == "AmortizedCost":
-            cost_value = getattr(row, "credits_amount", 0.0)
+            cost_value = getattr(row, "credits_amount", 0)
             _LOGGER.debug(
                 f"[_get_cost_field_by_option] Using AmortizedCost (credits_amount): {cost_value}"
             )
@@ -508,19 +508,19 @@ class CostManager(BaseManager):
 
         if select_cost == "list_price":
             # 정가 (크레딧 적용 전 원가)
-            cost_value = getattr(row, "cost_at_list", 0.0)
+            cost_value = getattr(row, "cost_at_list", 0)
             return cost_value
         elif select_cost == "after_credits":
             # 크레딧 적용 후 비용
-            cost_value = getattr(row, "cost_after_credits", 0.0)
+            cost_value = getattr(row, "cost_after_credits", 0)
             return cost_value
         elif select_cost == "net_cost":
             # 순 비용 (기본 cost와 동일)
-            cost_value = getattr(row, "cost", 0.0)
+            cost_value = getattr(row, "cost", 0)
             return cost_value
         else:
             # 기본값: cost (크레딧을 포함한 최종 비용)
-            cost_value = getattr(row, "cost", 0.0)
+            cost_value = getattr(row, "cost", 0)
             return cost_value
 
     @staticmethod

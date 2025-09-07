@@ -57,9 +57,17 @@ Google Cloud Billing 플러그인의 전체 시스템 아키텍처를 설명합�
 
 ### Manager Layer
 - **DataSourceManager**: 플러그인 메타데이터 관리
-- **CostManager**: 비용 데이터 처리 및 변환 로직
+- **CostManager**: 비용 데이터 처리 및 변환 로직 (✅ 향상됨)
+  - AmortizedCost 메트릭 지원 (credits_amount 기반)
+  - 향상된 select_cost 옵션 (list_price, after_credits, net_cost)
+  - cost_metric 옵션으로 다양한 비용 계산 방식 지원
+  - 상세 사용량 데이터(detailed usage) 자동 감지 및 처리
 - **JobManager**: 작업 스케줄링 및 분할
-- **FieldMapper**: 데이터 필드 매핑 및 변환
+- **FieldMapper**: 데이터 필드 매핑 및 변환 (✅ 확장됨)
+  - Pricing 관련 필드 매핑 추가 (service_id, sku_id, list_price 등)
+  - AmortizedCost 지원을 위한 credits_amount 매핑
+  - 리소스 식별 필드 지원 (resource_name, resource_global_name)
+  - 할인율 및 가격 계층 정보 매핑
 
 ### Connector Layer
 - **BigqueryConnector**: BigQuery 데이터베이스 연동 (기존)
@@ -69,10 +77,13 @@ Google Cloud Billing 플러그인의 전체 시스템 아키텍처를 설명합�
 - **HttpFileConnector**: HTTP 파일 다운로드 및 처리 (기존)
   - GCS 버킷 및 HTTP URL 다운로드 지원
   - 파일 크기 제한 및 압축 형식 자동 감지
-- **PricingConnector**: Google Cloud Pricing Data Export 연동 (신규)
+- **PricingConnector**: Google Cloud Pricing Data Export 연동 (✅ 구현 완료)
   - cloud_pricing_export 테이블 직접 조회
-  - 실제 청구 데이터와 정가 비교 분석
-  - 서비스별 가격 정보 요약 제공
+  - 실제 청구 데이터와 정가 비교 분석 (compare_billing_vs_pricing)
+  - 서비스별 가격 정보 요약 제공 (get_service_pricing_summary)
+  - 계층별 요금제(tiered_rates) 파싱 및 처리
+  - 숫자 타입 원본 보존으로 정확한 가격 계산
+  - Pricing 테이블 목록 조회 기능 (list_pricing_tables)
 
 ### File Processing Layer (신규)
 - **CompressionHandler**: 압축 파일 감지 및 해제 (gzip, snappy, zstd)

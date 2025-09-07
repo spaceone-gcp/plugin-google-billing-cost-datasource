@@ -5,7 +5,7 @@ Google Cloud의 cloud_pricing_export 테이블에서 가격 정보를 조회하�
 
 import logging
 from decimal import Decimal
-from typing import Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import pandas_gbq
 from google.oauth2 import service_account
@@ -276,18 +276,22 @@ class PricingConnector(BaseConnector):
     def _transform_pricing_row(self, row) -> Dict:
         """Pricing 데이터 행을 표준 형식으로 변환"""
 
-        # tiered_rates 파싱
+        # tiered_rates 파싱 - 원본 타입 유지
         tiered_rates = []
         if hasattr(row, "tiered_rates") and row.tiered_rates:
             for rate in row.tiered_rates:
                 tiered_rates.append(
                     {
-                        "pricing_unit_quantity": float(
+                        "pricing_unit_quantity": self._preserve_numeric_type(
                             rate.get("pricing_unit_quantity", 0)
                         ),
-                        "start_usage_amount": float(rate.get("start_usage_amount", 0)),
-                        "usd_amount": float(rate.get("usd_amount", 0)),
-                        "account_currency_amount": float(
+                        "start_usage_amount": self._preserve_numeric_type(
+                            rate.get("start_usage_amount", 0)
+                        ),
+                        "usd_amount": self._preserve_numeric_type(
+                            rate.get("usd_amount", 0)
+                        ),
+                        "account_currency_amount": self._preserve_numeric_type(
                             rate.get("account_currency_amount", 0)
                         ),
                     }
@@ -309,6 +313,29 @@ class PricingConnector(BaseConnector):
             "tiered_rates": tiered_rates,
             "base_price_usd": base_price_usd,
         }
+
+    def _preserve_numeric_type(self, value: Any) -> Any:
+        """숫자 값의 원본 타입을 유지하면서 유효성 검증"""
+        if value is None:
+            return 0
+
+        # 이미 숫자 타입인 경우 그대로 반환
+        if isinstance(value, (int, float)):
+            return value
+
+        # 문자열인 경우 숫자로 변환 시도
+        if isinstance(value, str):
+            try:
+                # 정수로 변환 가능한지 확인
+                if "." not in value and value.isdigit():
+                    return int(value)
+                else:
+                    return float(value)
+            except (ValueError, TypeError):
+                return 0
+
+        # 기타 타입은 0으로 처리
+        return 0
 
     def _check_secret_data(self, secret_data: dict):
         """시크릿 데이터 검증"""

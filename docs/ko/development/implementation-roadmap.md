@@ -303,7 +303,23 @@ def get_data_source_type(options: dict) -> str:
 3. ✅ 캐싱 최적화 (완료)
 4. 모니터링 기능
 
-### ✅ 최근 완료 (v2.1)
+### ✅ 최근 완료 (v2.2)
+1. ✅ **PricingConnector 신규 추가**: Google Cloud Pricing Data Export 완전 지원
+   - cloud_pricing_export 테이블 직접 조회 기능
+   - 실제 청구 데이터와 정가 비교 분석 (compare_billing_vs_pricing)
+   - 서비스별 가격 정보 요약 (get_service_pricing_summary)
+   - 계층별 요금제(tiered_rates) 정확한 파싱 및 처리
+   - 숫자 타입 원본 보존으로 정밀한 가격 계산
+2. ✅ **CostManager 비용 옵션 확장**: 
+   - AmortizedCost 메트릭 지원 (credits_amount 기반)
+   - 향상된 select_cost 옵션 (list_price, after_credits, net_cost)
+   - cost_metric 옵션으로 다양한 비용 계산 방식 지원
+3. ✅ **FieldMapper Pricing 지원 강화**:
+   - Pricing 관련 필드 매핑 추가 (service_id, sku_id, list_price 등)
+   - 할인율 및 가격 계층 정보 매핑
+   - 리소스 식별 필드 지원 (resource_name, resource_global_name)
+
+### ✅ 이전 완료 (v2.1)
 1. ✅ **SpaceONE Job 스키마 준수**: start 필드 길이 자동 제한 (7자)
 2. ✅ **ValidationError 방지**: ERROR_DB_QUERY 오류 완전 해결
 3. ✅ **하위 호환성**: 기존 BigQuery/HTTP 파일 기능 보존

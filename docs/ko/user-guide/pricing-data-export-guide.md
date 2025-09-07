@@ -225,52 +225,58 @@ WHERE DATE(_PARTITIONTIME) = "2024-01-15"
 ORDER BY current_cost DESC;
 ```
 
-## ⚠️ 현재 플러그인 구현 상태 분석
+## ✅ 현재 플러그인 구현 상태
 
-### 지원되지 않는 기능
+### 완전 지원되는 기능 (v2.2)
 
-현재 SpaceONE 플러그인은 **Pricing Data Export를 지원하지 않습니다**. 다음과 같은 제한사항이 있습니다:
+현재 SpaceONE 플러그인은 **Pricing Data Export를 완전히 지원합니다**:
 
-1. **테이블 지원 부재**: `cloud_pricing_export` 테이블 처리 로직 없음
-2. **가격 분석 기능 없음**: 정가 vs 실제 비용 비교 기능 부재
-3. **할인율 계산 없음**: 자동 할인율 분석 기능 부재
+1. **✅ PricingConnector 구현 완료**: `cloud_pricing_export` 테이블 완전 지원
+2. **✅ 가격 분석 기능**: 정가 vs 실제 비용 비교 분석 (`compare_billing_vs_pricing`)
+3. **✅ 할인율 계산**: 자동 할인율 분석 및 계산 기능
+4. **✅ 서비스별 가격 요약**: `get_service_pricing_summary` 기능
+5. **✅ 계층별 요금제 처리**: tiered_rates 정확한 파싱 및 분석
+6. **✅ 숫자 정밀도 보장**: Decimal 타입 기반 정확한 가격 계산
 
-### 구현 권장사항
+### 구현된 주요 기능
 
-#### 1. Pricing Data 커넥터 추가
+#### 1. PricingConnector 클래스
 ```python
-# src/plugin/connector/pricing_connector.py (신규)
+# src/plugin/connector/pricing_connector.py ✅ 구현 완료
 class PricingConnector(BaseConnector):
-    def get_pricing_data(self, service_id: str, sku_id: str) -> dict:
+    def get_pricing_data(self, service_id: str, sku_id: str, date: str) -> Generator[Dict, None, None]:
         """특정 서비스/SKU의 가격 정보 조회"""
-        pass
     
-    def compare_pricing_vs_billing(self, billing_data: dict) -> dict:
-        """실제 비용과 정가 비교 분석"""
-        pass
+    def compare_billing_vs_pricing(self, billing_data: dict, pricing_date: str) -> dict:
+        """실제 비용과 정가 비교 분석 - 할인율 자동 계산"""
+    
+    def get_service_pricing_summary(self, date: str) -> Dict[str, List[Dict]]:
+        """서비스별 가격 정보 요약"""
+    
+    def list_pricing_tables(self) -> List[Dict]:
+        """Pricing Export 테이블 목록 조회"""
 ```
 
-#### 2. 가격 분석 매니저 추가
-```python
-# src/plugin/manager/pricing_manager.py (신규)
-class PricingManager(BaseManager):
-    def analyze_discount_rates(self) -> dict:
-        """할인율 분석"""
-        pass
-    
-    def forecast_costs(self, usage_scenarios: list) -> dict:
-        """사용량 시나리오별 비용 예측"""
-        pass
-```
-
-#### 3. 설정 옵션 확장
+#### 2. 설정 옵션 지원
 ```yaml
-# register_datasource.yaml 확장
+# register_datasource.yaml에서 지원되는 옵션
 options:
-  # 기존 설정...
-  enable_pricing_analysis: true          # 가격 분석 활성화
-  pricing_export_project_id: "project"   # Pricing Export 프로젝트
-  pricing_dataset_id: "pricing_export"   # Pricing Export 데이터셋
+  pricing_export_project_id: "your-project"     # Pricing Export 프로젝트 ID
+  pricing_dataset_id: "pricing_export"          # Pricing Export 데이터셋 ID
+  # 기존 BigQuery 설정과 동일한 인증 정보 사용
+```
+
+#### 3. 비교 분석 결과 예시
+```json
+{
+  "comparison_available": true,
+  "actual_cost": 150.75,
+  "list_price_total": 200.00,
+  "discount_amount": 49.25,
+  "discount_rate_percent": 24.63,
+  "usage_amount": 1000.0,
+  "list_price_per_unit": 0.20
+}
 ```
 
 ## 🔗 관련 리소스

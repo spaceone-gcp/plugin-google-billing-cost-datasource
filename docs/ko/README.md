@@ -24,6 +24,7 @@ SpaceONE용 Google Cloud Billing 데이터 수집 플러그인 문서입니다.
 - **[Field Mapper 개발 가이드](./development/field-mapper-guide.md)** - Field Mapper 구현 방법
 - **[register_datasource.yaml 분석 보고서](./development/register-datasource-analysis.md)** - 설정 파일 상세 분석 ⭐ **NEW**
 - **[보안 모범 사례](./development/security-best-practices.md)** - 보안 설정 및 운영 가이드 ⭐ **NEW**
+- **[문서 자동 업데이트 프로세스](./development/documentation-update-process.md)** - 코드 변경 시 문서 자동 업데이트 가이드 ⭐ **NEW**
 
 ### 기술 명세서
 - **[아키텍처 설계](./technical/architecture.md)** - 전체 시스템 아키텍처
@@ -49,10 +50,13 @@ SpaceONE용 Google Cloud Billing 데이터 수집 플러그인 문서입니다.
 - ✅ **HTTP 파일**: GCS 파일 직접 처리 (프로덕션 준비 완료)
   - 스트리밍 처리로 대용량 파일 지원
   - 자동 압축 해제 및 형식 감지
-- ✅ **Pricing Data Export**: 가격 정보 분석 (완전 구현됨) ⭐ **NEW**
-  - 실제 비용 vs 정가 비교
-  - 할인율 자동 계산
-  - 서비스별 가격 분석
+- ✅ **Pricing Data Export**: 가격 정보 분석 (✅ v2.2 완전 구현됨) ⭐ **NEW**
+  - cloud_pricing_export 테이블 직접 조회
+  - 실제 비용 vs 정가 비교 분석 (compare_billing_vs_pricing)
+  - 할인율 자동 계산 및 상세 분석
+  - 서비스별 가격 정보 요약 (get_service_pricing_summary)
+  - 계층별 요금제(tiered_rates) 정확한 처리
+  - Decimal 기반 정밀한 가격 계산
 
 ### 파일 형식 지원
 - **파일 형식**: CSV, JSON, Parquet
@@ -63,7 +67,7 @@ SpaceONE용 Google Cloud Billing 데이터 수집 플러그인 문서입니다.
 - ✅ **이중 데이터 소스**: BigQuery + HTTP 파일 동시 지원
 - ✅ **유연한 Field Mapper**: 커스터마이징 가능한 필드 매핑
 - ✅ **크레딧 및 할인 분석**: 상세한 비용 최적화 분석
-- ✅ **AmortizedCost 지원**: 크레딧 절대값 기반 비용 분석 ⭐ **NEW**
+- ✅ **AmortizedCost 지원**: 크레딧 절대값 기반 비용 분석 (✅ v2.2 확장됨) ⭐ **NEW**
 - ✅ **라벨/태그 기반 추적**: 프로젝트/리소스별 비용 추적
 - ✅ **보안 강화**: 환경변수 기반 설정 및 자동 검증 도구 ⭐ **NEW**
 - ✅ **가격 분석**: 실제 비용 vs 정가 비교 및 할인율 계산 ⭐ **NEW**

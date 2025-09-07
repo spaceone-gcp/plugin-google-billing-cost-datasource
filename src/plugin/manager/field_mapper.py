@@ -44,10 +44,11 @@ class FieldMapper:
         try:
             # select_cost 옵션에 따라 비용 필드 결정
             cost_value = self._get_cost_by_option(source_data)
+            usage_quantity_value = self._map_field("usage_quantity", source_data, 0)
 
             mapped_data = {
                 "cost": cost_value,
-                "usage_quantity": self._map_field("usage_quantity", source_data, 0.0),
+                "usage_quantity": usage_quantity_value,
                 "usage_unit": self._map_field("usage_unit", source_data, ""),
                 "provider": self.provider,
                 "region_code": self._map_field("region_code", source_data, "global"),
@@ -59,15 +60,11 @@ class FieldMapper:
                 "additional_info": self._map_field("additional_info", source_data, {}),
             }
 
-            # 비용 데이터는 Decimal로 변환하여 정확성 보장
-            mapped_data["cost"] = self._ensure_decimal(mapped_data["cost"])
-            mapped_data["usage_quantity"] = self._ensure_decimal(
+            # 연산이 필요한 경우에만 Decimal로 변환하여 정확성 보장 후 원본 타입으로 복원
+            mapped_data["cost"] = self._process_numeric_field(mapped_data["cost"])
+            mapped_data["usage_quantity"] = self._process_numeric_field(
                 mapped_data["usage_quantity"]
             )
-
-            # JSON 직렬화를 위해 Decimal을 float로 변환
-            mapped_data["cost"] = float(mapped_data["cost"])
-            mapped_data["usage_quantity"] = float(mapped_data["usage_quantity"])
 
             return mapped_data
 
@@ -75,18 +72,18 @@ class FieldMapper:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
             raise ERROR_INVALID_ARGUMENT(key=f"field_mapping_error: {str(e)}")
 
-    def _get_cost_by_option(self, source_data: dict) -> float:
+    def _get_cost_by_option(self, source_data: dict):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
 
         Args:
             source_data: 원본 데이터
 
         Returns:
-            선택된 비용 값
+            선택된 비용 값 (원본 타입 유지)
         """
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric == "AmortizedCost":
-            cost_value = self._map_field("credits_amount", source_data, 0.0)
+            cost_value = self._map_field("credits_amount", source_data, 0)
             # _LOGGER.debug(f"[FieldMapper] Using AmortizedCost (credits_amount): {cost_value}")
             return cost_value
 
@@ -94,25 +91,25 @@ class FieldMapper:
         if self.select_cost == "list_price":
             # 정가 관련 필드들을 시도
             cost_value = (
-                self._map_field("cost_at_list", source_data, 0.0)
-                or self._map_field("list_price", source_data, 0.0)
-                or self._map_field("list_price_total", source_data, 0.0)
+                self._map_field("cost_at_list", source_data, 0)
+                or self._map_field("list_price", source_data, 0)
+                or self._map_field("list_price_total", source_data, 0)
             )
             # _LOGGER.debug(f"[FieldMapper] Using list_price: {cost_value}")
             return cost_value
         elif self.select_cost == "after_credits":
             # 크레딧 적용 후 비용
-            cost_value = self._map_field("cost_after_credits", source_data, 0.0)
+            cost_value = self._map_field("cost_after_credits", source_data, 0)
             # _LOGGER.debug(f"[FieldMapper] Using after_credits: {cost_value}")
             return cost_value
         elif self.select_cost == "net_cost":
             # 순 비용 (기본 cost와 동일)
-            cost_value = self._map_field("cost", source_data, 0.0)
+            cost_value = self._map_field("cost", source_data, 0)
             # _LOGGER.debug(f"[FieldMapper] Using net_cost: {cost_value}")
             return cost_value
         else:
             # 기본값: cost
-            cost_value = self._map_field("cost", source_data, 0.0)
+            cost_value = self._map_field("cost", source_data, 0)
             # _LOGGER.debug(f"[FieldMapper] Using default cost: {cost_value}")
             return cost_value
 
@@ -190,6 +187,31 @@ class FieldMapper:
                 # 상수 값: {"constant": "fixed_value"}
                 constant_value = mapping_rule["constant"]
                 return lambda data, const=constant_value: const
+
+            else:
+                # 딕셔너리 형태의 복합 매핑: {"field1": "source1", "field2": "source2"}
+                # additional_info와 같은 복합 필드에 사용
+                def map_dict_fields(data, rules=mapping_rule):
+                    result = {}
+                    for target_field, source_config in rules.items():
+                        if isinstance(source_config, str):
+                            # 단순 필드 매핑
+                            result[target_field] = data.get(source_config, "")
+                        elif (
+                            isinstance(source_config, dict) and "field" in source_config
+                        ):
+                            # 변환이 포함된 필드 매핑
+                            field_name = source_config["field"]
+                            transform = source_config.get("transform")
+                            value = data.get(field_name, "")
+                            result[target_field] = self._apply_transform(
+                                value, transform
+                            )
+                        else:
+                            result[target_field] = ""
+                    return result
+
+                return map_dict_fields
 
         elif callable(mapping_rule):
             # 함수 매핑
@@ -282,8 +304,48 @@ class FieldMapper:
             return data[expression]
         return ""
 
+    def _process_numeric_field(self, value: Any) -> Any:
+        """숫자 필드를 처리하여 연산 시에만 Decimal 사용하고 원본 타입으로 반환
+
+        Args:
+            value: 처리할 숫자 값
+
+        Returns:
+            원본 데이터 타입을 유지한 숫자 값
+        """
+        if value is None:
+            return 0
+
+        # 원본 타입 저장
+        original_type = type(value)
+
+        try:
+            # 연산을 위해 Decimal로 변환
+            decimal_value = self._ensure_decimal(value)
+
+            # 원본 타입에 따라 적절한 타입으로 변환하여 반환
+            if original_type is int:
+                return int(decimal_value)
+            elif original_type is float:
+                return float(decimal_value)
+            elif isinstance(value, str):
+                # 문자열인 경우 숫자로 변환 가능하면 float, 아니면 0
+                try:
+                    return float(decimal_value)
+                except (ValueError, TypeError, ArithmeticError):
+                    return 0
+            else:
+                # 기본적으로 float 반환
+                return float(decimal_value)
+
+        except Exception as e:
+            _LOGGER.warning(
+                f"[FieldMapper] Failed to process numeric field: {value}, error: {e}"
+            )
+            return 0
+
     def _ensure_decimal(self, value: Any) -> Decimal:
-        """값을 Decimal 타입으로 변환"""
+        """값을 Decimal 타입으로 변환 (내부 연산용)"""
         if value is None:
             return Decimal("0")
 
@@ -381,6 +443,10 @@ class FieldMapper:
                     "pricing_tier": "pricing_tier",
                     "service_id": "service_id",
                     "sku_id": "sku_id",
+                    # 🆕 신규: 추가 Pricing 필드들
+                    "effective_discount_percentage": "effective_discount_percentage",
+                    "tier_usage_amount": "tier_usage_amount",
+                    "tier_pricing_unit": "tier_pricing_unit",
                 },
             }
 
