@@ -46,6 +46,13 @@ class FieldMapper:
             cost_value = self._get_cost_by_option(source_data)
             usage_quantity_value = self._map_field("usage_quantity", source_data, 0)
 
+            # billed_date 필드는 반드시 문자열로 변환
+            billed_date_value = self._map_field("billed_date", source_data, "")
+            if not isinstance(billed_date_value, str):
+                billed_date_value = (
+                    str(billed_date_value) if billed_date_value is not None else ""
+                )
+
             mapped_data = {
                 "cost": cost_value,
                 "usage_quantity": usage_quantity_value,
@@ -55,7 +62,7 @@ class FieldMapper:
                 "product": self._map_field("product", source_data, ""),
                 "usage_type": self._map_field("usage_type", source_data, ""),
                 "resource": self._map_field("resource", source_data, ""),
-                "billed_date": self._map_field("billed_date", source_data, ""),
+                "billed_date": billed_date_value,
                 "tags": self._map_tags_field(source_data),
                 "additional_info": self._map_field("additional_info", source_data, {}),
             }
@@ -398,15 +405,26 @@ class FieldMapper:
             if isinstance(value, datetime):
                 return value.strftime("%Y-%m-%d")
             elif isinstance(value, str):
+                # 이미 올바른 형식인지 확인
+                if len(value) == 10 and value.count("-") == 2:
+                    try:
+                        # YYYY-MM-DD 형식 검증
+                        datetime.strptime(value, "%Y-%m-%d")
+                        return value
+                    except ValueError:
+                        pass
+
                 # 다양한 날짜 형식 파싱 시도
                 date_formats = [
                     "%Y-%m-%d",
                     "%Y-%m-%d %H:%M:%S",
                     "%Y-%m-%dT%H:%M:%S",
+                    "%Y-%m-%dT%H:%M:%S.%fZ",  # ISO 8601 with microseconds
                     "%Y-%m-%d %H:%M:%S UTC",  # Google Cloud usage_start_time 형식
                     "%Y-%m-%d %H:%M:%S.%f UTC",  # Google Cloud export_time 형식
                     "%Y/%m/%d",
                     "%m/%d/%Y",
+                    "%d/%m/%Y",
                 ]
 
                 for fmt in date_formats:
@@ -416,14 +434,16 @@ class FieldMapper:
                     except ValueError:
                         continue
 
-                # 파싱 실패 시 원본 반환
+                # 파싱 실패 시 원본을 문자열로 변환하여 반환
                 return str(value)
             else:
-                return str(value)
+                # 기타 타입은 문자열로 변환하여 반환
+                return str(value) if value is not None else ""
 
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Date format failed: {value}, error: {e}")
-            return str(value)
+            # 예외 발생 시에도 반드시 문자열 반환
+            return str(value) if value is not None else ""
 
     def _get_default_mapping(self, provider: str) -> dict:
         """프로바이더별 기본 매핑 반환"""

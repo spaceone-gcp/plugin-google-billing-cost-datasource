@@ -121,6 +121,60 @@ class HttpFileConnector(BaseConnector):
                 file_path=f"{bucket_name}/{pattern or '*'}"
             )
 
+    def list_files_by_path(
+        self,
+        bucket_name: str,
+        project_id: str,
+        year: str,
+        month: str,
+        limit: int = None,
+    ) -> List[Dict]:
+        """특정 경로(project_id/year/month/)에서 파일 목록 직접 조회"""
+        try:
+            # 경로 구성: project_id/year/month/
+            path_prefix = f"{project_id}/{year}/{month}/"
+
+            _LOGGER.info(
+                f"[HttpFileConnector] Listing files in direct path: {bucket_name}/{path_prefix}"
+            )
+
+            bucket = self.gcs_client.bucket(bucket_name)
+            blobs = bucket.list_blobs(prefix=path_prefix)
+
+            files = []
+            count = 0
+            total_scanned = 0
+
+            for blob in blobs:
+                total_scanned += 1
+                # 폴더가 아닌 실제 파일만 처리 (경로가 /로 끝나지 않는 경우)
+                if not blob.name.endswith("/") and self._is_supported_file(blob.name):
+                    files.append(
+                        {
+                            "name": blob.name,
+                            "size": blob.size,
+                            "updated": blob.updated,
+                            "content_type": blob.content_type,
+                            "bucket": bucket_name,
+                        }
+                    )
+                    count += 1
+
+                    # limit이 지정된 경우 해당 수만큼만 반환
+                    if limit and count >= limit:
+                        break
+
+            _LOGGER.info(
+                f"[HttpFileConnector] Found {len(files)} supported files out of {total_scanned} total items in path: {bucket_name}/{path_prefix}"
+            )
+            return files
+
+        except Exception as e:
+            _LOGGER.error(f"[HttpFileConnector] Failed to list files by path: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(
+                file_path=f"{bucket_name}/{project_id}/{year}/{month}/"
+            )
+
     def download_file_stream(self, bucket_name: str, file_path: str) -> IO:
         """파일을 스트림으로 다운로드"""
         try:

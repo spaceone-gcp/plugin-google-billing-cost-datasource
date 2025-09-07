@@ -255,35 +255,55 @@ class JobManager(BaseManager):
             elif "bucket_name" in options:
                 # 버킷에서 파일 목록 자동 생성
                 bucket_name = options["bucket_name"]
-                file_pattern = options.get("file_pattern")
+                project_id = options.get("project_id")
 
-                # 모든 파일 목록 가져오기
-                files = self.http_file_connector.list_files(bucket_name, file_pattern)
-
-                # start 파라미터 기반 파일 필터링
-                _LOGGER.info(
-                    f"[_get_http_file_tasks] Before filtering: {len(files)} files, start parameter: {start}"
-                )
-                if start:
+                # start 파라미터가 있고 project_id가 지정된 경우 직접 경로 접근 사용
+                if start and project_id:
                     validated_start = self._validate_and_fix_date_range(start)
+                    year, month = validated_start.split("-")
+
                     _LOGGER.info(
-                        f"[_get_http_file_tasks] Validated start date: {validated_start}"
+                        f"[_get_http_file_tasks] Using direct path access: {project_id}/{year}/{month}/"
                     )
-                    # 날짜 및 프로젝트 ID 기반 필터링
-                    project_id = options.get("project_id")
-                    files = self._filter_files_by_date(
-                        files, validated_start, project_id
+
+                    # 직접 경로로 파일 목록 조회
+                    files = self.http_file_connector.list_files_by_path(
+                        bucket_name, project_id, year, month
                     )
-                    filter_info = f"date: {validated_start}"
-                    if project_id:
-                        filter_info += f", project_id: {project_id}"
+
                     _LOGGER.info(
-                        f"[_get_http_file_tasks] After filtering: {len(files)} files for {filter_info}"
+                        f"[_get_http_file_tasks] Found {len(files)} files in direct path: {project_id}/{year}/{month}/"
                     )
                 else:
-                    _LOGGER.info(
-                        "[_get_http_file_tasks] No start parameter provided, using all files"
+                    # 기존 방식: 전체 파일 목록 조회 후 필터링
+                    file_pattern = options.get("file_pattern")
+                    files = self.http_file_connector.list_files(
+                        bucket_name, file_pattern
                     )
+
+                    # start 파라미터 기반 파일 필터링
+                    _LOGGER.info(
+                        f"[_get_http_file_tasks] Before filtering: {len(files)} files, start parameter: {start}"
+                    )
+                    if start:
+                        validated_start = self._validate_and_fix_date_range(start)
+                        _LOGGER.info(
+                            f"[_get_http_file_tasks] Validated start date: {validated_start}"
+                        )
+                        # 날짜 및 프로젝트 ID 기반 필터링
+                        files = self._filter_files_by_date(
+                            files, validated_start, project_id
+                        )
+                        filter_info = f"date: {validated_start}"
+                        if project_id:
+                            filter_info += f", project_id: {project_id}"
+                        _LOGGER.info(
+                            f"[_get_http_file_tasks] After filtering: {len(files)} files for {filter_info}"
+                        )
+                    else:
+                        _LOGGER.info(
+                            "[_get_http_file_tasks] No start parameter provided, using all files"
+                        )
 
                 for file_info in files:
                     task_options = {
@@ -434,6 +454,9 @@ class JobManager(BaseManager):
     ) -> List[Dict]:
         """start_date와 project_id를 기반으로 파일 목록 필터링
 
+        Note: 이 함수는 레거시 호환성을 위해 유지됩니다.
+        새로운 구현에서는 list_files_by_path()를 통한 직접 경로 접근을 권장합니다.
+
         Args:
             files: 파일 목록 (각 파일은 'name' 키를 가진 딕셔너리)
             start_date: YYYY-MM 형식의 시작 날짜
@@ -445,29 +468,42 @@ class JobManager(BaseManager):
         try:
             # YYYY-MM 형식에서 년도와 월 추출
             year, month = start_date.split("-")
-            year_month_pattern = f"{year}/{month.zfill(2)}"
+            target_year = year
+            target_month = month.zfill(2)  # 01, 02, ... 형식으로 변환
 
             filtered_files = []
 
             for file_info in files:
                 file_path = file_info.get("name", "")
 
-                # 날짜 필터링: 파일 경로에서 연/월 패턴 확인
-                # 예: aramco/2025/09/billing_data_202509-000000000000.parquet
-                # 예: mkkang-project/2025/09/billing_data_202509-000000000001.parquet
-                date_match = year_month_pattern in file_path
+                # 파일 경로 구조 분석: project_id/year/month/filename
+                # 예: mkkang-project/2025/09/billing_data_202509-000000000002.parquet
+                path_parts = file_path.split("/")
 
-                # 프로젝트 ID 필터링 (선택사항)
+                if (
+                    len(path_parts) < 4
+                ):  # 최소 4개 부분이 필요 (project/year/month/file)
+                    _LOGGER.debug(
+                        f"[_filter_files_by_date] ❌ Invalid path structure: {file_path}"
+                    )
+                    continue
+
+                file_project_id = path_parts[0]
+                file_year = path_parts[1]
+                file_month = path_parts[2]
+
+                # 날짜 매칭 검증
+                date_match = file_year == target_year and file_month == target_month
+
+                # 프로젝트 ID 매칭 검증 (선택사항)
                 project_match = True  # 기본값: 프로젝트 필터링 없음
                 if project_id:
-                    # 파일 경로에서 프로젝트 ID 패턴 확인
-                    # 파일 경로 형식: {project_id}/{year}/{month}/billing_data_...
-                    project_match = file_path.startswith(f"{project_id}/")
+                    project_match = file_project_id == project_id
 
                 # 날짜와 프로젝트 ID 모두 매치되는 경우만 포함
                 if date_match and project_match:
                     filtered_files.append(file_info)
-                    filter_reason = f"date={year_month_pattern}"
+                    filter_reason = f"date={target_year}/{target_month}"
                     if project_id:
                         filter_reason += f", project_id={project_id}"
                     _LOGGER.info(
@@ -477,11 +513,13 @@ class JobManager(BaseManager):
                     skip_reason = []
                     if not date_match:
                         skip_reason.append(
-                            f"date mismatch (expected: {year_month_pattern})"
+                            f"date mismatch (file: {file_year}/{file_month}, expected: {target_year}/{target_month})"
                         )
                     if not project_match:
-                        skip_reason.append(f"project mismatch (expected: {project_id})")
-                    _LOGGER.info(
+                        skip_reason.append(
+                            f"project mismatch (file: {file_project_id}, expected: {project_id})"
+                        )
+                    _LOGGER.debug(
                         f"[_filter_files_by_date] ❌ Skipped file: {file_path} ({', '.join(skip_reason)})"
                     )
 
@@ -534,8 +572,9 @@ class JobManager(BaseManager):
             start_year, start_month = map(int, start_date.split("-"))
             start_datetime = datetime(start_year, start_month, 1)
 
-            # 미래 날짜 검증
-            if start_datetime > current_date:
+            # 미래 날짜 검증 (월 단위로 비교)
+            current_month_start = datetime(current_date.year, current_date.month, 1)
+            if start_datetime > current_month_start:
                 _LOGGER.warning(
                     f"[_validate_and_fix_date_range] Future date detected: {start_date}, "
                     f"adjusting to current month: {current_year_month}"
