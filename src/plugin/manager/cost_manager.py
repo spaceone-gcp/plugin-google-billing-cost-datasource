@@ -678,8 +678,11 @@ class CostManager(BaseManager):
             _LOGGER.info(f"Using standard usage table: {self.billing_table}")
 
     def _create_google_sql(self, start):
+        # 날짜 범위 검증 및 안전한 처리
+        validated_start = self._validate_and_fix_date_range(start)
+
         where_condition = f"""
-        WHERE usage_start_time >= TIMESTAMP('{start}-01')
+        WHERE usage_start_time >= TIMESTAMP('{validated_start}-01')
         """
         if self.target_project_id != "*":
             where_condition += f" AND project.id = '{self.target_project_id}'"
@@ -735,8 +738,11 @@ class CostManager(BaseManager):
         return query
 
     def _create_linked_accounts_google_sql(self, start):
+        # 날짜 범위 검증 및 안전한 처리
+        validated_start = self._validate_and_fix_date_range(start)
+
         where_condition = f"""
-        WHERE usage_start_time >= TIMESTAMP('{start}-01')
+        WHERE usage_start_time >= TIMESTAMP('{validated_start}-01')
         """
 
         query = f"""
@@ -762,6 +768,59 @@ class CostManager(BaseManager):
         )
 
         return start_time.strftime("%Y-%m")
+
+    @staticmethod
+    def _validate_and_fix_date_range(start_date: str) -> str:
+        """날짜 범위 검증 및 미래 날짜 보정
+
+        Args:
+            start_date: YYYY-MM 형식의 시작 날짜
+
+        Returns:
+            str: 검증된 시작 날짜 (미래 날짜인 경우 현재 날짜로 보정)
+        """
+        try:
+            # 현재 날짜
+            current_date = datetime.now()
+            current_year_month = current_date.strftime("%Y-%m")
+
+            # 입력 날짜 파싱
+            if not start_date or len(start_date) != 7:  # YYYY-MM 형식 검증
+                _LOGGER.warning(
+                    f"[_validate_and_fix_date_range] Invalid date format: {start_date}, using current month"
+                )
+                return current_year_month
+
+            start_year, start_month = map(int, start_date.split("-"))
+            start_datetime = datetime(start_year, start_month, 1)
+
+            # 미래 날짜 검증
+            if start_datetime > current_date:
+                _LOGGER.warning(
+                    f"[_validate_and_fix_date_range] Future date detected: {start_date}, "
+                    f"adjusting to current month: {current_year_month}"
+                )
+                return current_year_month
+
+            # 너무 과거 날짜 검증 (5년 이전)
+            five_years_ago = current_date - timedelta(days=365 * 5)
+            if start_datetime < five_years_ago:
+                safe_start = five_years_ago.strftime("%Y-%m")
+                _LOGGER.warning(
+                    f"[_validate_and_fix_date_range] Date too far in past: {start_date}, "
+                    f"adjusting to: {safe_start}"
+                )
+                return safe_start
+
+            _LOGGER.debug(
+                f"[_validate_and_fix_date_range] Valid date range: {start_date}"
+            )
+            return start_date
+
+        except Exception as e:
+            _LOGGER.error(f"[_validate_and_fix_date_range] Date validation failed: {e}")
+            # 오류 시 안전한 기본값 반환 (현재 월)
+            return datetime.now().strftime("%Y-%m")
 
     def _get_data_source_type(self, options: dict, task_options: dict) -> str:
         """데이터 소스 타입 결정"""

@@ -42,10 +42,10 @@ class DataSourceManager(BaseManager):
         options: dict, secret_data: dict, domain_id: str, schema: str = None
     ) -> None:
         """플러그인 검증 - 데이터 소스 타입에 따라 적절한 커넥터로 검증"""
-        data_source_type = options.get("data_source_type", "http_file")
+        source = options.get("source", "gcs")
 
         # 데이터 소스 타입 자동 감지
-        if not data_source_type or data_source_type not in ["bigquery", "http_file"]:
+        if not source or source not in ["bigquery", "gcs"]:
             # BigQuery 필수 파라미터가 있으면 BigQuery로 판단
             bigquery_required = [
                 "billing_export_project_id",
@@ -53,19 +53,19 @@ class DataSourceManager(BaseManager):
                 "billing_account_id",
             ]
             if all(key in options for key in bigquery_required):
-                data_source_type = "bigquery"
+                source = "bigquery"
             else:
-                data_source_type = "http_file"
+                source = "gcs"
 
-        _LOGGER.info(f"[verify_plugin] Detected data_source_type: {data_source_type}")
+        _LOGGER.info(f"[verify_plugin] Detected source: {source}")
 
-        if data_source_type == "bigquery":
+        if source == "bigquery":
             # BigQuery 검증
             bigquery_connector = BigqueryConnector()
             bigquery_connector.create_session(options, secret_data, schema)
             _LOGGER.info("[verify_plugin] BigQuery connection verified successfully")
         else:
-            # HTTP File/GCS 검증
+            # GCS 검증
             from ..connector.http_file_connector import HttpFileConnector
 
             http_connector = HttpFileConnector()
