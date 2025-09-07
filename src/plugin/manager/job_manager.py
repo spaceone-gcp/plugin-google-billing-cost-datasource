@@ -269,13 +269,16 @@ class JobManager(BaseManager):
                     _LOGGER.info(
                         f"[_get_http_file_tasks] Validated start date: {validated_start}"
                     )
-                    # project_id 기반 필터링 추가
-                    project_id = secret_data.get("project_id") if secret_data else None
-                    files = self._filter_files_by_date_and_project(
+                    # 날짜 및 프로젝트 ID 기반 필터링
+                    project_id = options.get("project_id")
+                    files = self._filter_files_by_date(
                         files, validated_start, project_id
                     )
+                    filter_info = f"date: {validated_start}"
+                    if project_id:
+                        filter_info += f", project_id: {project_id}"
                     _LOGGER.info(
-                        f"[_get_http_file_tasks] After filtering: {len(files)} files for date: {validated_start}, project: {project_id}"
+                        f"[_get_http_file_tasks] After filtering: {len(files)} files for {filter_info}"
                     )
                 else:
                     _LOGGER.info(
@@ -426,12 +429,15 @@ class JobManager(BaseManager):
                 raise ERROR_INVALID_PARAMETER(key="options.bucket_name")
 
     @staticmethod
-    def _filter_files_by_date(files: List[Dict], start_date: str) -> List[Dict]:
-        """start_date를 기반으로 파일 목록 필터링
+    def _filter_files_by_date(
+        files: List[Dict], start_date: str, project_id: str = None
+    ) -> List[Dict]:
+        """start_date와 project_id를 기반으로 파일 목록 필터링
 
         Args:
             files: 파일 목록 (각 파일은 'name' 키를 가진 딕셔너리)
             start_date: YYYY-MM 형식의 시작 날짜
+            project_id: 필터링할 프로젝트 ID (선택사항)
 
         Returns:
             List[Dict]: 필터링된 파일 목록
@@ -446,21 +452,44 @@ class JobManager(BaseManager):
             for file_info in files:
                 file_path = file_info.get("name", "")
 
-                # 파일 경로에서 연/월 패턴 확인
+                # 날짜 필터링: 파일 경로에서 연/월 패턴 확인
                 # 예: aramco/2025/09/billing_data_202509-000000000000.parquet
                 # 예: mkkang-project/2025/09/billing_data_202509-000000000001.parquet
-                if year_month_pattern in file_path:
+                date_match = year_month_pattern in file_path
+
+                # 프로젝트 ID 필터링 (선택사항)
+                project_match = True  # 기본값: 프로젝트 필터링 없음
+                if project_id:
+                    # 파일 경로에서 프로젝트 ID 패턴 확인
+                    # 파일 경로 형식: {project_id}/{year}/{month}/billing_data_...
+                    project_match = file_path.startswith(f"{project_id}/")
+
+                # 날짜와 프로젝트 ID 모두 매치되는 경우만 포함
+                if date_match and project_match:
                     filtered_files.append(file_info)
+                    filter_reason = f"date={year_month_pattern}"
+                    if project_id:
+                        filter_reason += f", project_id={project_id}"
                     _LOGGER.info(
-                        f"[_filter_files_by_date] ✅ Matched file: {file_path}"
+                        f"[_filter_files_by_date] ✅ Matched file: {file_path} ({filter_reason})"
                     )
                 else:
+                    skip_reason = []
+                    if not date_match:
+                        skip_reason.append(
+                            f"date mismatch (expected: {year_month_pattern})"
+                        )
+                    if not project_match:
+                        skip_reason.append(f"project mismatch (expected: {project_id})")
                     _LOGGER.info(
-                        f"[_filter_files_by_date] ❌ Skipped file: {file_path}"
+                        f"[_filter_files_by_date] ❌ Skipped file: {file_path} ({', '.join(skip_reason)})"
                     )
 
+            filter_summary = f"date={start_date}"
+            if project_id:
+                filter_summary += f", project_id={project_id}"
             _LOGGER.info(
-                f"[_filter_files_by_date] Filtered {len(filtered_files)}/{len(files)} files for {start_date}"
+                f"[_filter_files_by_date] Filtered {len(filtered_files)}/{len(files)} files for {filter_summary}"
             )
             return filtered_files
 
