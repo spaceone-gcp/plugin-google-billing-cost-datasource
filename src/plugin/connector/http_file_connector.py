@@ -25,50 +25,117 @@ class HttpFileConnector(BaseConnector):
         self.gcs_client = None
         self.credentials = None
         self.project_id = None
+        _LOGGER.debug(
+            f"[HttpFileConnector] Initialized new HttpFileConnector instance - "
+            f"Args: {args}, Kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
+        )
 
     def create_session(self, options: dict, secret_data: dict, schema: str):
         """GCS 클라이언트 세션 생성 (캐시된 세션 재사용 지원)"""
+        _LOGGER.info(
+            f"[HttpFileConnector] Starting session creation process for schema: {schema}"
+        )
+        _LOGGER.debug(
+            f"[HttpFileConnector] Session creation options: {options}"
+        )
+        
         if not secret_data:
+            _LOGGER.error("[HttpFileConnector] Session creation failed: secret_data is empty or None")
             raise ERROR_REQUIRED_PARAMETER(key="secret_data")
 
-        self._check_secret_data(secret_data)
+        _LOGGER.debug("[HttpFileConnector] Validating secret_data structure")
+        try:
+            self._check_secret_data(secret_data)
+            _LOGGER.debug("[HttpFileConnector] Secret data validation successful")
+        except Exception as e:
+            _LOGGER.error(f"[HttpFileConnector] Secret data validation failed: {e}")
+            raise
+
         self.project_id = secret_data["project_id"]
         bucket_name = options.get("bucket_name", "")
+        
+        _LOGGER.info(
+            f"[HttpFileConnector] Session parameters - Project ID: {self.project_id}, Bucket: {bucket_name or 'Not specified'}"
+        )
 
         # 캐시된 세션 확인
+        _LOGGER.debug(
+            f"[HttpFileConnector] Checking for cached session - Project: {self.project_id}, Bucket: {bucket_name}"
+        )
         cached_session = concurrency_manager.get_cached_session(
             self.project_id, bucket_name
         )
         if cached_session:
             self.credentials = cached_session["credentials"]
             self.gcs_client = cached_session["gcs_client"]
+            _LOGGER.info(
+                f"[HttpFileConnector] Successfully reused cached GCS session for project: {self.project_id}"
+            )
             _LOGGER.debug(
-                f"[HttpFileConnector] Reusing cached GCS session for project: {self.project_id}"
+                f"[HttpFileConnector] Cached session details - Credentials type: {type(self.credentials).__name__}, "
+                f"GCS client project: {getattr(self.gcs_client, 'project', 'Unknown')}"
             )
             return
 
+        _LOGGER.info(
+            f"[HttpFileConnector] No cached session found, creating new GCS session for project: {self.project_id}"
+        )
+
         # 새 세션 생성
         # private_key의 \n 문자열을 실제 개행 문자로 변환
+        _LOGGER.debug("[HttpFileConnector] Processing secret data for authentication")
         processed_secret_data = secret_data.copy()
         if "private_key" in processed_secret_data:
+            original_key_length = len(processed_secret_data["private_key"])
             processed_secret_data["private_key"] = processed_secret_data[
                 "private_key"
             ].replace("\\n", "\n")
+            new_key_length = len(processed_secret_data["private_key"])
+            _LOGGER.debug(
+                f"[HttpFileConnector] Private key processed - Original length: {original_key_length}, "
+                f"Processed length: {new_key_length}"
+            )
 
         # Service Account 인증 정보로 GCS 클라이언트 생성
-        self.credentials = service_account.Credentials.from_service_account_info(
-            processed_secret_data
-        )
-        self.gcs_client = storage.Client(
-            credentials=self.credentials, project=self.project_id
-        )
+        _LOGGER.debug("[HttpFileConnector] Creating Service Account credentials")
+        try:
+            self.credentials = service_account.Credentials.from_service_account_info(
+                processed_secret_data
+            )
+            _LOGGER.debug(
+                f"[HttpFileConnector] Service Account credentials created successfully - "
+                f"Service account email: {getattr(self.credentials, 'service_account_email', 'Unknown')}"
+            )
+        except Exception as e:
+            _LOGGER.error(f"[HttpFileConnector] Failed to create Service Account credentials: {e}")
+            raise
+
+        _LOGGER.debug(f"[HttpFileConnector] Creating GCS client for project: {self.project_id}")
+        try:
+            self.gcs_client = storage.Client(
+                credentials=self.credentials, project=self.project_id
+            )
+            _LOGGER.debug(
+                f"[HttpFileConnector] GCS client created successfully - "
+                f"Client project: {self.gcs_client.project}"
+            )
+        except Exception as e:
+            _LOGGER.error(f"[HttpFileConnector] Failed to create GCS client: {e}")
+            raise
 
         # 세션 캐싱
-        session_data = {"credentials": self.credentials, "gcs_client": self.gcs_client}
-        concurrency_manager.cache_session(self.project_id, bucket_name, session_data)
-
         _LOGGER.debug(
-            f"[HttpFileConnector] New GCS session created and cached for project: {self.project_id}"
+            f"[HttpFileConnector] Caching new session - Project: {self.project_id}, Bucket: {bucket_name}"
+        )
+        session_data = {"credentials": self.credentials, "gcs_client": self.gcs_client}
+        try:
+            concurrency_manager.cache_session(self.project_id, bucket_name, session_data)
+            _LOGGER.debug("[HttpFileConnector] Session cached successfully")
+        except Exception as e:
+            _LOGGER.warning(f"[HttpFileConnector] Failed to cache session (continuing anyway): {e}")
+
+        _LOGGER.info(
+            f"[HttpFileConnector] New GCS session created and cached successfully for project: {self.project_id}"
         )
 
     def list_files(
@@ -335,7 +402,21 @@ class HttpFileConnector(BaseConnector):
     @staticmethod
     def _check_secret_data(secret_data):
         """Secret 데이터 유효성 검증"""
+        _LOGGER.debug(
+            f"[HttpFileConnector] Validating secret data keys. Required keys: {REQUIRED_SECRET_KEYS}"
+        )
+        
+        provided_keys = list(secret_data.keys()) if secret_data else []
+        _LOGGER.debug(
+            f"[HttpFileConnector] Provided secret data keys: {provided_keys}"
+        )
+        
         missing_keys = [key for key in REQUIRED_SECRET_KEYS if key not in secret_data]
         if missing_keys:
+            _LOGGER.error(
+                f"[HttpFileConnector] Secret data validation failed - Missing required keys: {missing_keys}"
+            )
             for key in missing_keys:
                 raise ERROR_REQUIRED_PARAMETER(key=f"secret_data.{key}")
+        
+        _LOGGER.debug("[HttpFileConnector] All required secret data keys are present")

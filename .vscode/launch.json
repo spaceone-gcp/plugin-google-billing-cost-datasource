@@ -6,7 +6,7 @@
         "type": "debugpy",
         "request": "launch",
         "module": "spaceone.core.command",
-        "python": "${workspaceFolder}/venv/bin/python",
+        "python": "${workspaceFolder}/.venv/bin/python",
         "env": {
           "PYTHONPATH": "./src:"
         },

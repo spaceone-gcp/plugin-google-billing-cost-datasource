@@ -28,13 +28,27 @@ REQUIRED_OPTIONS = [
 
 class JobManager(BaseManager):
     def __init__(self, *args, **kwargs):
+        _LOGGER.debug(
+            f"[JobManager] Initializing JobManager - Args: {args}, Kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
+        )
         super().__init__(*args, **kwargs)
+        
+        _LOGGER.debug("[JobManager] Creating connector instances")
         self.bigquery_connector = BigqueryConnector()
-        self.http_file_connector = HttpFileConnector()  # 추가
+        self.http_file_connector = HttpFileConnector()
+        _LOGGER.debug("[JobManager] Connector instances created successfully")
+        
+        # 인스턴스 변수 초기화
         self.billing_export_project_id = None
         self.billing_dataset = None
         self.billing_table = None
         self.billing_account_id = None
+        
+        _LOGGER.info("[JobManager] JobManager initialized successfully")
+        _LOGGER.debug(
+            f"[JobManager] Available connectors: BigQuery={type(self.bigquery_connector).__name__}, "
+            f"HttpFile={type(self.http_file_connector).__name__}"
+        )
 
     def get_tasks(
         self,
@@ -46,43 +60,70 @@ class JobManager(BaseManager):
         last_synchronized_at: datetime = None,
     ) -> dict:
         """데이터 소스 타입에 따라 작업 생성 분기"""
-
-        data_source_type = self._get_data_source_type(options)
-
         _LOGGER.info(
-            f"[get_tasks] 🚀 Starting task generation with data_source_type: {data_source_type}"
+            f"[JobManager.get_tasks] Starting task generation process for domain: {domain_id}"
         )
+        _LOGGER.debug(
+            f"[JobManager.get_tasks] Input parameters - "
+            f"Schema: {schema}, Start: {start}, Last sync: {last_synchronized_at}"
+        )
+        _LOGGER.debug(
+            f"[JobManager.get_tasks] Options keys: {list(options.keys())}"
+        )
+        _LOGGER.debug(
+            f"[JobManager.get_tasks] Secret data keys: {list(secret_data.keys()) if secret_data else 'None'}"
+        )
+
+        # 데이터 소스 타입 결정
+        _LOGGER.debug("[JobManager.get_tasks] Determining data source type")
+        data_source_type = self._get_data_source_type(options)
+        _LOGGER.info(
+            f"[JobManager.get_tasks] Data source type determined: {data_source_type}"
+        )
+
+        # 디버깅을 위한 추가 출력 (기존 코드 유지)
         print(
             f"[DEBUG] get_tasks called with data_source_type: {data_source_type}, start: {start}"
         )
-        _LOGGER.debug(f"[get_tasks] options keys: {list(options.keys())}")
 
-        # HTTP 파일 모드 강제 실행 (source=gcs인 경우)
-        if "source" in options and options["source"] == "gcs":
-            _LOGGER.debug("[get_tasks] Executing HTTP file mode for source=gcs")
-            result = self._get_http_file_tasks(
-                domain_id, options, secret_data, schema, start, last_synchronized_at
+        # 데이터 소스 타입별 작업 생성 분기
+        try:
+            if "source" in options and options["source"] == "gcs":
+                _LOGGER.info("[JobManager.get_tasks] Using HTTP file mode (forced by source=gcs)")
+                result = self._get_http_file_tasks(
+                    domain_id, options, secret_data, schema, start, last_synchronized_at
+                )
+            elif data_source_type == DATA_SOURCE_TYPES["http_file"]:
+                _LOGGER.info("[JobManager.get_tasks] Using HTTP file mode (auto-detected)")
+                result = self._get_http_file_tasks(
+                    domain_id, options, secret_data, schema, start, last_synchronized_at
+                )
+            else:
+                _LOGGER.info("[JobManager.get_tasks] Using BigQuery mode")
+                result = self._get_bigquery_tasks(
+                    domain_id, options, secret_data, schema, start, last_synchronized_at
+                )
+
+            # 전체 작업 생성 결과 로깅
+            task_count = len(result.get("tasks", []))
+            changed_count = len(result.get("changed", []))
+
+            _LOGGER.info(
+                f"[JobManager.get_tasks] Task generation completed successfully - "
+                f"Total tasks: {task_count}, Changed items: {changed_count}, "
+                f"Data source type: {data_source_type}"
             )
-        elif data_source_type == DATA_SOURCE_TYPES["http_file"]:
-            result = self._get_http_file_tasks(
-                domain_id, options, secret_data, schema, start, last_synchronized_at
-            )
-        else:
-            result = self._get_bigquery_tasks(
-                domain_id, options, secret_data, schema, start, last_synchronized_at
+            _LOGGER.debug(
+                f"[JobManager.get_tasks] Result structure: {list(result.keys())}"
             )
 
-        # 전체 작업 생성 결과 로깅
-        task_count = len(result.get("tasks", []))
-        changed_count = len(result.get("changed", []))
+            return result
 
-        _LOGGER.info(
-            f"[get_tasks] Task generation completed - "
-            f"Total tasks: {task_count}, Changed items: {changed_count}, "
-            f"Data source type: {data_source_type}"
-        )
-
-        return result
+        except Exception as e:
+            _LOGGER.error(
+                f"[JobManager.get_tasks] Task generation failed for data source type {data_source_type}: {e}"
+            )
+            raise
 
     def _get_bigquery_tasks(
         self,
@@ -94,70 +135,128 @@ class JobManager(BaseManager):
         last_synchronized_at: datetime = None,
     ) -> dict:
         """BigQuery 기반 작업 생성 (기존 로직)"""
-
-        self.bigquery_connector.create_session(options, secret_data, schema)
-        self._check_options(options)
-
-        self.billing_export_project_id = options["billing_export_project_id"]
-        self.billing_dataset = self._extract_dataset_id(options["billing_dataset_id"])
-        self.billing_account_id = options["billing_account_id"]
-
-        self.billing_table = (
-            f"{BIGQUERY_TABLE_PREFIX}_{self.billing_account_id.replace('-', '_')}"
-        )
-        self._validate_table_exists()
-
-        tasks = []
-        changed = []
-
-        start_month = self._get_start_month(start, last_synchronized_at)
-
-        query = self._create_google_sql(start_month)
-        response_stream = self.bigquery_connector.read_df_from_bigquery(query)
-
-        for index, row in response_stream.iterrows():
-            tasks.append(
-                {
-                    "task_options": {
-                        "start": start_month,
-                        "project_id": row.id,
-                        "billing_export_project_id": self.billing_export_project_id,
-                        "billing_dataset_id": self.billing_dataset,
-                        "billing_account_id": self.billing_account_id,
-                        "data_source_type": DATA_SOURCE_TYPES[
-                            "bigquery"
-                        ],  # 명시적 설정
-                    }
-                }
-            )
-
-        # SpaceONE Job 스키마의 start 필드 길이 제한 준수 (YYYY-MM 형식, 7자)
-        changed.append({"start": start_month})
-
         _LOGGER.info(
-            f"[get_bigquery_tasks] Generated {len(tasks)} BigQuery tasks for {len(tasks)} projects"
+            f"[JobManager._get_bigquery_tasks] Starting BigQuery task generation for domain: {domain_id}"
         )
         _LOGGER.debug(
-            f"[get_bigquery_tasks] Task details: start_month={start_month}, billing_account_id={self.billing_account_id}"
+            f"[JobManager._get_bigquery_tasks] Parameters - Schema: {schema}, Start: {start}, "
+            f"Last sync: {last_synchronized_at}"
         )
 
-        return {"tasks": tasks, "changed": changed}
+        try:
+            # BigQuery 커넥터 세션 생성
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] Creating BigQuery connector session")
+            self.bigquery_connector.create_session(options, secret_data, schema)
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] BigQuery session created successfully")
+
+            # 옵션 검증
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] Validating BigQuery options")
+            self._check_options(options)
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] Options validation completed")
+
+            # 빌링 정보 설정
+            self.billing_export_project_id = options["billing_export_project_id"]
+            self.billing_dataset = self._extract_dataset_id(options["billing_dataset_id"])
+            self.billing_account_id = options["billing_account_id"]
+
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] Billing configuration - "
+                f"Project: {self.billing_export_project_id}, Dataset: {self.billing_dataset}, "
+                f"Account: {self.billing_account_id}"
+            )
+
+            # 빌링 테이블 이름 생성
+            self.billing_table = (
+                f"{BIGQUERY_TABLE_PREFIX}_{self.billing_account_id.replace('-', '_')}"
+            )
+            _LOGGER.debug(
+                f"[JobManager._get_bigquery_tasks] Generated billing table name: {self.billing_table}"
+            )
+
+            # 테이블 존재 검증
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] Validating BigQuery table existence")
+            self._validate_table_exists()
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] Table validation completed")
+
+            # 작업 생성 초기화
+            tasks = []
+            changed = []
+
+            # 시작 월 계산
+            start_month = self._get_start_month(start, last_synchronized_at)
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] Calculated start month: {start_month}"
+            )
+
+            # BigQuery 쿼리 생성 및 실행
+            _LOGGER.debug("[JobManager._get_bigquery_tasks] Creating BigQuery SQL query")
+            query = self._create_google_sql(start_month)
+            _LOGGER.debug(f"[JobManager._get_bigquery_tasks] Generated query: {query}")
+
+            _LOGGER.info("[JobManager._get_bigquery_tasks] Executing BigQuery query to get project list")
+            response_stream = self.bigquery_connector.read_df_from_bigquery(query)
+            _LOGGER.debug(
+                f"[JobManager._get_bigquery_tasks] Query executed, processing {len(response_stream)} rows"
+            )
+
+            # 프로젝트별 작업 생성
+            for index, row in response_stream.iterrows():
+                project_id = row.id
+                _LOGGER.debug(
+                    f"[JobManager._get_bigquery_tasks] Creating task for project: {project_id} (row {index + 1})"
+                )
+                
+                task_options = {
+                    "start": start_month,
+                    "project_id": project_id,
+                    "billing_export_project_id": self.billing_export_project_id,
+                    "billing_dataset_id": self.billing_dataset,
+                    "billing_account_id": self.billing_account_id,
+                    "data_source_type": DATA_SOURCE_TYPES["bigquery"],  # 명시적 설정
+                }
+                
+                tasks.append({"task_options": task_options})
+
+            # SpaceONE Job 스키마의 start 필드 길이 제한 준수 (YYYY-MM 형식, 7자)
+            changed_item = {"start": start_month}
+            changed.append(changed_item)
+
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] BigQuery task generation completed - "
+                f"Generated {len(tasks)} tasks for {len(tasks)} projects, Start month: {start_month}"
+            )
+            _LOGGER.debug(
+                f"[JobManager._get_bigquery_tasks] Changed item: {changed_item}"
+            )
+
+            return {"tasks": tasks, "changed": changed}
+
+        except Exception as e:
+            _LOGGER.error(
+                f"[JobManager._get_bigquery_tasks] BigQuery task generation failed: {e}"
+            )
+            raise
 
     def _get_start_month(self, start, last_synchronized_at=None):
+        _LOGGER.debug(f"[JobManager._get_start_month] Input parameters - start: {start}, last_synchronized_at: {last_synchronized_at}")
+        
         if start:
             start_time: datetime = self._parse_start_time(start)
-        elif last_synchronized_at:
-            start_time: datetime = last_synchronized_at - timedelta(days=7)
-            start_time = start_time.replace(day=1)
+            _LOGGER.debug(f"[JobManager._get_start_month] Using provided start parameter: {start}")
         else:
-            start_time: datetime = datetime.utcnow() - timedelta(days=365)
+            # start 파라미터가 없으면 무조건 현재 날짜 기준 1년 전의 연월 사용
+            current_utc = datetime.utcnow()
+            start_time: datetime = current_utc - timedelta(days=365)
             start_time = start_time.replace(day=1)
+            _LOGGER.debug(f"[JobManager._get_start_month] Using default (1 year ago) - current: {current_utc.strftime('%Y-%m-%d')}, calculated: {start_time.strftime('%Y-%m-%d')}")
 
         start_time = start_time.replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=None
         )
 
-        return start_time.strftime("%Y-%m")
+        result = start_time.strftime("%Y-%m")
+        _LOGGER.debug(f"[JobManager._get_start_month] Final result: {result}")
+        return result
 
     @staticmethod
     def _parse_start_time(start_str):
@@ -220,27 +319,50 @@ class JobManager(BaseManager):
         last_synchronized_at: datetime = None,
     ) -> dict:
         """HTTP 파일 기반 작업 생성 (신규)"""
-
-        _LOGGER.info(f"[_get_http_file_tasks] 🚀 Called with start={start}")
+        _LOGGER.info(
+            f"[JobManager._get_http_file_tasks] Starting HTTP file task generation for domain: {domain_id}"
+        )
+        _LOGGER.debug(
+            f"[JobManager._get_http_file_tasks] Parameters - Schema: {schema}, Start: {start}, "
+            f"Last sync: {last_synchronized_at}"
+        )
+        
+        # 디버깅을 위한 추가 출력 (기존 코드 유지)
         print(f"[DEBUG] _get_http_file_tasks called with start={start}")
 
         try:
             # HTTP 파일 커넥터 세션 생성
+            _LOGGER.debug("[JobManager._get_http_file_tasks] Creating HTTP file connector session")
             self.http_file_connector.create_session(options, secret_data, schema)
+            _LOGGER.debug("[JobManager._get_http_file_tasks] HTTP file session created successfully")
 
             # HTTP 파일 설정 검증
+            _LOGGER.debug("[JobManager._get_http_file_tasks] Validating HTTP file options")
             self._check_http_file_options(options)
+            _LOGGER.debug("[JobManager._get_http_file_tasks] HTTP file options validation completed")
 
+            # 작업 생성 초기화
             tasks = []
             changed = []
+            
+            _LOGGER.debug("[JobManager._get_http_file_tasks] Initialized task containers")
 
             # 파일 목록 또는 단일 파일 처리
             if "file_list" in options:
                 # 여러 파일 처리
                 file_list = options["file_list"]
-                for file_info in file_list:
+                _LOGGER.info(
+                    f"[JobManager._get_http_file_tasks] Processing file list mode with {len(file_list)} files"
+                )
+                
+                for index, file_info in enumerate(file_list):
                     bucket_name = file_info["bucket_name"]
                     file_path = file_info["file_path"]
+                    
+                    _LOGGER.debug(
+                        f"[JobManager._get_http_file_tasks] Processing file {index + 1}/{len(file_list)}: "
+                        f"{bucket_name}/{file_path}"
+                    )
 
                     task_options = {
                         "bucket_name": bucket_name,
@@ -251,19 +373,32 @@ class JobManager(BaseManager):
                     }
 
                     tasks.append({"task_options": task_options})
+                    
+                _LOGGER.info(
+                    f"[JobManager._get_http_file_tasks] File list processing completed - "
+                    f"Created {len(tasks)} tasks from file list"
+                )
 
             elif "bucket_name" in options:
                 # 버킷에서 파일 목록 자동 생성
                 bucket_name = options["bucket_name"]
                 project_id = options.get("project_id")
+                
+                _LOGGER.info(
+                    f"[JobManager._get_http_file_tasks] Processing bucket mode - "
+                    f"Bucket: {bucket_name}, Project ID: {project_id or 'Not specified'}"
+                )
 
                 # start 파라미터가 있고 project_id가 지정된 경우 직접 경로 접근 사용
                 if start and project_id:
+                    _LOGGER.info(
+                        "[JobManager._get_http_file_tasks] Using direct path access method (optimized)"
+                    )
                     validated_start = self._validate_and_fix_date_range(start)
                     year, month = validated_start.split("-")
 
                     _LOGGER.info(
-                        f"[_get_http_file_tasks] Using direct path access: {project_id}/{year}/{month}/"
+                        f"[JobManager._get_http_file_tasks] Direct path: {bucket_name}/{project_id}/{year}/{month}/"
                     )
 
                     # 직접 경로로 파일 목록 조회
@@ -272,25 +407,37 @@ class JobManager(BaseManager):
                     )
 
                     _LOGGER.info(
-                        f"[_get_http_file_tasks] Found {len(files)} files in direct path: {project_id}/{year}/{month}/"
+                        f"[JobManager._get_http_file_tasks] Direct path access result - "
+                        f"Found {len(files)} files in {project_id}/{year}/{month}/"
                     )
                 else:
                     # 기존 방식: 전체 파일 목록 조회 후 필터링
+                    _LOGGER.info(
+                        "[JobManager._get_http_file_tasks] Using legacy file listing method (with filtering)"
+                    )
                     file_pattern = options.get("file_pattern")
+                    
+                    _LOGGER.debug(
+                        f"[JobManager._get_http_file_tasks] File pattern: {file_pattern or 'None (all files)'}"
+                    )
+                    
                     files = self.http_file_connector.list_files(
                         bucket_name, file_pattern
                     )
 
                     # start 파라미터 기반 파일 필터링
                     _LOGGER.info(
-                        f"[_get_http_file_tasks] Before filtering: {len(files)} files, start parameter: {start}"
+                        f"[JobManager._get_http_file_tasks] Before filtering: {len(files)} files, "
+                        f"Start parameter: {start}"
                     )
+                    
                     if start:
                         validated_start = self._validate_and_fix_date_range(start)
                         _LOGGER.info(
-                            f"[_get_http_file_tasks] Validated start date: {validated_start}"
+                            f"[JobManager._get_http_file_tasks] Validated start date: {validated_start}"
                         )
                         # 날짜 및 프로젝트 ID 기반 필터링
+                        original_count = len(files)
                         files = self._filter_files_by_date(
                             files, validated_start, project_id
                         )
@@ -298,33 +445,70 @@ class JobManager(BaseManager):
                         if project_id:
                             filter_info += f", project_id: {project_id}"
                         _LOGGER.info(
-                            f"[_get_http_file_tasks] After filtering: {len(files)} files for {filter_info}"
+                            f"[JobManager._get_http_file_tasks] After filtering: {len(files)}/{original_count} "
+                            f"files matched ({filter_info})"
+                        )
+                    elif project_id:
+                        # start 파라미터가 없어도 project_id가 있으면 필터링 적용
+                        _LOGGER.info(
+                            f"[JobManager._get_http_file_tasks] No start parameter provided, but filtering by project_id: {project_id}"
+                        )
+                        original_count = len(files)
+                        files = self._filter_files_by_project_id(files, project_id)
+                        _LOGGER.info(
+                            f"[JobManager._get_http_file_tasks] After project_id filtering: {len(files)}/{original_count} "
+                            f"files matched (project_id: {project_id})"
                         )
                     else:
                         _LOGGER.info(
-                            "[_get_http_file_tasks] No start parameter provided, using all files"
+                            "[JobManager._get_http_file_tasks] No start parameter or project_id provided, using all files"
                         )
 
-                for file_info in files:
+                # 파일별 작업 생성
+                _LOGGER.debug(
+                    f"[JobManager._get_http_file_tasks] Creating tasks from {len(files)} files"
+                )
+                
+                for index, file_info in enumerate(files):
+                    file_path = file_info["name"]
+                    _LOGGER.debug(
+                        f"[JobManager._get_http_file_tasks] Creating task {index + 1}/{len(files)}: "
+                        f"{bucket_name}/{file_path}"
+                    )
+                    
                     task_options = {
                         "bucket_name": bucket_name,
-                        "file_path": file_info["name"],
+                        "file_path": file_path,
                         "data_source_type": DATA_SOURCE_TYPES["http_file"],
                         "field_mapping": options.get("field_mapping", {}),
                         "parsing_options": options.get("parsing_options", {}),
                     }
 
                     tasks.append({"task_options": task_options})
+                    
+                _LOGGER.info(
+                    f"[JobManager._get_http_file_tasks] Bucket processing completed - "
+                    f"Created {len(tasks)} tasks from bucket files"
+                )
 
             else:
                 # 단일 파일 처리
                 bucket_name = options.get("bucket_name")
                 file_path = options.get("file_path")
+                
+                _LOGGER.info(
+                    f"[JobManager._get_http_file_tasks] Processing single file mode - "
+                    f"Bucket: {bucket_name}, File: {file_path}"
+                )
 
                 if not bucket_name or not file_path:
-                    raise ERROR_REQUIRED_PARAMETER(
-                        key="Either 'file_list', 'bucket_name', or both 'bucket_name' and 'file_path' must be provided"
-                    )
+                    error_msg = "Either 'file_list', 'bucket_name', or both 'bucket_name' and 'file_path' must be provided"
+                    _LOGGER.error(f"[JobManager._get_http_file_tasks] {error_msg}")
+                    raise ERROR_REQUIRED_PARAMETER(key=error_msg)
+
+                _LOGGER.debug(
+                    f"[JobManager._get_http_file_tasks] Creating single task for: {bucket_name}/{file_path}"
+                )
 
                 task_options = {
                     "bucket_name": bucket_name,
@@ -335,15 +519,25 @@ class JobManager(BaseManager):
                 }
 
                 tasks.append({"task_options": task_options})
+                
+                _LOGGER.info(
+                    "[JobManager._get_http_file_tasks] Single file processing completed - Created 1 task"
+                )
 
             # 변경 사항 기록 - start 필드 포함 (TasksResponse 스키마 요구사항)
+            _LOGGER.debug("[JobManager._get_http_file_tasks] Creating changed items for response")
             current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-            # start 파라미터 처리 - get_data와 동일한 로직 적용
+            # start 파라미터 처리 - BigQuery 모드와 동일한 _get_start_month 함수 사용
+            start_month = self._get_start_month(start, last_synchronized_at)
+            _LOGGER.debug(f"[JobManager._get_http_file_tasks] Calculated start month: {start_month}")
+            
             if start:
                 start_value = self._validate_and_fix_date_range(start)
+                _LOGGER.debug(f"[JobManager._get_http_file_tasks] Using validated start: {start_value}")
             else:
-                start_value = datetime.utcnow().strftime("%Y-%m")  # YYYY-MM 형식
+                start_value = start_month  # _get_start_month에서 계산된 기본값 사용 (1년 전)
+                _LOGGER.debug(f"[JobManager._get_http_file_tasks] Using default start from _get_start_month: {start_value}")
 
             changed_item = {
                 "start": start_value,
@@ -353,62 +547,106 @@ class JobManager(BaseManager):
             changed.append(changed_item)
 
             _LOGGER.debug(
-                f"[_get_http_file_tasks] created changed item: {changed_item}"
+                f"[JobManager._get_http_file_tasks] Created changed item: {changed_item}"
             )
-            _LOGGER.debug(
-                f"[_get_http_file_tasks] returning tasks count: {len(tasks)}, changed count: {len(changed)}"
-            )
-
             _LOGGER.info(
-                f"[get_http_file_tasks] Generated {len(tasks)} HTTP file tasks from {len(tasks)} files"
+                f"[JobManager._get_http_file_tasks] HTTP file task generation completed successfully - "
+                f"Generated {len(tasks)} tasks, Start: {start_value}"
             )
 
             return {"tasks": tasks, "changed": changed}
 
         except Exception as e:
             _LOGGER.error(
-                f"[get_http_file_tasks] Failed to generate HTTP file tasks: {e}"
+                f"[JobManager._get_http_file_tasks] HTTP file task generation failed: {e}"
             )
-            raise e
+            raise
 
     def _get_data_source_type(self, options: dict) -> str:
         """데이터 소스 타입 결정"""
+        _LOGGER.debug(
+            "[JobManager._get_data_source_type] Starting data source type determination"
+        )
+        _LOGGER.debug(
+            f"[JobManager._get_data_source_type] Available options: {list(options.keys())}"
+        )
+        _LOGGER.debug(
+            f"[JobManager._get_data_source_type] Available data source types: {list(DATA_SOURCE_TYPES.keys())}"
+        )
+
         # 1. 명시적 data_source_type 확인
         data_source_type = options.get("data_source_type")
+        _LOGGER.debug(
+            f"[JobManager._get_data_source_type] Explicit data_source_type: {data_source_type}"
+        )
+        
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
-            _LOGGER.debug(
-                f"[_get_data_source_type] Using explicit data_source_type: {data_source_type}"
+            _LOGGER.info(
+                f"[JobManager._get_data_source_type] Using explicit data_source_type: {data_source_type}"
             )
             return data_source_type
+        elif data_source_type:
+            _LOGGER.warning(
+                f"[JobManager._get_data_source_type] Invalid explicit data_source_type: {data_source_type}, "
+                f"Valid types: {list(DATA_SOURCE_TYPES.values())}"
+            )
 
         # 2. 레거시 'source' 파라미터 지원
         source = options.get("source")
+        _LOGGER.debug(f"[JobManager._get_data_source_type] Legacy source parameter: {source}")
+        
         if source == "gcs":
-            _LOGGER.debug("[_get_data_source_type] Using source=gcs -> http_file")
+            _LOGGER.info("[JobManager._get_data_source_type] Using source=gcs -> http_file")
             return DATA_SOURCE_TYPES["http_file"]
         elif source == "bigquery":
-            _LOGGER.debug("[_get_data_source_type] Using source=bigquery -> bigquery")
+            _LOGGER.info("[JobManager._get_data_source_type] Using source=bigquery -> bigquery")
             return DATA_SOURCE_TYPES["bigquery"]
+        elif source:
+            _LOGGER.warning(
+                f"[JobManager._get_data_source_type] Unknown source parameter: {source}, "
+                f"Valid sources: gcs, bigquery"
+            )
 
         # 3. 파라미터 기반 자동 감지
+        _LOGGER.debug("[JobManager._get_data_source_type] Attempting auto-detection based on parameters")
+        
         # HTTP 파일 모드 감지: bucket_name이 있고 BigQuery 필수 파라미터가 없는 경우
         has_bucket = "bucket_name" in options
         has_bigquery_params = all(key in options for key in REQUIRED_OPTIONS)
-
+        
         _LOGGER.debug(
-            f"[_get_data_source_type] has_bucket={has_bucket}, has_bigquery_params={has_bigquery_params}"
+            f"[JobManager._get_data_source_type] Auto-detection analysis - "
+            f"has_bucket: {has_bucket}, has_bigquery_params: {has_bigquery_params}"
+        )
+        _LOGGER.debug(
+            f"[JobManager._get_data_source_type] Required BigQuery options: {REQUIRED_OPTIONS}"
+        )
+        _LOGGER.debug(
+            f"[JobManager._get_data_source_type] Missing BigQuery options: "
+            f"{[key for key in REQUIRED_OPTIONS if key not in options]}"
         )
 
         if has_bucket and not has_bigquery_params:
-            _LOGGER.debug("[_get_data_source_type] Auto-detected http_file mode")
+            _LOGGER.info("[JobManager._get_data_source_type] Auto-detected http_file mode (bucket_name present, BigQuery params missing)")
             return DATA_SOURCE_TYPES["http_file"]
         elif has_bigquery_params:
-            _LOGGER.debug("[_get_data_source_type] Auto-detected bigquery mode")
+            _LOGGER.info("[JobManager._get_data_source_type] Auto-detected bigquery mode (all BigQuery params present)")
+            return DATA_SOURCE_TYPES["bigquery"]
+        elif has_bucket and has_bigquery_params:
+            _LOGGER.warning(
+                "[JobManager._get_data_source_type] Both bucket_name and BigQuery params present, "
+                "preferring BigQuery mode"
+            )
             return DATA_SOURCE_TYPES["bigquery"]
 
         # 4. 기본값 반환 (하위 호환성)
+        _LOGGER.warning(
+            f"[JobManager._get_data_source_type] No clear data source type detected, "
+            f"using default: {DEFAULT_DATA_SOURCE_TYPE}"
+        )
         _LOGGER.debug(
-            f"[_get_data_source_type] Using default: {DEFAULT_DATA_SOURCE_TYPE}"
+            "[JobManager._get_data_source_type] Consider providing explicit 'data_source_type' "
+            "or 'source' parameter for better reliability"
         )
         return DEFAULT_DATA_SOURCE_TYPE
 
@@ -447,6 +685,56 @@ class JobManager(BaseManager):
             bucket_name = options["bucket_name"]
             if not bucket_name or bucket_name.strip() == "":
                 raise ERROR_INVALID_PARAMETER(key="options.bucket_name")
+
+    @staticmethod
+    def _filter_files_by_project_id(files: List[Dict], project_id: str) -> List[Dict]:
+        """project_id를 기반으로 파일 목록 필터링
+        
+        Args:
+            files: 파일 목록 (각 파일은 'name' 키를 가진 딕셔너리)
+            project_id: 필터링할 프로젝트 ID
+            
+        Returns:
+            List[Dict]: 필터링된 파일 목록
+        """
+        if not project_id:
+            _LOGGER.warning("[_filter_files_by_project_id] No project_id provided, returning all files")
+            return files
+            
+        filtered_files = []
+        
+        for file_info in files:
+            file_path = file_info.get("name", "")
+            
+            # 파일 경로 구조 분석: project_id/year/month/filename
+            # 예: mkkang-project/2025/09/billing_data_202509-000000000002.parquet
+            path_parts = file_path.split("/")
+            
+            if len(path_parts) < 4:  # 최소 4개 부분이 필요 (project/year/month/file)
+                _LOGGER.debug(
+                    f"[_filter_files_by_project_id] ❌ Invalid path structure: {file_path}"
+                )
+                continue
+                
+            file_project_id = path_parts[0]
+            
+            # 프로젝트 ID 매칭 검증
+            if file_project_id == project_id:
+                filtered_files.append(file_info)
+                _LOGGER.debug(
+                    f"[_filter_files_by_project_id] ✅ Matched file: {file_path} (project_id={project_id})"
+                )
+            else:
+                _LOGGER.debug(
+                    f"[_filter_files_by_project_id] ❌ Skipped file: {file_path} "
+                    f"(file project: {file_project_id}, expected: {project_id})"
+                )
+                
+        _LOGGER.info(
+            f"[_filter_files_by_project_id] Filtered {len(filtered_files)}/{len(files)} files for project_id={project_id}"
+        )
+        
+        return filtered_files
 
     @staticmethod
     def _filter_files_by_date(

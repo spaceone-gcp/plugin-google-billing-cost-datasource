@@ -53,6 +53,18 @@ class FieldMapper:
                     str(billed_date_value) if billed_date_value is not None else ""
                 )
 
+            # additional_info 필드 특별 처리 - 기존 데이터와 매핑 데이터 병합
+            mapped_additional_info = self._map_field("additional_info", source_data, {})
+            existing_additional_info = source_data.get("additional_info", {})
+            
+            # 기존 additional_info와 매핑된 additional_info 병합
+            # 매핑된 값이 우선순위를 가짐
+            final_additional_info = {}
+            if isinstance(existing_additional_info, dict):
+                final_additional_info.update(existing_additional_info)
+            if isinstance(mapped_additional_info, dict):
+                final_additional_info.update(mapped_additional_info)
+
             mapped_data = {
                 "cost": cost_value,
                 "usage_quantity": usage_quantity_value,
@@ -64,7 +76,7 @@ class FieldMapper:
                 "resource": self._map_field("resource", source_data, ""),
                 "billed_date": billed_date_value,
                 "tags": self._map_tags_field(source_data),
-                "additional_info": self._map_field("additional_info", source_data, {}),
+                "additional_info": final_additional_info,
             }
 
             # 연산이 필요한 경우에만 Decimal로 변환하여 정확성 보장 후 원본 타입으로 복원

@@ -97,35 +97,64 @@ class ConcurrencyManager:
     def cache_session(self, project_id: str, bucket_name: str, session_data: Dict):
         """GCS 세션 캐싱"""
         session_key = self._get_session_key(project_id, bucket_name)
+        _LOGGER.debug(
+            f"[ConcurrencyManager] Attempting to cache session - Project: {project_id}, Bucket: {bucket_name}"
+        )
+        
         with self._main_lock:
+            current_cache_count = len(self._session_cache)
             self._session_cache[session_key] = {
                 "data": session_data,
                 "created_at": time.time(),
             }
-            _LOGGER.debug(f"[ConcurrencyManager] Cached session for: {session_key}")
+            _LOGGER.info(
+                f"[ConcurrencyManager] Session cached successfully for: {session_key} "
+                f"(Total cached sessions: {current_cache_count + 1})"
+            )
+            _LOGGER.debug(
+                f"[ConcurrencyManager] Session data contains: {list(session_data.keys()) if session_data else 'No data'}"
+            )
 
     def get_cached_session(
         self, project_id: str, bucket_name: str, max_age: float = 300.0
     ) -> Optional[Dict]:
         """캐시된 GCS 세션 조회 (기본 5분 TTL)"""
         session_key = self._get_session_key(project_id, bucket_name)
+        _LOGGER.debug(
+            f"[ConcurrencyManager] Looking for cached session - Project: {project_id}, "
+            f"Bucket: {bucket_name}, Max age: {max_age}s"
+        )
+        
         with self._main_lock:
+            total_cached = len(self._session_cache)
+            _LOGGER.debug(
+                f"[ConcurrencyManager] Current cache status - Total sessions: {total_cached}, "
+                f"Looking for key: {session_key}"
+            )
+            
             if session_key in self._session_cache:
                 cache_entry = self._session_cache[session_key]
                 age = time.time() - cache_entry["created_at"]
 
                 if age <= max_age:
-                    _LOGGER.debug(
-                        f"[ConcurrencyManager] Using cached session for: {session_key} (age: {age:.1f}s)"
+                    _LOGGER.info(
+                        f"[ConcurrencyManager] Found valid cached session for: {session_key} "
+                        f"(age: {age:.1f}s, max_age: {max_age}s)"
                     )
                     return cache_entry["data"]
                 else:
                     # 만료된 세션 제거
                     del self._session_cache[session_key]
-                    _LOGGER.debug(
-                        f"[ConcurrencyManager] Expired session removed: {session_key}"
+                    _LOGGER.info(
+                        f"[ConcurrencyManager] Expired session removed: {session_key} "
+                        f"(age: {age:.1f}s exceeded max_age: {max_age}s)"
                     )
+            else:
+                _LOGGER.debug(
+                    f"[ConcurrencyManager] No cached session found for: {session_key}"
+                )
 
+        _LOGGER.debug(f"[ConcurrencyManager] Returning None - no valid cached session for: {session_key}")
         return None
 
     def clear_expired_sessions(self, max_age: float = 300.0):
