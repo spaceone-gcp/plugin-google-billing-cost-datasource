@@ -295,9 +295,20 @@ class ConfigValidator:
                         }
                     )
 
-        # Field Mapper 검증
-        if "field_mapper" in options:
-            self._validate_field_mapper(options["field_mapper"])
+        # Field Mapper 검증 (filed_mapper 오타 처리 포함)
+        field_mapper_config = options.get("field_mapper") or options.get("filed_mapper")
+        if field_mapper_config:
+            self._validate_field_mapper(field_mapper_config)
+            # filed_mapper 오타에 대한 경고
+            if "filed_mapper" in options and "field_mapper" not in options:
+                self.validation_results.append(
+                    {
+                        "type": "warning",
+                        "category": "options",
+                        "message": "Using deprecated 'filed_mapper' option. Please use 'field_mapper' instead.",
+                        "field": "plugin_info.options.filed_mapper",
+                    }
+                )
 
     def _validate_field_mapper(self, field_mapper: Dict):
         """Field Mapper 설정 검증"""

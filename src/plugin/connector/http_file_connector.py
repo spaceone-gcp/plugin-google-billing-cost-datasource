@@ -274,7 +274,7 @@ class HttpFileConnector(BaseConnector):
 
             # 크기 불일치 또는 None 경고
             if blob.size is None:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     f"[HttpFileConnector] Blob size is None for {file_path}, actual downloaded: {actual_size} bytes"
                 )
             elif actual_size != blob.size:

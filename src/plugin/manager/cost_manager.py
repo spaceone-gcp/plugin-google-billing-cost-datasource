@@ -246,9 +246,9 @@ class CostManager(BaseManager):
                     )
 
                 # Field Mapper 초기화 (기본 매핑 사용)
-                mapping_config = task_options.get("field_mapping", {}) or options.get(
-                    "field_mapper", {}
-                )
+                # filed_mapper 오타 처리 (하위 호환성을 위해)
+                field_mapper_config = options.get("field_mapper") or options.get("filed_mapper", {})
+                mapping_config = task_options.get("field_mapping", {}) or field_mapper_config
                 provider = options.get("provider", "google_cloud")
                 self.field_mapper = FieldMapper(
                     mapping_config,
@@ -287,7 +287,9 @@ class CostManager(BaseManager):
                 self.http_file_connector.create_session(options, secret_data, schema)
 
                 # Field Mapper 초기화 (기본 매핑 사용)
-                mapping_config = task_options.get("field_mapping", {})
+                # filed_mapper 오타 처리 (하위 호환성을 위해)
+                field_mapper_config = options.get("field_mapper") or options.get("filed_mapper", {})
+                mapping_config = task_options.get("field_mapping", {}) or field_mapper_config
                 provider = options.get("provider", "google_cloud")
                 self.field_mapper = FieldMapper(
                     mapping_config,
