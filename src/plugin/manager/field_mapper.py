@@ -154,6 +154,19 @@ class FieldMapper:
 
         # 문자열인 경우 JSON 파싱 시도
         if isinstance(tags_value, str) and tags_value.strip():
+            # 이미 처리한 잘린 문자열인지 캐시 확인 (성능 최적화)
+            if not hasattr(self, '_truncated_cache'):
+                self._truncated_cache = set()
+            
+            tags_hash = hash(tags_value[:100])  # 처음 100자로 해시 생성
+            if tags_hash in self._truncated_cache:
+                return {}  # 이미 잘린 것으로 확인된 문자열
+            
+            # 디버깅을 위한 로깅 (처음 몇 개만)
+            if not hasattr(self, '_debug_logged'):
+                _LOGGER.debug(f"[FieldMapper] Raw tags_value: {repr(tags_value[:100])}")
+                self._debug_logged = True
+            
             try:
                 import json
 
@@ -176,11 +189,109 @@ class FieldMapper:
                     )
                     return {}
             except (json.JSONDecodeError, ValueError) as e:
-                _LOGGER.warning(f"[FieldMapper] Failed to parse tags JSON: {e}")
-                return {}
+                # 잘린 JSON 문자열인 경우 로깅 생략 (스팸 방지)
+                truncated_patterns = [
+                    "', 'value': '",  # 잘린 key-value 패턴
+                    "'key':",  # 시작만 있는 패턴
+                    '"key":',  # 시작만 있는 패턴  
+                    "'value': '",  # value만 있는 패턴
+                    '"value": "',  # value만 있는 패턴
+                ]
+                
+                is_truncated = (
+                    len(tags_value) > 50 and 
+                    not tags_value.strip().endswith(('}', ']', '"', "'"))
+                ) or any(pattern in tags_value[:50] for pattern in truncated_patterns)
+                
+                if is_truncated:
+                    # 잘린 문자열로 보이는 경우 - 캐시에 추가하고 빈 딕셔너리 반환
+                    if hasattr(self, '_truncated_cache'):
+                        self._truncated_cache.add(tags_hash)
+                    return {}
+                
+                # 로깅 빈도 제한 - 같은 오류는 최대 5번만 로깅
+                if not hasattr(self, '_json_error_count'):
+                    self._json_error_count = {}
+                error_key = str(e)[:50]  # 오류 메시지의 처음 50자로 키 생성
+                if self._json_error_count.get(error_key, 0) < 5:
+                    self._json_error_count[error_key] = self._json_error_count.get(error_key, 0) + 1
+                    _LOGGER.debug(f"[FieldMapper] JSON parsing failed for: {repr(tags_value[:50])}, error: {e}")
+                
+                # 일반적인 잘못된 JSON 형식들을 수정 시도
+                cleaned_value = self._try_fix_malformed_json(tags_value)
+                if cleaned_value != tags_value:
+                    try:
+                        parsed_tags = json.loads(cleaned_value)
+                        if isinstance(parsed_tags, dict):
+                            return parsed_tags
+                        elif isinstance(parsed_tags, list):
+                            result_dict = {}
+                            for item in parsed_tags:
+                                if isinstance(item, dict) and "key" in item and "value" in item:
+                                    result_dict[item["key"]] = item["value"]
+                            return result_dict
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                
+                # key=value 형태 파싱 시도
+                return self._parse_key_value_pairs(tags_value)
 
         # 기타 모든 경우 빈 딕셔너리 반환
         return {}
+
+    def _try_fix_malformed_json(self, json_str: str) -> str:
+        """잘못된 JSON 형식을 수정 시도"""
+        try:
+            # 일반적인 문제들 수정
+            cleaned = json_str.strip()
+            
+            # 잘린 문자열인 경우 조기 반환 (수정 불가능)
+            if len(cleaned) > 50 and not cleaned.endswith(('}', ']', '"')):
+                return json_str
+            
+            # 1. 작은따옴표를 큰따옴표로 변경
+            if "'" in cleaned and '"' not in cleaned:
+                cleaned = cleaned.replace("'", '"')
+            
+            # 2. 키에 따옴표가 없는 경우 추가 (간단한 경우만)
+            import re
+            # {key: "value"} -> {"key": "value"}
+            cleaned = re.sub(r'{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'{"\1":', cleaned)
+            cleaned = re.sub(r',\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r', "\1":', cleaned)
+            
+            # 3. Python-style True/False를 JSON true/false로 변경
+            cleaned = cleaned.replace('True', 'true').replace('False', 'false').replace('None', 'null')
+            
+            return cleaned
+        except Exception:
+            return json_str
+
+    def _parse_key_value_pairs(self, text: str) -> dict:
+        """key=value 형태의 문자열을 딕셔너리로 파싱"""
+        try:
+            result = {}
+            
+            # 다양한 구분자 시도
+            separators = [',', ';', '&', ' ']
+            
+            for sep in separators:
+                if sep in text:
+                    pairs = text.split(sep)
+                    for pair in pairs:
+                        if '=' in pair:
+                            key, value = pair.split('=', 1)
+                            result[key.strip()] = value.strip()
+                    if result:  # 성공적으로 파싱된 경우
+                        return result
+            
+            # 단일 key=value 형태
+            if '=' in text and len(text.split('=')) == 2:
+                key, value = text.split('=', 1)
+                return {key.strip(): value.strip()}
+                
+            return {}
+        except Exception:
+            return {}
 
     def _compile_mappings(self):
         """매핑 설정을 컴파일하여 실행 가능한 형태로 변환"""
