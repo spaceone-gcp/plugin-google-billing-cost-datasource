@@ -559,7 +559,11 @@ class FieldMapper:
             return datetime.now().strftime("%Y-%m-%d")
 
         try:
-            if isinstance(value, datetime):
+            # pandas.Timestamp 객체 처리 (Parquet 파일에서 읽어온 날짜)
+            if hasattr(value, 'to_pydatetime'):
+                # pandas.Timestamp를 Python datetime으로 변환 후 포맷팅
+                return value.to_pydatetime().strftime("%Y-%m-%d")
+            elif isinstance(value, datetime):
                 return value.strftime("%Y-%m-%d")
             elif isinstance(value, str):
                 # 이미 올바른 형식인지 확인
@@ -576,6 +580,7 @@ class FieldMapper:
                     "%Y-%m-%d",
                     "%Y-%m-%d %H:%M:%S",
                     "%Y-%m-%dT%H:%M:%S",
+                    "%Y-%m-%dT%H:%M:%SZ",  # ISO 8601 with Z suffix
                     "%Y-%m-%dT%H:%M:%S.%fZ",  # ISO 8601 with microseconds
                     "%Y-%m-%d %H:%M:%S UTC",  # Google Cloud usage_start_time 형식
                     "%Y-%m-%d %H:%M:%S.%f UTC",  # Google Cloud export_time 형식

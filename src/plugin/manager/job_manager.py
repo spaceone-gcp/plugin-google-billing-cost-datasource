@@ -73,6 +73,14 @@ class JobManager(BaseManager):
             f"Schema: {schema}, Start: {start}, Last sync: {last_synchronized_at}"
         )
         _LOGGER.debug(f"[JobManager.get_tasks] Options keys: {list(options.keys())}")
+
+        # filed_mapper 오타 사용 시 경고 (하위 호환성은 유지하지만 경고)
+        if "filed_mapper" in options and "field_mapper" not in options:
+            _LOGGER.warning(
+                "[JobManager.get_tasks] Using deprecated 'filed_mapper' option. "
+                "Please use 'field_mapper' instead for better compatibility."
+            )
+
         _LOGGER.debug(
             f"[JobManager.get_tasks] Secret data keys: {list(secret_data.keys()) if secret_data else 'None'}"
         )
@@ -581,10 +589,12 @@ class JobManager(BaseManager):
                 for index, file_info in enumerate(files):
                     try:
                         file_path = file_info["name"]
-                        _LOGGER.debug(
-                            f"[JobManager._get_http_file_tasks] Creating task {index + 1}/{len(files)}: "
-                            f"{bucket_name}/{file_path}"
-                        )
+                        # 작업 생성은 처음 3개와 마지막 3개만 로깅 (스팸 방지)
+                        if index + 1 <= 3 or index + 1 > len(files) - 3:
+                            _LOGGER.debug(
+                                f"[JobManager._get_http_file_tasks] Creating task {index + 1}/{len(files)}: "
+                                f"{bucket_name}/{file_path}"
+                            )
 
                         task_options = {
                             "bucket_name": bucket_name,
@@ -874,14 +884,12 @@ class JobManager(BaseManager):
             # 프로젝트 ID 매칭 검증
             if file_project_id == project_id:
                 filtered_files.append(file_info)
-                _LOGGER.debug(
-                    f"[_filter_files_by_project_id] ✅ Matched file: {file_path} (project_id={project_id})"
-                )
-            else:
-                _LOGGER.debug(
-                    f"[_filter_files_by_project_id] ❌ Skipped file: {file_path} "
-                    f"(file project: {file_project_id}, expected: {project_id})"
-                )
+                # 매칭된 파일은 처음 3개만 로깅 (스팸 방지)
+                if len(filtered_files) <= 3:
+                    _LOGGER.debug(
+                        f"[_filter_files_by_project_id] ✅ Matched file: {file_path} (project_id={project_id})"
+                    )
+            # 스킵된 파일은 로깅하지 않음 (스팸 방지) - 요약 정보만 INFO 레벨로 출력
 
         _LOGGER.info(
             f"[_filter_files_by_project_id] Filtered {len(filtered_files)}/{len(files)} files for project_id={project_id}"
@@ -944,25 +952,15 @@ class JobManager(BaseManager):
                 # 날짜와 프로젝트 ID 모두 매치되는 경우만 포함
                 if date_match and project_match:
                     filtered_files.append(file_info)
-                    filter_reason = f"date={target_year}/{target_month}"
-                    if project_id:
-                        filter_reason += f", project_id={project_id}"
-                    _LOGGER.info(
-                        f"[_filter_files_by_date] ✅ Matched file: {file_path} ({filter_reason})"
-                    )
-                else:
-                    skip_reason = []
-                    if not date_match:
-                        skip_reason.append(
-                            f"date mismatch (file: {file_year}/{file_month}, expected: {target_year}/{target_month})"
+                    # 매칭된 파일은 처음 3개만 로깅 (스팸 방지)
+                    if len(filtered_files) <= 3:
+                        filter_reason = f"date={target_year}/{target_month}"
+                        if project_id:
+                            filter_reason += f", project_id={project_id}"
+                        _LOGGER.debug(
+                            f"[_filter_files_by_date] ✅ Matched file: {file_path} ({filter_reason})"
                         )
-                    if not project_match:
-                        skip_reason.append(
-                            f"project mismatch (file: {file_project_id}, expected: {project_id})"
-                        )
-                    _LOGGER.debug(
-                        f"[_filter_files_by_date] ❌ Skipped file: {file_path} ({', '.join(skip_reason)})"
-                    )
+                # 스킵된 파일은 로깅하지 않음 (스팸 방지) - 요약 정보만 INFO 레벨로 출력
 
             filter_summary = f"date={start_date}"
             if project_id:
