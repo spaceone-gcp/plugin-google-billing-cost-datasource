@@ -133,12 +133,24 @@ class FieldMapper:
             return cost_value
 
     def _map_tags_field(self, source_data: dict) -> dict:
-        """tags 필드 특별 처리 - 문자열인 경우 JSON 파싱"""
+        """tags 필드 특별 처리 - Google Cloud labels 배열을 딕셔너리로 변환"""
         tags_value = self._map_field("tags", source_data, {})
 
         # 이미 딕셔너리인 경우 그대로 반환
         if isinstance(tags_value, dict):
             return tags_value
+
+        # Google Cloud labels 배열 형태 처리 [{"key": "k1", "value": "v1"}, ...]
+        if isinstance(tags_value, list):
+            try:
+                result_dict = {}
+                for item in tags_value:
+                    if isinstance(item, dict) and "key" in item and "value" in item:
+                        result_dict[item["key"]] = item["value"]
+                return result_dict
+            except Exception as e:
+                _LOGGER.warning(f"[FieldMapper] Failed to process labels array: {e}")
+                return {}
 
         # 문자열인 경우 JSON 파싱 시도
         if isinstance(tags_value, str) and tags_value.strip():
@@ -146,12 +158,21 @@ class FieldMapper:
                 import json
 
                 parsed_tags = json.loads(tags_value)
-                # 파싱된 결과가 딕셔너리인지 확인
+                
+                # 파싱된 결과가 딕셔너리인 경우
                 if isinstance(parsed_tags, dict):
                     return parsed_tags
+                    
+                # 파싱된 결과가 Google Cloud labels 배열인 경우
+                elif isinstance(parsed_tags, list):
+                    result_dict = {}
+                    for item in parsed_tags:
+                        if isinstance(item, dict) and "key" in item and "value" in item:
+                            result_dict[item["key"]] = item["value"]
+                    return result_dict
                 else:
                     _LOGGER.warning(
-                        f"[FieldMapper] Parsed tags is not a dict: {type(parsed_tags)}"
+                        f"[FieldMapper] Parsed tags is not a dict or labels array: {type(parsed_tags)}"
                     )
                     return {}
             except (json.JSONDecodeError, ValueError) as e:
