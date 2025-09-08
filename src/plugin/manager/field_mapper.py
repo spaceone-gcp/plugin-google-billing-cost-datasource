@@ -56,7 +56,7 @@ class FieldMapper:
             # additional_info 필드 특별 처리 - 기존 데이터와 매핑 데이터 병합
             mapped_additional_info = self._map_field("additional_info", source_data, {})
             existing_additional_info = source_data.get("additional_info", {})
-            
+
             # 기존 additional_info와 매핑된 additional_info 병합
             # 매핑된 값이 우선순위를 가짐
             final_additional_info = {}
@@ -155,27 +155,27 @@ class FieldMapper:
         # 문자열인 경우 JSON 파싱 시도
         if isinstance(tags_value, str) and tags_value.strip():
             # 이미 처리한 잘린 문자열인지 캐시 확인 (성능 최적화)
-            if not hasattr(self, '_truncated_cache'):
+            if not hasattr(self, "_truncated_cache"):
                 self._truncated_cache = set()
-            
+
             tags_hash = hash(tags_value[:100])  # 처음 100자로 해시 생성
             if tags_hash in self._truncated_cache:
                 return {}  # 이미 잘린 것으로 확인된 문자열
-            
+
             # 디버깅을 위한 로깅 (처음 몇 개만)
-            if not hasattr(self, '_debug_logged'):
+            if not hasattr(self, "_debug_logged"):
                 _LOGGER.debug(f"[FieldMapper] Raw tags_value: {repr(tags_value[:100])}")
                 self._debug_logged = True
-            
+
             try:
                 import json
 
                 parsed_tags = json.loads(tags_value)
-                
+
                 # 파싱된 결과가 딕셔너리인 경우
                 if isinstance(parsed_tags, dict):
                     return parsed_tags
-                    
+
                 # 파싱된 결과가 Google Cloud labels 배열인 경우
                 elif isinstance(parsed_tags, list):
                     result_dict = {}
@@ -193,30 +193,34 @@ class FieldMapper:
                 truncated_patterns = [
                     "', 'value': '",  # 잘린 key-value 패턴
                     "'key':",  # 시작만 있는 패턴
-                    '"key":',  # 시작만 있는 패턴  
+                    '"key":',  # 시작만 있는 패턴
                     "'value': '",  # value만 있는 패턴
                     '"value": "',  # value만 있는 패턴
                 ]
-                
+
                 is_truncated = (
-                    len(tags_value) > 50 and 
-                    not tags_value.strip().endswith(('}', ']', '"', "'"))
+                    len(tags_value) > 50
+                    and not tags_value.strip().endswith(("}", "]", '"', "'"))
                 ) or any(pattern in tags_value[:50] for pattern in truncated_patterns)
-                
+
                 if is_truncated:
                     # 잘린 문자열로 보이는 경우 - 캐시에 추가하고 빈 딕셔너리 반환
-                    if hasattr(self, '_truncated_cache'):
+                    if hasattr(self, "_truncated_cache"):
                         self._truncated_cache.add(tags_hash)
                     return {}
-                
+
                 # 로깅 빈도 제한 - 같은 오류는 최대 5번만 로깅
-                if not hasattr(self, '_json_error_count'):
+                if not hasattr(self, "_json_error_count"):
                     self._json_error_count = {}
                 error_key = str(e)[:50]  # 오류 메시지의 처음 50자로 키 생성
                 if self._json_error_count.get(error_key, 0) < 5:
-                    self._json_error_count[error_key] = self._json_error_count.get(error_key, 0) + 1
-                    _LOGGER.debug(f"[FieldMapper] JSON parsing failed for: {repr(tags_value[:50])}, error: {e}")
-                
+                    self._json_error_count[error_key] = (
+                        self._json_error_count.get(error_key, 0) + 1
+                    )
+                    _LOGGER.debug(
+                        f"[FieldMapper] JSON parsing failed for: {repr(tags_value[:50])}, error: {e}"
+                    )
+
                 # 일반적인 잘못된 JSON 형식들을 수정 시도
                 cleaned_value = self._try_fix_malformed_json(tags_value)
                 if cleaned_value != tags_value:
@@ -227,12 +231,16 @@ class FieldMapper:
                         elif isinstance(parsed_tags, list):
                             result_dict = {}
                             for item in parsed_tags:
-                                if isinstance(item, dict) and "key" in item and "value" in item:
+                                if (
+                                    isinstance(item, dict)
+                                    and "key" in item
+                                    and "value" in item
+                                ):
                                     result_dict[item["key"]] = item["value"]
                             return result_dict
                     except (json.JSONDecodeError, ValueError):
                         pass
-                
+
                 # key=value 형태 파싱 시도
                 return self._parse_key_value_pairs(tags_value)
 
@@ -244,24 +252,29 @@ class FieldMapper:
         try:
             # 일반적인 문제들 수정
             cleaned = json_str.strip()
-            
+
             # 잘린 문자열인 경우 조기 반환 (수정 불가능)
-            if len(cleaned) > 50 and not cleaned.endswith(('}', ']', '"')):
+            if len(cleaned) > 50 and not cleaned.endswith(("}", "]", '"')):
                 return json_str
-            
+
             # 1. 작은따옴표를 큰따옴표로 변경
             if "'" in cleaned and '"' not in cleaned:
                 cleaned = cleaned.replace("'", '"')
-            
+
             # 2. 키에 따옴표가 없는 경우 추가 (간단한 경우만)
             import re
+
             # {key: "value"} -> {"key": "value"}
-            cleaned = re.sub(r'{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'{"\1":', cleaned)
-            cleaned = re.sub(r',\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r', "\1":', cleaned)
-            
+            cleaned = re.sub(r"{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'{"\1":', cleaned)
+            cleaned = re.sub(r",\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r', "\1":', cleaned)
+
             # 3. Python-style True/False를 JSON true/false로 변경
-            cleaned = cleaned.replace('True', 'true').replace('False', 'false').replace('None', 'null')
-            
+            cleaned = (
+                cleaned.replace("True", "true")
+                .replace("False", "false")
+                .replace("None", "null")
+            )
+
             return cleaned
         except Exception:
             return json_str
@@ -270,25 +283,25 @@ class FieldMapper:
         """key=value 형태의 문자열을 딕셔너리로 파싱"""
         try:
             result = {}
-            
+
             # 다양한 구분자 시도
-            separators = [',', ';', '&', ' ']
-            
+            separators = [",", ";", "&", " "]
+
             for sep in separators:
                 if sep in text:
                     pairs = text.split(sep)
                     for pair in pairs:
-                        if '=' in pair:
-                            key, value = pair.split('=', 1)
+                        if "=" in pair:
+                            key, value = pair.split("=", 1)
                             result[key.strip()] = value.strip()
                     if result:  # 성공적으로 파싱된 경우
                         return result
-            
+
             # 단일 key=value 형태
-            if '=' in text and len(text.split('=')) == 2:
-                key, value = text.split('=', 1)
+            if "=" in text and len(text.split("=")) == 2:
+                key, value = text.split("=", 1)
                 return {key.strip(): value.strip()}
-                
+
             return {}
         except Exception:
             return {}
@@ -578,16 +591,22 @@ class FieldMapper:
                     except ValueError:
                         continue
 
-                # 파싱 실패 시 원본을 문자열로 변환하여 반환
-                return str(value)
+                # 파싱 실패 시 현재 날짜를 기본값으로 사용
+                _LOGGER.warning(
+                    f"[FieldMapper] Failed to parse date: {value}, using current date"
+                )
+                return datetime.now().strftime("%Y-%m-%d")
             else:
-                # 기타 타입은 문자열로 변환하여 반환
-                return str(value) if value is not None else ""
+                # 기타 타입은 현재 날짜를 기본값으로 사용
+                _LOGGER.warning(
+                    f"[FieldMapper] Unsupported date type: {type(value)}, value: {value}, using current date"
+                )
+                return datetime.now().strftime("%Y-%m-%d")
 
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Date format failed: {value}, error: {e}")
-            # 예외 발생 시에도 반드시 문자열 반환
-            return str(value) if value is not None else ""
+            # 예외 발생 시에도 올바른 YYYY-MM-DD 형식으로 반환
+            return datetime.now().strftime("%Y-%m-%d")
 
     def _get_default_mapping(self, provider: str) -> dict:
         """프로바이더별 기본 매핑 반환"""
