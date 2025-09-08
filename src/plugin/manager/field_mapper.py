@@ -46,12 +46,9 @@ class FieldMapper:
             cost_value = self._get_cost_by_option(source_data)
             usage_quantity_value = self._map_field("usage_quantity", source_data, 0)
 
-            # billed_date 필드는 반드시 문자열로 변환
+            # billed_date 필드는 반드시 YYYY-MM-DD 형식으로 변환
             billed_date_value = self._map_field("billed_date", source_data, "")
-            if not isinstance(billed_date_value, str):
-                billed_date_value = (
-                    str(billed_date_value) if billed_date_value is not None else ""
-                )
+            billed_date_value = self._format_date(billed_date_value)
 
             # additional_info 필드 특별 처리 - 기존 데이터와 매핑 데이터 병합
             mapped_additional_info = self._map_field("additional_info", source_data, {})
@@ -89,7 +86,7 @@ class FieldMapper:
 
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
-            raise ERROR_INVALID_ARGUMENT(key=f"field_mapping_error: {str(e)}")
+            raise ERROR_INVALID_ARGUMENT(key=f"field_mapper_error: {str(e)}")
 
     def _get_cost_by_option(self, source_data: dict):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택

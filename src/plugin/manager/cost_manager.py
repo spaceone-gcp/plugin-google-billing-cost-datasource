@@ -86,6 +86,7 @@ class CostManager(BaseManager):
             "bucket_name": options.get("bucket_name"),
             "project_id": options.get("project_id"),
             "file_path": task_options.get("file_path"),
+            "base_url": options.get("base_url") or task_options.get("base_url"),
             "data_source_type": task_options.get("data_source_type"),
             "select_cost": options.get("select_cost"),
             "field_mapper": options.get("field_mapper"),
@@ -248,7 +249,7 @@ class CostManager(BaseManager):
                 # Field Mapper 초기화 (기본 매핑 사용)
                 # filed_mapper 오타 처리 (하위 호환성을 위해)
                 field_mapper_config = options.get("field_mapper") or options.get("filed_mapper", {})
-                mapping_config = task_options.get("field_mapping", {}) or field_mapper_config
+                mapping_config = task_options.get("field_mapper", {}) or field_mapper_config
                 provider = options.get("provider", "google_cloud")
                 self.field_mapper = FieldMapper(
                     mapping_config,
@@ -289,7 +290,7 @@ class CostManager(BaseManager):
                 # Field Mapper 초기화 (기본 매핑 사용)
                 # filed_mapper 오타 처리 (하위 호환성을 위해)
                 field_mapper_config = options.get("field_mapper") or options.get("filed_mapper", {})
-                mapping_config = task_options.get("field_mapping", {}) or field_mapper_config
+                mapping_config = task_options.get("field_mapper", {}) or field_mapper_config
                 provider = options.get("provider", "google_cloud")
                 self.field_mapper = FieldMapper(
                     mapping_config,

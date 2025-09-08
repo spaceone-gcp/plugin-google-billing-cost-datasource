@@ -457,7 +457,7 @@ class JobManager(BaseManager):
                         "bucket_name": bucket_name,
                         "file_path": file_path,
                         "data_source_type": DATA_SOURCE_TYPES["http_file"],
-                        "field_mapping": options.get("field_mapping", {}),
+                        "field_mapper": options.get("field_mapper", {}),
                         "parsing_options": file_info.get("parsing_options", {}),
                     }
 
@@ -600,7 +600,7 @@ class JobManager(BaseManager):
                             "bucket_name": bucket_name,
                             "file_path": file_path,
                             "data_source_type": DATA_SOURCE_TYPES["http_file"],
-                            "field_mapping": options.get("field_mapping", {}),
+                            "field_mapper": options.get("field_mapper", {}),
                             "parsing_options": options.get("parsing_options", {}),
                         }
 
@@ -640,7 +640,7 @@ class JobManager(BaseManager):
                     "bucket_name": bucket_name,
                     "file_path": file_path,
                     "data_source_type": DATA_SOURCE_TYPES["http_file"],
-                    "field_mapping": options.get("field_mapping", {}),
+                    "field_mapper": options.get("field_mapper", {}),
                     "parsing_options": options.get("parsing_options", {}),
                 }
 

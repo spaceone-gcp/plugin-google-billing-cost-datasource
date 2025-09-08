@@ -201,6 +201,7 @@ class RequestDeduplicator:
         key_data = {
             "bucket_name": options.get("bucket_name"),
             "file_path": task_options.get("file_path"),
+            "base_url": options.get("base_url") or task_options.get("base_url"),
             "project_id": options.get("project_id"),
             "field_mapper": options.get("field_mapper", {}),
             "select_cost": options.get("select_cost"),

@@ -127,7 +127,7 @@ options:
   provider: "google_cloud"
   bucket_name: "your-billing-export-bucket"
   file_pattern: "gcp_billing_export_v1_*.csv.gz"
-  field_mapping:
+  field_mapper:
     cost: "cost"
     billed_date: "usage_start_time"
     currency: "currency"
