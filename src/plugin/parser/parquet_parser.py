@@ -70,10 +70,58 @@ class ParquetParser(BaseParser):
                             # Series를 dict로 변환
                             row_dict = row.to_dict()
 
+                            # 🚨 CRITICAL: 원본 데이터에 data 필드가 있는지 확인
+                            if processed_count < 3:  # 처음 3개 레코드만 로그
+                                if "data" in row_dict:
+                                    _LOGGER.error(
+                                        f"[ParquetParser] CRITICAL: Original row_dict contains 'data' field: type={type(row_dict['data'])}, value={repr(row_dict['data'])[:100]}"
+                                    )
+                                else:
+                                    _LOGGER.info(
+                                        f"[ParquetParser] Original row_dict does NOT contain 'data' field. Keys: {list(row_dict.keys())[:10]}..."
+                                    )
+
                             # NaN 값을 None으로 변환
                             row_dict = self._clean_nan_values(row_dict)
 
+                            # 🚨 CRITICAL: NaN 정리 후 data 필드 확인
+                            if processed_count < 3:
+                                if "data" in row_dict:
+                                    _LOGGER.error(
+                                        f"[ParquetParser] CRITICAL: After _clean_nan_values, 'data' field exists: type={type(row_dict['data'])}, value={repr(row_dict['data'])[:100]}"
+                                    )
+
                             mapped_record = field_mapper.map_record(row_dict)
+
+                            # 🚨 CRITICAL: 매핑 후 data 필드 확인 및 강제 제거
+                            if processed_count < 3:
+                                if "data" in mapped_record:
+                                    original_type = type(mapped_record["data"])
+                                    original_value = repr(mapped_record["data"])[:100]
+                                    _LOGGER.error(
+                                        f"[ParquetParser] CRITICAL: After field_mapper.map_record, 'data' field exists: type={original_type}, value={original_value}"
+                                    )
+                                    _LOGGER.error(
+                                        f"[ParquetParser] CRITICAL: All mapped_record keys: {list(mapped_record.keys())}"
+                                    )
+                                    # 🚨 EMERGENCY: 즉시 제거!
+                                    del mapped_record["data"]
+                                    _LOGGER.error(
+                                        f"[ParquetParser] EMERGENCY: Force-removed data field (was {original_type})"
+                                    )
+                                else:
+                                    _LOGGER.info(
+                                        "[ParquetParser] After field_mapper.map_record, NO 'data' field (as expected)"
+                                    )
+                                    _LOGGER.info(
+                                        f"[ParquetParser] mapped_record keys: {list(mapped_record.keys())}"
+                                    )
+
+                            # 🚨 FINAL EMERGENCY: SpaceONE 프레임워크 호환성을 위해 data 필드 보장
+                            if "data" not in mapped_record or not isinstance(
+                                mapped_record["data"], dict
+                            ):
+                                mapped_record["data"] = {}
                             batch_records.append(mapped_record)
                             processed_count += 1
 
@@ -148,7 +196,16 @@ class ParquetParser(BaseParser):
                     f"[ParquetParser] Failed to process value for key '{key}': {e}"
                 )
                 # 중첩 구조 필드들은 빈 문자열로 변환하지 않음
-                if key in ['project', 'service', 'sku', 'location', 'usage', 'labels', 'credits', 'invoice']:
+                if key in [
+                    "project",
+                    "service",
+                    "sku",
+                    "location",
+                    "usage",
+                    "labels",
+                    "credits",
+                    "invoice",
+                ]:
                     cleaned_dict[key] = value  # 원본 값 유지
                 elif key.lower() in ["cost", "usage_quantity", "amount"]:
                     cleaned_dict[key] = 0

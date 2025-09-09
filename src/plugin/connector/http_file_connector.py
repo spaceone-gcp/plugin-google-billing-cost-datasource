@@ -35,12 +35,12 @@ class HttpFileConnector(BaseConnector):
         _LOGGER.info(
             f"[HttpFileConnector] Starting session creation process for schema: {schema}"
         )
-        _LOGGER.debug(
-            f"[HttpFileConnector] Session creation options: {options}"
-        )
-        
+        _LOGGER.debug(f"[HttpFileConnector] Session creation options: {options}")
+
         if not secret_data:
-            _LOGGER.error("[HttpFileConnector] Session creation failed: secret_data is empty or None")
+            _LOGGER.error(
+                "[HttpFileConnector] Session creation failed: secret_data is empty or None"
+            )
             raise ERROR_REQUIRED_PARAMETER(key="secret_data")
 
         _LOGGER.debug("[HttpFileConnector] Validating secret_data structure")
@@ -53,7 +53,7 @@ class HttpFileConnector(BaseConnector):
 
         self.project_id = secret_data["project_id"]
         bucket_name = options.get("bucket_name", "")
-        
+
         _LOGGER.info(
             f"[HttpFileConnector] Session parameters - Project ID: {self.project_id}, Bucket: {bucket_name or 'Not specified'}"
         )
@@ -107,10 +107,14 @@ class HttpFileConnector(BaseConnector):
                 f"Service account email: {getattr(self.credentials, 'service_account_email', 'Unknown')}"
             )
         except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to create Service Account credentials: {e}")
+            _LOGGER.error(
+                f"[HttpFileConnector] Failed to create Service Account credentials: {e}"
+            )
             raise
 
-        _LOGGER.debug(f"[HttpFileConnector] Creating GCS client for project: {self.project_id}")
+        _LOGGER.debug(
+            f"[HttpFileConnector] Creating GCS client for project: {self.project_id}"
+        )
         try:
             self.gcs_client = storage.Client(
                 credentials=self.credentials, project=self.project_id
@@ -129,10 +133,14 @@ class HttpFileConnector(BaseConnector):
         )
         session_data = {"credentials": self.credentials, "gcs_client": self.gcs_client}
         try:
-            concurrency_manager.cache_session(self.project_id, bucket_name, session_data)
+            concurrency_manager.cache_session(
+                self.project_id, bucket_name, session_data
+            )
             _LOGGER.debug("[HttpFileConnector] Session cached successfully")
         except Exception as e:
-            _LOGGER.warning(f"[HttpFileConnector] Failed to cache session (continuing anyway): {e}")
+            _LOGGER.warning(
+                f"[HttpFileConnector] Failed to cache session (continuing anyway): {e}"
+            )
 
         _LOGGER.info(
             f"[HttpFileConnector] New GCS session created and cached successfully for project: {self.project_id}"
@@ -405,12 +413,10 @@ class HttpFileConnector(BaseConnector):
         _LOGGER.debug(
             f"[HttpFileConnector] Validating secret data keys. Required keys: {REQUIRED_SECRET_KEYS}"
         )
-        
+
         provided_keys = list(secret_data.keys()) if secret_data else []
-        _LOGGER.debug(
-            f"[HttpFileConnector] Provided secret data keys: {provided_keys}"
-        )
-        
+        _LOGGER.debug(f"[HttpFileConnector] Provided secret data keys: {provided_keys}")
+
         missing_keys = [key for key in REQUIRED_SECRET_KEYS if key not in secret_data]
         if missing_keys:
             _LOGGER.error(
@@ -418,5 +424,5 @@ class HttpFileConnector(BaseConnector):
             )
             for key in missing_keys:
                 raise ERROR_REQUIRED_PARAMETER(key=f"secret_data.{key}")
-        
+
         _LOGGER.debug("[HttpFileConnector] All required secret data keys are present")

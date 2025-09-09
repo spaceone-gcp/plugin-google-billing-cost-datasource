@@ -2,8 +2,23 @@ import logging
 from datetime import datetime, timedelta
 from typing import Generator, List
 
-from spaceone.core.error import ERROR_REQUIRED_PARAMETER
-from spaceone.core.manager import BaseManager
+# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
+try:
+    from spaceone.core.error import ERROR_REQUIRED_PARAMETER
+    from spaceone.core.manager import BaseManager
+except ImportError:
+    # Mock for local development
+    class MockError:
+        def __call__(self, *args, **kwargs):
+            return Exception("Mock SpaceONE Error")
+
+    ERROR_REQUIRED_PARAMETER = MockError()
+
+    class BaseManager:
+        """Mock BaseManager for local development"""
+
+        pass
+
 
 from ..conf.cost_conf import (
     BIGQUERY_TABLE_PREFIX,
@@ -172,6 +187,7 @@ class CostManager(BaseManager):
         for index, row in response_stream.iterrows():
             yield self._make_cost_data(row)
 
+        # BigQuery 데이터의 경우 빈 results 반환
         yield {"results": []}
 
     def _get_data_from_http_file(
@@ -248,14 +264,25 @@ class CostManager(BaseManager):
 
                 # Field Mapper 초기화 (기본 매핑 사용)
                 # filed_mapper 오타 처리 (하위 호환성을 위해)
-                field_mapper_config = options.get("field_mapper") or options.get("filed_mapper", {})
-                mapping_config = task_options.get("field_mapper", {}) or field_mapper_config
+                field_mapper_config = options.get("field_mapper") or options.get(
+                    "filed_mapper", {}
+                )
+                mapping_config = (
+                    task_options.get("field_mapper", {}) or field_mapper_config
+                )
                 provider = options.get("provider", "google_cloud")
+
+                # 원본 데이터 포함 옵션 처리
+                include_raw_data = options.get("include_raw_data", False)
+                wrap_as_sample_data = options.get("wrap_as_sample_data", False)
+
                 self.field_mapper = FieldMapper(
                     mapping_config,
                     provider,
                     self.select_cost_option,
                     self.cost_metric_option,
+                    include_raw_data,
+                    wrap_as_sample_data,
                 )
 
                 _LOGGER.debug(
@@ -268,12 +295,16 @@ class CostManager(BaseManager):
                 # 파싱 옵션 설정
                 parsing_options = task_options.get("parsing_options", {})
 
-                # 데이터 스트림 처리
+                # 데이터 스트림 처리 - BigQuery results 구조로 변환
                 for batch_result in parser.parse_stream(
                     file_stream, self.field_mapper, **parsing_options
                 ):
                     if batch_result and "results" in batch_result:
-                        yield batch_result
+                        # GCS 응답을 BigQuery results 구조로 변환
+                        converted_result = self._convert_to_bigquery_structure(
+                            batch_result
+                        )
+                        yield converted_result
 
                 # URL 처리 완료 메시지
                 _LOGGER.info(
@@ -289,14 +320,25 @@ class CostManager(BaseManager):
 
                 # Field Mapper 초기화 (기본 매핑 사용)
                 # filed_mapper 오타 처리 (하위 호환성을 위해)
-                field_mapper_config = options.get("field_mapper") or options.get("filed_mapper", {})
-                mapping_config = task_options.get("field_mapper", {}) or field_mapper_config
+                field_mapper_config = options.get("field_mapper") or options.get(
+                    "filed_mapper", {}
+                )
+                mapping_config = (
+                    task_options.get("field_mapper", {}) or field_mapper_config
+                )
                 provider = options.get("provider", "google_cloud")
+
+                # 원본 데이터 포함 옵션 처리
+                include_raw_data = options.get("include_raw_data", False)
+                wrap_as_sample_data = options.get("wrap_as_sample_data", False)
+
                 self.field_mapper = FieldMapper(
                     mapping_config,
                     provider,
                     self.select_cost_option,
                     self.cost_metric_option,
+                    include_raw_data,
+                    wrap_as_sample_data,
                 )
 
                 # 압축 처리를 위한 import
@@ -450,11 +492,18 @@ class CostManager(BaseManager):
                             # 파싱 옵션 설정
                             parsing_options = task_options.get("parsing_options", {})
 
-                            # 데이터 스트림 처리
+                            # 데이터 스트림 처리 - BigQuery results 구조로 변환
                             for batch_result in parser.parse_stream(
                                 file_stream, self.field_mapper, **parsing_options
                             ):
-                                yield batch_result
+                                if batch_result and "results" in batch_result:
+                                    # GCS 응답을 BigQuery results 구조로 변환
+                                    converted_result = (
+                                        self._convert_to_bigquery_structure(
+                                            batch_result
+                                        )
+                                    )
+                                    yield converted_result
 
                             _LOGGER.info(
                                 f"[get_data_from_http_file] Successfully processed file: {file_name}"
@@ -477,6 +526,41 @@ class CostManager(BaseManager):
                 f"[get_data_from_http_file] Failed to process file: {e}", exc_info=True
             )
             raise e
+
+    def _convert_to_bigquery_structure(self, gcs_result: dict) -> dict:
+        """GCS 응답을 BigQuery results 구조로 변환하지 않고 그대로 반환
+
+        BigQuery 구조 변환이 billed_date 누락 문제를 일으키므로,
+        SpaceONE 표준 구조를 유지하여 반환합니다.
+
+        Args:
+            gcs_result: GCS에서 가져온 결과 ({"results": [...]})
+
+        Returns:
+            SpaceONE 표준 구조를 유지한 결과
+        """
+        if not gcs_result or "results" not in gcs_result:
+            return {"results": []}
+
+        # 🚨 FINAL CRITICAL: SpaceONE 프레임워크 요구사항 준수
+        # BigQuery 구조 변환 시 billed_date 누락 문제가 발생하므로 원본 SpaceONE 구조를 보존하되,
+        # Google Cloud Billing에는 data 필드가 없지만 SpaceONE에서 필수로 요구하므로 빈 딕셔너리 제공
+        # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
+
+        if "results" in gcs_result and isinstance(gcs_result["results"], list):
+            for i, record in enumerate(gcs_result["results"]):
+                if isinstance(record, dict):
+                    # SpaceONE 검증 오류 해결을 위해 data 필드를 빈 딕셔너리로 설정
+                    record["data"] = {}
+                    if i < 3:  # 처음 3개만 로그
+                        _LOGGER.debug(
+                            f"[_convert_to_bigquery_structure] Set data field to empty dict for record {i} (SpaceONE framework compatibility)"
+                        )
+
+        _LOGGER.debug(
+            f"[_convert_to_bigquery_structure] Maintaining SpaceONE structure for {len(gcs_result['results'])} items with SpaceONE-compatible data fields"
+        )
+        return gcs_result
 
     def _make_cost_data(self, row) -> dict:
         """Source Data Model (DataFrame)

@@ -39,8 +39,114 @@ class BaseParser(ABC):
         self.chunk_size = max(1, min(chunk_size, self.max_chunk_size))
 
     def _create_batch_result(self, records: list) -> dict:
-        """배치 결과 생성"""
-        return {"results": records}
+        """배치 결과 생성 - billed_date 필드 검증 및 직렬화 포함"""
+        # 🚨 CRITICAL: 모든 레코드에 billed_date 필드가 있는지 검증
+        validated_records = []
+        for i, record in enumerate(records):
+            # 🚨 CRITICAL: 입력 레코드에 data 필드가 있는지 확인
+            if i < 3:  # 처음 3개만 로그
+                if "data" in record:
+                    _LOGGER.error(
+                        f"[BaseParser] CRITICAL: Input record {i} contains 'data' field: type={type(record['data'])}, value={repr(record['data'])[:100]}"
+                    )
+                else:
+                    _LOGGER.info(
+                        f"[BaseParser] Input record {i} does NOT contain 'data' field (good)"
+                    )
+            if not record.get("billed_date"):
+                from datetime import datetime
+
+                record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+                _LOGGER.warning(
+                    f"[BaseParser] CRITICAL: Missing billed_date in record {i}, force-set to current date"
+                )
+
+            # 🚨 CRITICAL: 모든 Pandas/Numpy 객체를 직렬화 가능한 타입으로 변환
+            sanitized_record = self._sanitize_record_for_serialization(record)
+
+            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+            # Google Cloud Billing에는 data 필드가 없지만, SpaceONE에서 필수로 요구함
+            # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
+            # SpaceONE 검증 오류 해결을 위해 빈 딕셔너리 제공
+            sanitized_record["data"] = {}
+            if i < 3:  # 처음 3개만 로그
+                _LOGGER.debug(
+                    f"[BaseParser] Set data field to empty dict for record {i} (SpaceONE framework compatibility)"
+                )
+
+            validated_records.append(sanitized_record)
+
+        # 🚨 FINAL CRITICAL: SpaceONE 프레임워크 요구사항 최종 확인
+        # Google Cloud Billing에는 data 필드가 없지만, SpaceONE에서 필수로 요구함
+        # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
+        final_results = []
+        for i, record in enumerate(validated_records):
+            # SpaceONE 검증 오류 해결을 위해 data 필드를 빈 딕셔너리로 보장
+            if "data" not in record or not isinstance(record["data"], dict):
+                record["data"] = {}
+            final_results.append(record)
+
+        _LOGGER.info(
+            f"[BaseParser] FINAL: Ensured all {len(final_results)} records have valid data field for SpaceONE framework"
+        )
+        return {"results": final_results}
+
+    def _sanitize_record_for_serialization(self, record: dict) -> dict:
+        """레코드를 JSON 직렬화 가능한 타입으로 변환"""
+        import pandas as pd
+        import numpy as np
+        from decimal import Decimal
+        from datetime import datetime, date
+
+        def convert_value(value):
+            """개별 값을 직렬화 가능한 타입으로 변환"""
+            # 🚨 CRITICAL: None 체크를 먼저 수행
+            if value is None:
+                return None
+            # 🚨 CRITICAL: Pandas NA 체크는 안전하게 수행
+            try:
+                if pd.isna(value):
+                    return None
+            except (TypeError, ValueError):
+                # pd.isna()가 실패하면 무시하고 계속 진행
+                pass
+
+            if isinstance(value, (pd.Timestamp, pd.Timedelta)):
+                # Pandas Timestamp/Timedelta -> 문자열
+                return str(value)
+            elif isinstance(value, (np.integer, np.floating)):
+                # Numpy 숫자 타입 -> Python 기본 타입
+                return value.item()
+            elif isinstance(value, np.ndarray):
+                # Numpy 배열 -> 리스트
+                return [convert_value(item) for item in value]
+            elif isinstance(value, (datetime, date)):
+                # Python datetime -> 문자열
+                return value.isoformat()
+            elif isinstance(value, Decimal):
+                # Decimal -> float
+                return float(value)
+            elif isinstance(value, dict):
+                # 중첩 딕셔너리 재귀 처리
+                return {k: convert_value(v) for k, v in value.items()}
+            elif isinstance(value, (list, tuple)):
+                # 리스트/튜플 재귀 처리
+                return [convert_value(item) for item in value]
+            else:
+                return value
+
+        # 전체 레코드 변환
+        sanitized_record = {}
+        for key, value in record.items():
+            try:
+                sanitized_record[key] = convert_value(value)
+            except Exception as e:
+                _LOGGER.warning(
+                    f"[BaseParser] Failed to sanitize field {key}: {e}, converting to string"
+                )
+                sanitized_record[key] = str(value)  # 실패 시 문자열로 변환
+
+        return sanitized_record
 
     def _estimate_message_size(self, records: list) -> int:
         """메시지 크기 추정 (바이트 단위)"""

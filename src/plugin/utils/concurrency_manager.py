@@ -100,7 +100,7 @@ class ConcurrencyManager:
         _LOGGER.debug(
             f"[ConcurrencyManager] Attempting to cache session - Project: {project_id}, Bucket: {bucket_name}"
         )
-        
+
         with self._main_lock:
             current_cache_count = len(self._session_cache)
             self._session_cache[session_key] = {
@@ -124,14 +124,14 @@ class ConcurrencyManager:
             f"[ConcurrencyManager] Looking for cached session - Project: {project_id}, "
             f"Bucket: {bucket_name}, Max age: {max_age}s"
         )
-        
+
         with self._main_lock:
             total_cached = len(self._session_cache)
             _LOGGER.debug(
                 f"[ConcurrencyManager] Current cache status - Total sessions: {total_cached}, "
                 f"Looking for key: {session_key}"
             )
-            
+
             if session_key in self._session_cache:
                 cache_entry = self._session_cache[session_key]
                 age = time.time() - cache_entry["created_at"]
@@ -154,7 +154,9 @@ class ConcurrencyManager:
                     f"[ConcurrencyManager] No cached session found for: {session_key}"
                 )
 
-        _LOGGER.debug(f"[ConcurrencyManager] Returning None - no valid cached session for: {session_key}")
+        _LOGGER.debug(
+            f"[ConcurrencyManager] Returning None - no valid cached session for: {session_key}"
+        )
         return None
 
     def clear_expired_sessions(self, max_age: float = 300.0):
