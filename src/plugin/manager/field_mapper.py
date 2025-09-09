@@ -204,7 +204,7 @@ class FieldMapper:
 
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
-            raise ERROR_INVALID_ARGUMENT(key=f"field_mapper_error: {str(e)}")
+            raise ERROR_INVALID_ARGUMENT(key=f"field_mapper_error: {str(e)}") from e
 
     def _sanitize_for_serialization(self, data: dict) -> dict:
         """모든 데이터를 JSON 직렬화 가능한 타입으로 변환
@@ -215,10 +215,11 @@ class FieldMapper:
         Returns:
             직렬화 가능한 타입으로 변환된 데이터
         """
-        import pandas as pd
-        import numpy as np
+        from datetime import date, datetime
         from decimal import Decimal
-        from datetime import datetime, date
+
+        import numpy as np
+        import pandas as pd
 
         def convert_value(value):
             """개별 값을 직렬화 가능한 타입으로 변환"""
@@ -1003,151 +1004,151 @@ class FieldMapper:
                 },
                 "tags": {"field": "labels", "transform": "json_parse"},
                 "additional_info": {
-                    # 💰 비용 관련 필드들 (BigQuery 표준 스키마)
-                    "cost_at_list": "cost_at_list",
-                    "cost_after_credits": "cost_after_credits",
-                    "cost_at_effective_price_default": "cost_at_effective_price_default",
-                    "cost_at_list_consumption_model": "cost_at_list_consumption_model",
-                    "credits_amount": "credits_amount",  # AmortizedCost용
-                    "credits": {"field": "credits", "transform": "json_parse"},
-                    "currency_conversion_rate": "currency_conversion_rate",
+                    # 💰 비용 관련 필드들 (BigQuery 스타일)
+                    "Cost At List": "cost_at_list",
+                    "Cost After Credits": "cost_after_credits",
+                    "Cost At Effective Price Default": "cost_at_effective_price_default",
+                    "Cost At List Consumption Model": "cost_at_list_consumption_model",
+                    "Credits Amount": "credits_amount",  # AmortizedCost용
+                    "Credits Detail": {"field": "credits", "transform": "json_parse"},
+                    "Currency Conversion Rate": "currency_conversion_rate",
                     # 🏢 계정 및 청구 정보
-                    "billing_account_id": "billing_account_id",
-                    "invoice_month": {
+                    "Billing Account ID": "billing_account_id",
+                    "Invoice Month": {
                         "field": "invoice.month",
                         "fallback": "invoice_month",
                     },
-                    "invoice_publisher_type": {
+                    "Invoice Publisher Type": {
                         "field": "invoice.publisher_type",
                         "fallback": "invoice_publisher_type",
                     },
-                    "cost_type": "cost_type",
-                    "transaction_type": "transaction_type",
-                    "seller_name": "seller_name",
+                    "Cost Type": "cost_type",
+                    "Transaction Type": "transaction_type",
+                    "Seller Name": "seller_name",
                     # 🏗️ 프로젝트 정보 (BigQuery 중첩 구조)
-                    "project_id": {
+                    "Project ID": {
                         "field": "project.id",
                         "fallback": "project_id",
                     },
-                    "project_name": {
+                    "Project Name": {
                         "field": "project.name",
                         "fallback": "project_name",
                     },
-                    "project_number": {
+                    "Project Number": {
                         "field": "project.number",
                         "fallback": "project_number",
                     },
-                    "project_ancestry_numbers": {
+                    "Project Ancestry Numbers": {
                         "field": "project.ancestry_numbers",
                         "fallback": "project_ancestry_numbers",
                     },
                     # 🔧 서비스 정보 (BigQuery 중첩 구조)
-                    "service_id": {
+                    "Service ID": {
                         "field": "service.id",
                         "fallback": "service_id",
                     },
-                    "service_description": {
+                    "Service Description": {
                         "field": "service.description",
                         "fallback": "service_description",
                     },
                     # 📦 SKU 정보 (BigQuery 중첩 구조)
-                    "sku_id": {
+                    "SKU ID": {
                         "field": "sku.id",
                         "fallback": "sku_id",
                     },
-                    "sku_description": {
+                    "SKU Description": {
                         "field": "sku.description",
                         "fallback": "sku_description",
                     },
                     # 🌍 위치 정보 (BigQuery 중첩 구조)
-                    "location_location": {
+                    "Location": {
                         "field": "location.location",
                         "fallback": "location_location",
                     },
-                    "location_country": {
+                    "Location Country": {
                         "field": "location.country",
                         "fallback": "location_country",
                     },
-                    "location_region": {
+                    "Location Region": {
                         "field": "location.region",
                         "fallback": "location_region",
                     },
-                    "location_zone": {
+                    "Location Zone": {
                         "field": "location.zone",
                         "fallback": "location_zone",
                     },
                     # 📊 사용량 정보 (BigQuery 중첩 구조)
-                    "usage_start_time": "usage_start_time",
-                    "usage_end_time": "usage_end_time",
-                    "usage_amount": {
+                    "Usage Start Time": "usage_start_time",
+                    "Usage End Time": "usage_end_time",
+                    "Usage Amount": {
                         "field": "usage.amount",
                         "fallback": "usage_amount",
                     },
-                    "usage_unit": {
+                    "Usage Unit": {
                         "field": "usage.unit",
                         "fallback": "usage_unit",
                     },
-                    "usage_amount_in_pricing_units": {
+                    "Usage Amount In Pricing Units": {
                         "field": "usage.amount_in_pricing_units",
                         "fallback": "usage_amount_in_pricing_units",
                     },
-                    "usage_pricing_unit": {
+                    "Usage Pricing Unit": {
                         "field": "usage.pricing_unit",
                         "fallback": "usage_pricing_unit",
                     },
                     # 💲 가격 정보 (BigQuery price 중첩 구조)
-                    "price_effective_price": {
+                    "Price Effective Price": {
                         "field": "price.effective_price",
                         "fallback": "price_effective_price",
                     },
-                    "price_tier_start_amount": {
+                    "Price Tier Start Amount": {
                         "field": "price.tier_start_amount",
                         "fallback": "price_tier_start_amount",
                     },
-                    "price_unit": {
+                    "Price Unit": {
                         "field": "price.unit",
                         "fallback": "price_unit",
                     },
-                    "price_pricing_unit_quantity": {
+                    "Price Pricing Unit Quantity": {
                         "field": "price.pricing_unit_quantity",
                         "fallback": "price_pricing_unit_quantity",
                     },
-                    "price_list_price": {
+                    "Price List Price": {
                         "field": "price.list_price",
                         "fallback": "price_list_price",
                     },
-                    "price_effective_price_default": {
+                    "Price Effective Price Default": {
                         "field": "price.effective_price_default",
                         "fallback": "price_effective_price_default",
                     },
-                    "price_list_price_consumption_model": {
+                    "Price List Price Consumption Model": {
                         "field": "price.list_price_consumption_model",
                         "fallback": "price_list_price_consumption_model",
                     },
                     # 🏷️ 라벨 및 태그 (BigQuery 배열 구조)
-                    "system_labels": {
+                    "System Labels": {
                         "field": "system_labels",
                         "transform": "json_parse",
                     },
-                    "resource_tags": {"field": "tags", "transform": "json_parse"},
+                    "Resource Tags": {"field": "tags", "transform": "json_parse"},
                     # 📈 소비 모델 정보
-                    "consumption_model_id": {
+                    "Consumption Model ID": {
                         "field": "consumption_model.id",
                         "fallback": "consumption_model_id",
                     },
-                    "consumption_model_description": {
+                    "Consumption Model Description": {
                         "field": "consumption_model.description",
                         "fallback": "consumption_model_description",
                     },
                     # 🔍 메타데이터
-                    "export_time": "export_time",
-                    "adjustment_info": {
+                    "Export Time": "export_time",
+                    "Adjustment Info": {
                         "field": "adjustment_info",
                         "transform": "json_parse",
                     },
                     # 🆕 리소스 식별 필드 (상세 사용량 데이터용)
-                    "resource_name": "resource_name",
-                    "resource_global_name": "resource_global_name",
+                    "Resource Name": "resource_name",
+                    "Resource Global Name": "resource_global_name",
                 },
             }
 
