@@ -42,6 +42,15 @@ class FieldMapper:
             SpaceONE 형식으로 변환된 데이터
         """
         try:
+            # 디버깅: 첫 번째 레코드에서만 로그 출력
+            if not hasattr(self, '_debug_record_logged'):
+                _LOGGER.info(f"[FieldMapper] DEBUG: Source data keys: {list(source_data.keys())}")
+                # 중요한 중첩 필드들 확인
+                for key in ['service', 'sku', 'project', 'usage', 'invoice']:
+                    if key in source_data:
+                        _LOGGER.info(f"[FieldMapper] DEBUG: {key} = {repr(source_data[key])}")
+                self._debug_record_logged = True
+
             # select_cost 옵션에 따라 비용 필드 결정
             cost_value = self._get_cost_by_option(source_data)
             usage_quantity_value = self._map_field("usage_quantity", source_data, 0)
@@ -62,15 +71,27 @@ class FieldMapper:
             if isinstance(mapped_additional_info, dict):
                 final_additional_info.update(mapped_additional_info)
 
+            # 중요 필드들 개별 매핑 및 디버깅
+            product_value = self._map_field("product", source_data, "")
+            usage_type_value = self._map_field("usage_type", source_data, "")
+            resource_value = self._map_field("resource", source_data, "")
+            
+            # 디버깅: 매핑 결과 확인
+            if not hasattr(self, '_debug_mapping_logged'):
+                _LOGGER.info(f"[FieldMapper] DEBUG: product mapping result: {repr(product_value)}")
+                _LOGGER.info(f"[FieldMapper] DEBUG: usage_type mapping result: {repr(usage_type_value)}")
+                _LOGGER.info(f"[FieldMapper] DEBUG: resource mapping result: {repr(resource_value)}")
+                self._debug_mapping_logged = True
+
             mapped_data = {
                 "cost": cost_value,
                 "usage_quantity": usage_quantity_value,
                 "usage_unit": self._map_field("usage_unit", source_data, ""),
                 "provider": self.provider,
                 "region_code": self._map_field("region_code", source_data, "global"),
-                "product": self._map_field("product", source_data, ""),
-                "usage_type": self._map_field("usage_type", source_data, ""),
-                "resource": self._map_field("resource", source_data, ""),
+                "product": product_value,
+                "usage_type": usage_type_value,
+                "resource": resource_value,
                 "billed_date": billed_date_value,
                 "tags": self._map_tags_field(source_data),
                 "additional_info": final_additional_info,
@@ -318,8 +339,8 @@ class FieldMapper:
     def _compile_single_mapping(self, mapping_rule) -> Callable:
         """단일 매핑 규칙을 컴파일"""
         if isinstance(mapping_rule, str):
-            # 단순 필드 매핑: "source_field_name"
-            return lambda data, rule=mapping_rule: data.get(rule, "")
+            # 단순 필드 매핑: "source_field_name" 또는 중첩 경로 "parent.child"
+            return lambda data, rule=mapping_rule: self._get_nested_value(data, rule)
 
         elif isinstance(mapping_rule, dict):
             if "field" in mapping_rule:
@@ -336,15 +357,16 @@ class FieldMapper:
                     default=default_value,
                     fallback=fallback_field,
                 ):
-                    # 주 필드 시도
-                    value = data.get(field)
-                    if value:
+                    # 주 필드 시도 (중첩 경로 지원)
+                    value = self._get_nested_value(data, field)
+                    # None이 아니고 빈 문자열이 아닌 경우 사용 (빈 딕셔너리 {} 도 유효한 값)
+                    if value is not None and value != "":
                         return self._apply_transform(value, trans)
 
-                    # fallback 필드 시도
+                    # fallback 필드 시도 (중첩 경로 지원)
                     if fallback:
-                        fallback_value = data.get(fallback)
-                        if fallback_value:
+                        fallback_value = self._get_nested_value(data, fallback)
+                        if fallback_value is not None and fallback_value != "":
                             return self._apply_transform(fallback_value, trans)
 
                     # 기본값 사용
@@ -369,17 +391,30 @@ class FieldMapper:
                 # additional_info와 같은 복합 필드에 사용
                 def map_dict_fields(data, rules=mapping_rule):
                     result = {}
+                    # 디버깅: 첫 번째 레코드에서만 로그 출력
+                    if not hasattr(self, '_debug_dict_mapping_logged'):
+                        _LOGGER.info(f"[FieldMapper] DEBUG: map_dict_fields called with data keys: {list(data.keys())}")
+                        _LOGGER.info(f"[FieldMapper] DEBUG: mapping rules: {rules}")
+                        self._debug_dict_mapping_logged = True
+                    
                     for target_field, source_config in rules.items():
                         if isinstance(source_config, str):
-                            # 단순 필드 매핑
-                            result[target_field] = data.get(source_config, "")
+                            # 단순 필드 매핑 (중첩 경로 지원)
+                            value = self._get_nested_value(data, source_config, "")
+                            result[target_field] = value
+                            
+                            # 디버깅: 중요한 필드들만 로그
+                            if target_field in ['project_id', 'service_id', 'sku_id'] and not hasattr(self, f'_debug_{target_field}_logged'):
+                                _LOGGER.info(f"[FieldMapper] DEBUG: {target_field} = '{source_config}' -> '{value}'")
+                                setattr(self, f'_debug_{target_field}_logged', True)
+                                
                         elif (
                             isinstance(source_config, dict) and "field" in source_config
                         ):
-                            # 변환이 포함된 필드 매핑
+                            # 변환이 포함된 필드 매핑 (중첩 경로 지원)
                             field_name = source_config["field"]
                             transform = source_config.get("transform")
-                            value = data.get(field_name, "")
+                            value = self._get_nested_value(data, field_name, "")
                             result[target_field] = self._apply_transform(
                                 value, transform
                             )
@@ -404,6 +439,7 @@ class FieldMapper:
             try:
                 result = self.compiled_mappings[field_name](source_data)
                 # 결과가 빈 문자열이고 default_value가 있으면 default_value 사용
+                # 하지만 빈 딕셔너리나 빈 리스트는 유효한 값으로 간주
                 if result == "" and default_value is not None and default_value != "":
                     return default_value
                 return result
@@ -411,8 +447,75 @@ class FieldMapper:
                 _LOGGER.warning(f"[FieldMapper] Failed to map field {field_name}: {e}")
                 return default_value
 
-        # 매핑 규칙이 없으면 동일한 필드명으로 시도
-        return source_data.get(field_name, default_value)
+        # 매핑 규칙이 없으면 동일한 필드명으로 시도 (중첩 경로 지원)
+        return self._get_nested_value(source_data, field_name, default_value)
+
+    def _get_nested_value(self, data: dict, path: str, default_value: Any = "") -> Any:
+        """중첩 객체 경로를 처리하여 값을 추출
+        
+        Args:
+            data: 원본 데이터 딕셔너리
+            path: 필드 경로 (예: "project.id", "service.description")
+            default_value: 기본값
+            
+        Returns:
+            추출된 값 또는 기본값
+        """
+        if not path:
+            return default_value
+            
+        try:
+            # 점(.)으로 구분된 경로 처리
+            if "." in path:
+                keys = path.split(".")
+                current_value = data
+                
+                for i, key in enumerate(keys):
+                    if isinstance(current_value, dict):
+                        current_value = current_value.get(key)
+                        if current_value is None:
+                            # 디버깅을 위한 상세 로그 (중요 필드만)
+                            if path in ['project.id', 'service.id', 'sku.id']:
+                                _LOGGER.debug(f"[FieldMapper] Nested path '{path}' failed at key '{key}' (step {i+1}/{len(keys)})")
+                                _LOGGER.debug(f"[FieldMapper] Available keys at this level: {list(data.keys()) if i == 0 else 'N/A'}")
+                            return default_value
+                    elif isinstance(current_value, str):
+                        # 문자열인 경우 JSON 파싱 시도
+                        try:
+                            import json
+                            parsed_value = json.loads(current_value)
+                            if isinstance(parsed_value, dict):
+                                current_value = parsed_value.get(key)
+                                if current_value is None:
+                                    return default_value
+                            else:
+                                return default_value
+                        except (json.JSONDecodeError, ValueError):
+                            return default_value
+                    else:
+                        # 중요한 필드들에 대해서만 로그 출력
+                        if path in ['project.id', 'service.id', 'sku.id']:
+                            _LOGGER.debug(f"[FieldMapper] Nested path '{path}' expected dict but got {type(current_value)} at key '{key}'")
+                        return default_value
+                
+                # 결과 검증 및 로깅
+                result = current_value if current_value is not None else default_value
+                
+                # 중요한 필드들에 대해 결과 로깅 (처음 몇 번만)
+                if path in ['project.id', 'service.id', 'sku.id', 'service.description', 'sku.description', 'project.name', 'invoice.month']:
+                    log_key = f"_nested_log_{path.replace('.', '_')}"
+                    if not hasattr(self, log_key):
+                        _LOGGER.info(f"[FieldMapper] DEBUG: Nested path '{path}' resolved to: {repr(result)}")
+                        setattr(self, log_key, True)
+                
+                return result
+            else:
+                # 단순 필드명
+                return data.get(path, default_value)
+                
+        except Exception as e:
+            _LOGGER.warning(f"[FieldMapper] Failed to get nested value for path '{path}': {e}")
+            return default_value
 
     def _apply_transform(self, value: Any, transform: Optional[str]) -> Any:
         """값 변환 함수 적용"""
@@ -615,12 +718,31 @@ class FieldMapper:
         if provider == "google_cloud" or provider == "gcp":
             return {
                 "cost": "cost",
-                "usage_quantity": "usage_quantity",
-                "usage_unit": "pricing_unit",
-                "region_code": "region_code",
-                "product": "service_description",
-                "usage_type": "sku_description",
-                "resource": "project_id",
+                "usage_quantity": {
+                    "field": "usage.amount_in_pricing_units",
+                    "fallback": "usage_quantity",
+                },
+                "usage_unit": {
+                    "field": "usage.pricing_unit",
+                    "fallback": "pricing_unit",
+                },
+                "region_code": {
+                    "field": "location.region",
+                    "fallback": "region_code",
+                    "default": "global",
+                },
+                "product": {
+                    "field": "service.description",
+                    "fallback": "service_description",
+                },
+                "usage_type": {
+                    "field": "sku.description",
+                    "fallback": "sku_description",
+                },
+                "resource": {
+                    "field": "project.id",
+                    "fallback": "project_id",
+                },
                 "currency": "currency",
                 "billed_date": {
                     "field": "usage_start_time",
@@ -639,19 +761,69 @@ class FieldMapper:
                         "transform": "json_parse",
                     },
                     "billing_account_id": "billing_account_id",
-                    "invoice_month": "invoice_month",
+                    "invoice_month": {
+                        "field": "invoice.month",
+                        "fallback": "invoice_month",
+                    },
                     "cost_type": "cost_type",
-                    "project_name": "project_name",
+                    "project_id": {
+                        "field": "project.id",
+                        "fallback": "project_id",
+                    },
+                    "project_name": {
+                        "field": "project.name",
+                        "fallback": "project_name",
+                    },
                     # 🆕 신규: 리소스 식별 필드 (상세 사용량 데이터)
                     "resource_name": "resource_name",
                     "resource_global_name": "resource_global_name",
-                    # 🆕 신규: Pricing 관련 필드 추가
+                    # 🆕 신규: Service 및 SKU 식별 필드 (중첩 구조 지원)
+                    "service_id": {
+                        "field": "service.id",
+                        "fallback": "service_id",
+                    },
+                    "service_description": {
+                        "field": "service.description",
+                        "fallback": "service_description",
+                    },
+                    "sku_id": {
+                        "field": "sku.id",
+                        "fallback": "sku_id",
+                    },
+                    "sku_description": {
+                        "field": "sku.description",
+                        "fallback": "sku_description",
+                    },
+                    # 🆕 신규: Location 정보 (중첩 구조 지원)
+                    "location_country": {
+                        "field": "location.country",
+                        "fallback": "location_country",
+                    },
+                    "location_region": {
+                        "field": "location.region",
+                        "fallback": "location_region",
+                    },
+                    "location_zone": {
+                        "field": "location.zone",
+                        "fallback": "location_zone",
+                    },
+                    # 🆕 신규: Usage 정보 (중첩 구조 지원)
+                    "usage_amount": {
+                        "field": "usage.amount",
+                        "fallback": "usage_amount",
+                    },
+                    "usage_amount_in_pricing_units": {
+                        "field": "usage.amount_in_pricing_units",
+                        "fallback": "usage_amount_in_pricing_units",
+                    },
+                    "usage_pricing_unit": {
+                        "field": "usage.pricing_unit",
+                        "fallback": "usage_pricing_unit",
+                    },
+                    # 🆕 신규: 추가 Pricing 필드들
                     "list_price": "list_price",
                     "discount_rate": "discount_rate",
                     "pricing_tier": "pricing_tier",
-                    "service_id": "service_id",
-                    "sku_id": "sku_id",
-                    # 🆕 신규: 추가 Pricing 필드들
                     "effective_discount_percentage": "effective_discount_percentage",
                     "tier_usage_amount": "tier_usage_amount",
                     "tier_pricing_unit": "tier_pricing_unit",

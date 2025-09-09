@@ -136,14 +136,21 @@ class ParquetParser(BaseParser):
                     else:
                         cleaned_dict[key] = ""
                 else:
-                    cleaned_dict[key] = value
+                    # 딕셔너리나 리스트 같은 복합 타입은 그대로 유지
+                    if isinstance(value, (dict, list)):
+                        cleaned_dict[key] = value
+                    else:
+                        cleaned_dict[key] = value
 
             except Exception as e:
                 # 예외 발생 시 기본값으로 처리
                 _LOGGER.debug(
                     f"[ParquetParser] Failed to process value for key '{key}': {e}"
                 )
-                if key.lower() in ["cost", "usage_quantity", "amount"]:
+                # 중첩 구조 필드들은 빈 문자열로 변환하지 않음
+                if key in ['project', 'service', 'sku', 'location', 'usage', 'labels', 'credits', 'invoice']:
+                    cleaned_dict[key] = value  # 원본 값 유지
+                elif key.lower() in ["cost", "usage_quantity", "amount"]:
                     cleaned_dict[key] = 0
                 else:
                     cleaned_dict[key] = ""
