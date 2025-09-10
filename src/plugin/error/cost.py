@@ -42,5 +42,5 @@ class ERROR_FIELD_MAPPING_FAILED(ERROR_INVALID_ARGUMENT):
     _message = "Field mapping failed: {field}, reason: {reason}"
 
 
-class ERROR_INVALID_HTTP_FILE_CONFIG(ERROR_INVALID_ARGUMENT):
-    _message = "Invalid HTTP file configuration: {config}"
+class ERROR_INVALID_GCS_CONFIG(ERROR_INVALID_ARGUMENT):
+    _message = "Invalid GCS configuration: {config}"

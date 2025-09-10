@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from ..conf.cost_conf import HTTP_FILE_CONFIG
+from ..conf.cost_conf import GCS_CONFIG
 from ..error.cost import ERROR_UNSUPPORTED_FILE_FORMAT
 from ..parser.base_parser import BaseParser
 from ..parser.csv_parser import CSVParser
@@ -27,7 +27,7 @@ class FileProcessorFactory:
         Raises:
             ERROR_UNSUPPORTED_FILE_FORMAT: 지원하지 않는 파일 형식
         """
-        if file_format not in HTTP_FILE_CONFIG["supported_formats"]:
+        if file_format not in GCS_CONFIG["supported_formats"]:
             raise ERROR_UNSUPPORTED_FILE_FORMAT(format=file_format)
 
         parser_map = {"csv": CSVParser, "json": JSONParser, "parquet": ParquetParser}
@@ -37,7 +37,7 @@ class FileProcessorFactory:
             raise ERROR_UNSUPPORTED_FILE_FORMAT(format=file_format)
 
         parser = parser_class()
-        parser.set_chunk_size(HTTP_FILE_CONFIG["default_chunk_size"])
+        parser.set_chunk_size(GCS_CONFIG["default_chunk_size"])
 
         _LOGGER.debug(f"[FileProcessorFactory] Created {file_format} parser")
         return parser
@@ -230,9 +230,9 @@ class FileProcessorFactory:
     @staticmethod
     def get_supported_formats() -> list:
         """지원되는 파일 형식 목록 반환"""
-        return HTTP_FILE_CONFIG["supported_formats"].copy()
+        return GCS_CONFIG["supported_formats"].copy()
 
     @staticmethod
     def is_supported_format(file_format: str) -> bool:
         """파일 형식이 지원되는지 확인"""
-        return file_format in HTTP_FILE_CONFIG["supported_formats"]
+        return file_format in GCS_CONFIG["supported_formats"]

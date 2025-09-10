@@ -6,7 +6,7 @@ Google Cloud Pricing Data 분석을 위한 매니저
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Optional
 
 from spaceone.core.manager import BaseManager
 
@@ -34,7 +34,7 @@ class PricingManager(BaseManager):
 
     def analyze_discount_rates(
         self, options: dict, secret_data: dict, task_options: dict
-    ) -> Dict:
+    ) -> dict:
         """
         실제 청구 데이터와 정가를 비교하여 할인율 분석
 
@@ -118,8 +118,8 @@ class PricingManager(BaseManager):
             raise ERROR_INVALID_ARGUMENT(key="discount_analysis", value=str(e))
 
     def forecast_costs(
-        self, options: dict, secret_data: dict, usage_scenarios: List[Dict]
-    ) -> Dict:
+        self, options: dict, secret_data: dict, usage_scenarios: list[dict]
+    ) -> dict:
         """
         사용량 시나리오별 비용 예측
 
@@ -208,7 +208,7 @@ class PricingManager(BaseManager):
 
     def get_service_pricing_report(
         self, options: dict, secret_data: dict, service_filter: Optional[str] = None
-    ) -> Dict:
+    ) -> dict:
         """
         서비스별 가격 정보 리포트 생성
 
@@ -287,7 +287,7 @@ class PricingManager(BaseManager):
         self.pricing_project_id = options["pricing_export_project_id"]
         self.pricing_dataset_id = options["pricing_dataset_id"]
 
-    def _get_billing_data(self, task_options: dict) -> List[Dict]:
+    def _get_billing_data(self, task_options: dict) -> list[dict]:
         """실제 청구 데이터 조회 (간단한 형태)"""
         # 실제 구현에서는 BigQuery에서 청구 데이터를 조회하여 반환
         # 여기서는 예시 데이터 구조만 제공
@@ -305,7 +305,7 @@ class PricingManager(BaseManager):
         ]
 
     def _calculate_tiered_cost(
-        self, usage_amount: Decimal, tiered_rates: List[Dict]
+        self, usage_amount: Decimal, tiered_rates: list[dict]
     ) -> Decimal:
         """계층별 요금제를 적용한 비용 계산"""
         if not tiered_rates:

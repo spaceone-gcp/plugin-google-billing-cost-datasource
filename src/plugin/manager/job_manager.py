@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List
 
 from spaceone.core.error import (
     ERROR_INVALID_PARAMETER,
@@ -15,7 +14,7 @@ from ..conf.cost_conf import (
     DEFAULT_DATA_SOURCE_TYPE,
 )
 from ..connector.bigquery_connector import BigqueryConnector
-from ..connector.http_file_connector import HttpFileConnector
+from ..connector.gcs_connector import GcsConnector
 from ..utils.error_handler import (
     GracefulErrorHandler,
     create_empty_job_response,
@@ -40,7 +39,7 @@ class JobManager(BaseManager):
 
         _LOGGER.debug("[JobManager] Creating connector instances")
         self.bigquery_connector = BigqueryConnector()
-        self.http_file_connector = HttpFileConnector()
+        self.gcs_connector = GcsConnector()
         _LOGGER.debug("[JobManager] Connector instances created successfully")
 
         # 인스턴스 변수 초기화
@@ -52,7 +51,7 @@ class JobManager(BaseManager):
         _LOGGER.info("[JobManager] JobManager initialized successfully")
         _LOGGER.debug(
             f"[JobManager] Available connectors: BigQuery={type(self.bigquery_connector).__name__}, "
-            f"HttpFile={type(self.http_file_connector).__name__}"
+            f"GCS={type(self.gcs_connector).__name__}"
         )
 
     def get_tasks(
@@ -405,7 +404,7 @@ class JobManager(BaseManager):
 
             while retry_count < max_retries:
                 try:
-                    self.http_file_connector.create_session(
+                    self.gcs_connector.create_session(
                         options, secret_data, schema
                     )
                     _LOGGER.debug(
@@ -499,7 +498,7 @@ class JobManager(BaseManager):
 
                     # 직접 경로로 파일 목록 조회 - 에러 처리 강화
                     try:
-                        files = self.http_file_connector.list_files_by_path(
+                        files = self.gcs_connector.list_gcs_files_by_path(
                             bucket_name, project_id, year, month
                         )
 
@@ -530,7 +529,7 @@ class JobManager(BaseManager):
 
                     # 파일 목록 조회 - 에러 처리 강화
                     try:
-                        files = self.http_file_connector.list_files(
+                        files = self.gcs_connector.list_gcs_files(
                             bucket_name, file_pattern
                         )
                     except Exception as e:
@@ -856,7 +855,7 @@ class JobManager(BaseManager):
                 raise ERROR_INVALID_PARAMETER(key="options.bucket_name")
 
     @staticmethod
-    def _filter_files_by_project_id(files: List[Dict], project_id: str) -> List[Dict]:
+    def _filter_files_by_project_id(files: list[dict], project_id: str) -> list[dict]:
         """project_id를 기반으로 파일 목록 필터링
 
         Args:
@@ -907,8 +906,8 @@ class JobManager(BaseManager):
 
     @staticmethod
     def _filter_files_by_date(
-        files: List[Dict], start_date: str, project_id: str = None
-    ) -> List[Dict]:
+        files: list[dict], start_date: str, project_id: str = None
+    ) -> list[dict]:
         """start_date와 project_id를 기반으로 파일 목록 필터링
 
         Note: 이 함수는 레거시 호환성을 위해 유지됩니다.

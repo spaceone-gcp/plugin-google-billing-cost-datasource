@@ -3,7 +3,7 @@ import logging
 from io import BytesIO
 from typing import IO, Optional
 
-from ..conf.cost_conf import HTTP_FILE_CONFIG
+from ..conf.cost_conf import GCS_CONFIG
 from ..error.cost import ERROR_UNSUPPORTED_FILE_FORMAT
 
 _LOGGER = logging.getLogger("spaceone")
@@ -103,7 +103,7 @@ class CompressionHandler:
             ERROR_UNSUPPORTED_FILE_FORMAT: 지원하지 않는 압축 형식
         """
 
-        if compression_type not in HTTP_FILE_CONFIG["supported_compressions"]:
+        if compression_type not in GCS_CONFIG["supported_compressions"]:
             raise ERROR_UNSUPPORTED_FILE_FORMAT(format=compression_type)
 
         try:

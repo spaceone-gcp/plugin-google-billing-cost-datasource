@@ -26,7 +26,7 @@ from ..conf.cost_conf import (
     DETAILED_USAGE_TABLE_PREFIX,
 )
 from ..connector.bigquery_connector import BigqueryConnector
-from ..connector.http_file_connector import HttpFileConnector
+from ..connector.gcs_connector import GcsConnector
 from ..factory.file_processor_factory import FileProcessorFactory
 from ..manager.field_mapper import FieldMapper
 from ..utils.concurrency_manager import concurrency_manager, request_deduplicator
@@ -51,7 +51,7 @@ class CostManager(BaseManager):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.bigquery_connector = BigqueryConnector()
-        self.http_file_connector = HttpFileConnector()  # 추가
+        self.gcs_connector = GcsConnector()  # 추가
         self.field_mapper = None  # 추가
         self.billing_export_project_id = None
         self.billing_dataset = None
@@ -210,7 +210,7 @@ class CostManager(BaseManager):
 
             if bucket_name:
                 # GCS 버킷 접근을 위해 인증 필요
-                self.http_file_connector.create_session(options, secret_data, schema)
+                self.gcs_connector.create_session(options, secret_data, schema)
 
                 # Field Mapper 초기화 (기본 매핑 사용)
                 # filed_mapper 오타 처리 (하위 호환성을 위해)
@@ -322,7 +322,7 @@ class CostManager(BaseManager):
                     return
 
                 # 파일 다운로드
-                file_stream = self.http_file_connector.download_file_stream(
+                file_stream = self.gcs_connector.download_gcs_file_stream(
                     bucket_name, file_name
                 )
 
@@ -379,7 +379,7 @@ class CostManager(BaseManager):
         if file_path:
             _LOGGER.info(f"[CostManager] Specific file_path provided: {file_path}")
             # 특정 파일만 조회
-            specific_files = self.http_file_connector.list_files(bucket_name, file_path)
+            specific_files = self.gcs_connector.list_gcs_files(bucket_name, file_path)
             if specific_files:
                 _LOGGER.info(
                     f"[CostManager] Found specific file: {specific_files[0]['name']}"
@@ -393,14 +393,14 @@ class CostManager(BaseManager):
         custom_pattern = task_options.get("file_pattern")
         if custom_pattern:
             file_pattern = custom_pattern
-            return self.http_file_connector.list_files(bucket_name, file_pattern)
+            return self.gcs_connector.list_gcs_files(bucket_name, file_pattern)
         elif project_id and start_period:
             # start부터 현재 월까지의 날짜 범위로 파일 수집
             all_files = []
             date_patterns = self._generate_date_range_patterns(project_id, start_period)
 
             for pattern in date_patterns:
-                pattern_files = self.http_file_connector.list_files(
+                pattern_files = self.gcs_connector.list_gcs_files(
                     bucket_name, pattern
                 )
                 all_files.extend(pattern_files)
@@ -416,10 +416,10 @@ class CostManager(BaseManager):
 
         elif project_id:
             file_pattern = f"{project_id}/"
-            return self.http_file_connector.list_files(bucket_name, file_pattern)
+            return self.gcs_connector.list_gcs_files(bucket_name, file_pattern)
         else:
             # 패턴 없이 모든 파일 검색
-            return self.http_file_connector.list_files(bucket_name, None)
+            return self.gcs_connector.list_gcs_files(bucket_name, None)
 
     def _get_data_from_http(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
@@ -454,7 +454,7 @@ class CostManager(BaseManager):
                 base_url = base_url.replace(".jparquet.", ".parquet.")
 
                 # HTTP URL 처리 - 인증 불필요, GCS 세션 생성 건너뛰기
-                file_stream = self.http_file_connector.download_file_from_url(base_url)
+                file_stream = self.gcs_connector.download_file_from_url(base_url)
 
                 # 파일 내용 샘플 읽기 (파일 형식 감지를 위해)
                 file_stream.seek(0)
@@ -786,7 +786,7 @@ class CostManager(BaseManager):
 
         # GCS 버킷 사용 시 secret_data 검증
         if secret_data:
-            from ..connector.http_file_connector import REQUIRED_SECRET_KEYS
+            from ..connector.gcs_connector import REQUIRED_SECRET_KEYS
 
             missing_keys = [
                 key for key in REQUIRED_SECRET_KEYS if key not in secret_data

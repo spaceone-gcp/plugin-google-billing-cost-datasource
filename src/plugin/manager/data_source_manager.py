@@ -66,16 +66,16 @@ class DataSourceManager(BaseManager):
             _LOGGER.info("[verify_plugin] BigQuery connection verified successfully")
         else:
             # GCS 검증
-            from ..connector.http_file_connector import HttpFileConnector
+            from ..connector.gcs_connector import GcsConnector
 
-            http_connector = HttpFileConnector()
-            http_connector.create_session(options, secret_data, schema)
+            gcs_connector = GcsConnector()
+            gcs_connector.create_session(options, secret_data, schema)
 
             # 기본 연결 테스트 (bucket_name이나 base_url 확인)
             if bucket_name := options.get("bucket_name"):
                 # GCS 버킷 접근 테스트
                 try:
-                    http_connector.list_files(bucket_name, limit=1)
+                    gcs_connector.list_gcs_files(bucket_name, limit=1)
                     _LOGGER.info(
                         f"[verify_plugin] GCS bucket '{bucket_name}' access verified"
                     )
@@ -85,7 +85,7 @@ class DataSourceManager(BaseManager):
             elif base_url := options.get("base_url"):
                 # HTTP URL 접근 테스트
                 try:
-                    http_connector.test_connection(base_url)
+                    gcs_connector.test_connection(base_url)
                     _LOGGER.info(
                         f"[verify_plugin] HTTP URL '{base_url}' access verified"
                     )

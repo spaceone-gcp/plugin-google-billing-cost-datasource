@@ -5,7 +5,7 @@ FieldMapper 리팩토링의 일부
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -13,7 +13,7 @@ _LOGGER = logging.getLogger("spaceone")
 class JsonTransformer:
     """JSON 변환 클래스"""
 
-    def parse(self, value: Any) -> Dict[str, Any]:
+    def parse(self, value: Any) -> dict[str, Any]:
         """값을 JSON으로 파싱"""
         if not value:
             return {}
@@ -38,7 +38,7 @@ class JsonTransformer:
             # JSON 파싱 실패 시 문자열을 단일 키-값으로 처리 시도
             return self._parse_key_value_pairs(json_str)
 
-    def _parse_key_value_pairs(self, text: str) -> Dict[str, Any]:
+    def _parse_key_value_pairs(self, text: str) -> dict[str, Any]:
         """key=value 형태의 문자열을 딕셔너리로 파싱"""
         if "=" not in text:
             return {}

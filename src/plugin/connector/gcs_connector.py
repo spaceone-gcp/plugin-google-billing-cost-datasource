@@ -1,6 +1,6 @@
 import logging
 from io import BytesIO
-from typing import IO, Dict, List, Optional
+from typing import IO, Optional
 
 import requests
 from google.cloud import storage
@@ -24,7 +24,7 @@ except ImportError:
 
     ERROR_INVALID_ARGUMENT = MockError()
 
-from ..conf.cost_conf import HTTP_FILE_CONFIG
+from ..conf.cost_conf import GCS_CONFIG
 from ..error.cost import ERROR_FILE_DOWNLOAD_FAILED
 from ..utils.concurrency_manager import concurrency_manager
 
@@ -33,8 +33,8 @@ _LOGGER = logging.getLogger("spaceone")
 REQUIRED_SECRET_KEYS = ["project_id", "private_key", "token_uri", "client_email"]
 
 
-class HttpFileConnector(BaseConnector):
-    """Google Cloud Storage 기반 HTTP 파일 처리 커넥터"""
+class GcsConnector(BaseConnector):
+    """Google Cloud Storage 전용 파일 처리 커넥터"""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -69,24 +69,13 @@ class HttpFileConnector(BaseConnector):
                 "private_key"
             ].replace("\\n", "\n")
 
-        # Service Account 인증 정보로 GCS 클라이언트 생성
-        try:
-            self.credentials = service_account.Credentials.from_service_account_info(
-                processed_secret_data
-            )
-        except Exception as e:
-            _LOGGER.error(
-                f"[HttpFileConnector] Failed to create Service Account credentials: {e}"
-            )
-            raise
-
-        try:
-            self.gcs_client = storage.Client(
-                credentials=self.credentials, project=self.project_id
-            )
-        except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to create GCS client: {e}")
-            raise
+        # Service Account 인증 정보로 GCS 클라이언트 생성 (상세 오류 처리 제거)
+        self.credentials = service_account.Credentials.from_service_account_info(
+            processed_secret_data
+        )
+        self.gcs_client = storage.Client(
+            credentials=self.credentials, project=self.project_id
+        )
 
         # 세션 캐싱
         session_data = {"credentials": self.credentials, "gcs_client": self.gcs_client}
@@ -97,10 +86,10 @@ class HttpFileConnector(BaseConnector):
         except Exception:
             pass
 
-    def list_files(
+    def list_gcs_files(
         self, bucket_name: str, pattern: str = None, limit: int = None
-    ) -> List[Dict]:
-        """버킷에서 파일 목록 조회"""
+    ) -> list[dict]:
+        """GCS 버킷에서 파일 목록 조회"""
         try:
             bucket = self.gcs_client.bucket(bucket_name)
 
@@ -134,20 +123,20 @@ class HttpFileConnector(BaseConnector):
             return files
 
         except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to list files: {e}")
+            _LOGGER.error(f"[GcsConnector] Failed to list GCS files: {e}")
             raise ERROR_FILE_DOWNLOAD_FAILED(
                 file_path=f"{bucket_name}/{pattern or '*'}"
-            )
+            ) from e
 
-    def list_files_by_path(
+    def list_gcs_files_by_path(
         self,
         bucket_name: str,
         project_id: str,
         year: str,
         month: str,
         limit: int = None,
-    ) -> List[Dict]:
-        """특정 경로(project_id/year/month/)에서 파일 목록 직접 조회"""
+    ) -> list[dict]:
+        """GCS 버킷의 특정 경로(project_id/year/month/)에서 파일 목록 직접 조회"""
         try:
             # 경로 구성: project_id/year/month/
             path_prefix = f"{project_id}/{year}/{month}/"
@@ -181,13 +170,13 @@ class HttpFileConnector(BaseConnector):
             return files
 
         except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to list files by path: {e}")
+            _LOGGER.error(f"[GcsConnector] Failed to list GCS files by path: {e}")
             raise ERROR_FILE_DOWNLOAD_FAILED(
                 file_path=f"{bucket_name}/{project_id}/{year}/{month}/"
-            )
+            ) from e
 
-    def download_file_stream(self, bucket_name: str, file_path: str) -> IO:
-        """파일을 스트림으로 다운로드"""
+    def download_gcs_file_stream(self, bucket_name: str, file_path: str) -> IO:
+        """GCS 파일을 스트림으로 다운로드"""
         try:
             bucket = self.gcs_client.bucket(bucket_name)
             blob = bucket.blob(file_path)
@@ -196,9 +185,9 @@ class HttpFileConnector(BaseConnector):
                 raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}")
 
             # 파일 크기 검증
-            if blob.size is not None and blob.size > HTTP_FILE_CONFIG["max_file_size"]:
+            if blob.size is not None and blob.size > GCS_CONFIG["max_file_size"]:
                 raise ERROR_INVALID_ARGUMENT(
-                    key=f"File size {blob.size} exceeds maximum allowed size {HTTP_FILE_CONFIG['max_file_size']}"
+                    key=f"File size {blob.size} exceeds maximum allowed size {GCS_CONFIG['max_file_size']}"
                 )
 
             # 메모리로 다운로드
@@ -207,21 +196,21 @@ class HttpFileConnector(BaseConnector):
             file_content.seek(0)
 
             # 실제 다운로드된 크기 확인
-            actual_size = file_content.tell()
+            file_content.tell()
             file_content.seek(0)  # 다시 처음으로 이동
 
             return file_content
 
         except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to download file: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}")
+            _LOGGER.error(f"[GcsConnector] Failed to download GCS file: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}") from e
 
     def download_file_from_url(self, url: str) -> IO:
-        """HTTP URL에서 파일을 스트림으로 다운로드"""
+        """HTTP URL에서 파일을 스트림으로 다운로드 (외부 URL 지원용)"""
         try:
             # HTTP 요청으로 파일 다운로드
             response = requests.get(
-                url, stream=True, timeout=HTTP_FILE_CONFIG["download_timeout"]
+                url, stream=True, timeout=GCS_CONFIG["download_timeout"]
             )
             response.raise_for_status()
 
@@ -229,10 +218,10 @@ class HttpFileConnector(BaseConnector):
             content_length = response.headers.get("content-length")
             if (
                 content_length
-                and int(content_length) > HTTP_FILE_CONFIG["max_file_size"]
+                and int(content_length) > GCS_CONFIG["max_file_size"]
             ):
                 raise ERROR_INVALID_ARGUMENT(
-                    key=f"File size {content_length} exceeds maximum allowed size {HTTP_FILE_CONFIG['max_file_size']}"
+                    key=f"File size {content_length} exceeds maximum allowed size {GCS_CONFIG['max_file_size']}"
                 )
 
             # 메모리로 다운로드
@@ -246,27 +235,27 @@ class HttpFileConnector(BaseConnector):
             return file_content
 
         except requests.RequestException as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to download from URL: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url)
+            _LOGGER.error(f"[GcsConnector] Failed to download from URL: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url) from e
         except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to download from URL: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url)
+            _LOGGER.error(f"[GcsConnector] Failed to download from URL: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url) from e
 
     def test_connection(self, url: str) -> None:
         """HTTP URL 연결 테스트 (HEAD 요청으로 빠른 검증)"""
         try:
             # HEAD 요청으로 연결 테스트 (데이터 다운로드 없이)
             response = requests.head(
-                url, timeout=HTTP_FILE_CONFIG.get("connection_timeout", 10)
+                url, timeout=GCS_CONFIG.get("connection_timeout", 10)
             )
             response.raise_for_status()
 
         except requests.RequestException as e:
-            _LOGGER.error(f"[HttpFileConnector] Connection test failed: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url)
+            _LOGGER.error(f"[GcsConnector] Connection test failed: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=url) from e
 
-    def get_file_info(self, bucket_name: str, file_path: str) -> Dict:
-        """파일 메타데이터 조회"""
+    def get_gcs_file_info(self, bucket_name: str, file_path: str) -> dict:
+        """GCS 파일 메타데이터 조회"""
         try:
             bucket = self.gcs_client.bucket(bucket_name)
             blob = bucket.blob(file_path)
@@ -285,19 +274,19 @@ class HttpFileConnector(BaseConnector):
             }
 
         except Exception as e:
-            _LOGGER.error(f"[HttpFileConnector] Failed to get file info: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}")
+            _LOGGER.error(f"[GcsConnector] Failed to get GCS file info: {e}")
+            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}") from e
 
     def _is_supported_file(self, file_name: str) -> bool:
         """지원되는 파일 형식인지 확인"""
         format_type = self._detect_file_format(file_name)
-        return format_type in HTTP_FILE_CONFIG["supported_formats"]
+        return format_type in GCS_CONFIG["supported_formats"]
 
     def _detect_file_format(self, file_name: str) -> Optional[str]:
         """파일명으로 파일 형식 감지"""
         # 압축 확장자 제거 후 파일 형식 감지
         name_lower = file_name.lower()
-        for compression in HTTP_FILE_CONFIG["supported_compressions"]:
+        for compression in GCS_CONFIG["supported_compressions"]:
             if name_lower.endswith(f".{compression}"):
                 name_lower = name_lower[: -len(f".{compression}")]
                 break
@@ -314,7 +303,7 @@ class HttpFileConnector(BaseConnector):
     def _detect_compression(self, file_name: str) -> Optional[str]:
         """파일명으로 압축 형식 감지"""
         name_lower = file_name.lower()
-        for compression in HTTP_FILE_CONFIG["supported_compressions"]:
+        for compression in GCS_CONFIG["supported_compressions"]:
             if name_lower.endswith(f".{compression}"):
                 return compression
         return None

@@ -5,7 +5,6 @@ Google Cloud Billing Cost Datasource 플러그인의 설정 파일을 검증하�
 
 import logging
 import re
-from typing import Dict, List, Tuple
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -18,7 +17,7 @@ class ConfigValidator:
         self.security_issues = []
         self.warnings = []
 
-    def validate_config(self, config: Dict) -> Tuple[bool, List[Dict]]:
+    def validate_config(self, config: dict) -> tuple[bool, list[dict]]:
         """
         전체 설정 검증
 
@@ -56,7 +55,7 @@ class ConfigValidator:
 
         return not has_critical_issues, all_results
 
-    def _validate_basic_structure(self, config: Dict):
+    def _validate_basic_structure(self, config: dict):
         """기본 구조 검증"""
         required_fields = ["name", "data_source_type", "provider", "plugin_info"]
 
@@ -98,7 +97,7 @@ class ConfigValidator:
                     }
                 )
 
-    def _validate_plugin_info(self, plugin_info: Dict):
+    def _validate_plugin_info(self, plugin_info: dict):
         """플러그인 정보 검증"""
         # 플러그인 ID 검증
         if "plugin_id" in plugin_info:
@@ -135,12 +134,12 @@ class ConfigValidator:
         if "metadata" in plugin_info:
             self._validate_metadata(plugin_info["metadata"])
 
-    def _validate_security(self, config: Dict):
+    def _validate_security(self, config: dict):
         """보안 관련 검증 - secret_data 검증은 제거됨"""
         # secret_data 검증은 더 이상 수행하지 않음
         pass
 
-    def _validate_metadata(self, metadata: Dict):
+    def _validate_metadata(self, metadata: dict):
         """메타데이터 검증"""
         # 통화 코드 검증
         if "currency" in metadata:
@@ -161,7 +160,7 @@ class ConfigValidator:
         if "data_source_rules" in metadata:
             self._validate_data_source_rules(metadata["data_source_rules"])
 
-    def _validate_data_source_rules(self, rules: List[Dict]):
+    def _validate_data_source_rules(self, rules: list[dict]):
         """데이터 소스 규칙 검증"""
         for i, rule in enumerate(rules):
             # 필수 필드 검사
@@ -197,7 +196,7 @@ class ConfigValidator:
                             }
                         )
 
-    def _validate_options(self, options: Dict):
+    def _validate_options(self, options: dict):
         """옵션 검증"""
         # 데이터 소스 타입별 필수 옵션 검증
         if "source" in options:
@@ -264,7 +263,7 @@ class ConfigValidator:
                     }
                 )
 
-    def _validate_field_mapper(self, field_mapper: Dict):
+    def _validate_field_mapper(self, field_mapper: dict):
         """Field Mapper 설정 검증"""
         # 필수 필드 매핑 검증
         required_mappings = ["cost", "billed_date", "currency"]
@@ -279,7 +278,7 @@ class ConfigValidator:
                     }
                 )
 
-    def _validate_schedule(self, schedule: Dict):
+    def _validate_schedule(self, schedule: dict):
         """스케줄 설정 검증"""
         if "state" in schedule:
             valid_states = ["ENABLED", "DISABLED"]
@@ -368,7 +367,7 @@ class ConfigValidator:
 
         return False
 
-    def generate_report(self, results: List[Dict]) -> str:
+    def generate_report(self, results: list[dict]) -> str:
         """검증 결과 리포트 생성"""
         if not results:
             return "✅ Configuration validation passed with no issues!"

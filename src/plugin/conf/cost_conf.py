@@ -10,7 +10,7 @@ COST_METRIC = ["net_cost", "credits", "currency", "AmortizedCost"]
 # Data Source Types Configuration
 DATA_SOURCE_TYPES = {"bigquery": "bigquery", "gcs": "gcs", "http_file": "http_file"}
 
-HTTP_FILE_CONFIG = {
+GCS_CONFIG = {
     "supported_formats": ["csv", "json", "parquet"],
     "supported_compressions": [
         "gz",
@@ -24,6 +24,7 @@ HTTP_FILE_CONFIG = {
     "download_timeout": 300,  # 5분
     "max_files_per_batch": 10,  # 배치당 최대 파일 수
     "grpc_message_size_limit": 4 * 1024 * 1024,  # 4MB (gRPC 기본 제한)
+    "connection_timeout": 10,  # 연결 타임아웃
 }
 
 # Default data source type for backward compatibility

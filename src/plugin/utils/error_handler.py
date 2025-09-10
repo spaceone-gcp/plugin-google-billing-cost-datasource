@@ -8,7 +8,7 @@
 import logging
 import time
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def retry_on_failure(
     max_retries: int = 3,
     delay: float = 1.0,
     backoff_factor: float = 2.0,
-    exceptions: Tuple[Exception, ...] = (Exception,),
+    exceptions: tuple[Exception, ...] = (Exception,),
     on_retry: Optional[Callable[[int, Exception], None]] = None,
 ) -> Callable:
     """
@@ -74,7 +74,7 @@ def retry_on_failure(
 
 def safe_execute(
     func: Callable, *args, default_return: Any = None, log_errors: bool = True, **kwargs
-) -> Tuple[bool, Any]:
+) -> tuple[bool, Any]:
     """
     함수를 안전하게 실행하고 에러 발생 시 기본값을 반환
 

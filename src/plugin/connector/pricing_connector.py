@@ -6,7 +6,7 @@ Google Cloud의 cloud_pricing_export 테이블에서 가격 정보를 조회하�
 import logging
 from collections.abc import Generator
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas_gbq
 from google.oauth2 import service_account
@@ -34,7 +34,6 @@ class PricingConnector(BaseConnector):
     def create_session(self, options: dict, secret_data: dict, schema: str):
         """BigQuery 세션 생성 및 Pricing 관련 설정 초기화"""
         if not secret_data:
-            _LOGGER.warning("[PricingConnector] No secret_data provided")
             return
 
         self.project_id = secret_data.get("project_id")
@@ -59,16 +58,12 @@ class PricingConnector(BaseConnector):
         )
         self.pricing_dataset_id = options.get("pricing_dataset_id", "pricing_export")
 
-        _LOGGER.info(
-            f"[PricingConnector] Session created for pricing project: {self.pricing_project_id}"
-        )
-
     def get_pricing_data(
         self,
         service_id: Optional[str] = None,
         sku_id: Optional[str] = None,
         date: Optional[str] = None,
-    ) -> Generator[Dict, None, None]:
+    ) -> Generator[dict, None, None]:
         """
         cloud_pricing_export 테이블에서 가격 정보 조회
 
@@ -97,7 +92,7 @@ class PricingConnector(BaseConnector):
 
     def get_service_pricing_summary(
         self, date: Optional[str] = None
-    ) -> Dict[str, List[Dict]]:
+    ) -> dict[str, list[dict]]:
         """
         서비스별 가격 정보 요약 조회
 
@@ -138,8 +133,8 @@ class PricingConnector(BaseConnector):
             raise ERROR_INVALID_ARGUMENT(key="service_summary_query", value=str(e))
 
     def compare_billing_vs_pricing(
-        self, billing_data: Dict, pricing_date: Optional[str] = None
-    ) -> Dict:
+        self, billing_data: dict, pricing_date: Optional[str] = None
+    ) -> dict:
         """
         실제 청구 데이터와 정가 비교 분석
 
@@ -226,7 +221,7 @@ class PricingConnector(BaseConnector):
         where_clause = " AND ".join(where_conditions)
 
         query = f"""
-            SELECT 
+            SELECT
                 export_time,
                 pricing_as_of_time,
                 service.id as service_id,
@@ -251,20 +246,20 @@ class PricingConnector(BaseConnector):
             date_condition = f"DATE(_PARTITIONTIME) = (SELECT MAX(DATE(_PARTITIONTIME)) FROM `{self.pricing_project_id}.{self.pricing_dataset_id}.cloud_pricing_export`)"
 
         query = f"""
-            SELECT 
+            SELECT
                 service.description as service_description,
                 sku.id as sku_id,
                 sku.description as sku_description,
                 IFNULL(geo_taxonomy.region, 'global') as region,
                 -- 첫 번째 가격 계층의 단위 가격 추출
-                (SELECT tier.usd_amount 
-                 FROM UNNEST(list_price.tiered_rates) as tier 
-                 WHERE tier.start_usage_amount = 0 
+                (SELECT tier.usd_amount
+                 FROM UNNEST(list_price.tiered_rates) as tier
+                 WHERE tier.start_usage_amount = 0
                  LIMIT 1) as base_price_usd,
                 -- 가격 책정 단위 정보
-                (SELECT tier.pricing_unit_quantity 
-                 FROM UNNEST(list_price.tiered_rates) as tier 
-                 WHERE tier.start_usage_amount = 0 
+                (SELECT tier.pricing_unit_quantity
+                 FROM UNNEST(list_price.tiered_rates) as tier
+                 WHERE tier.start_usage_amount = 0
                  LIMIT 1) as pricing_unit
             FROM `{self.pricing_project_id}.{self.pricing_dataset_id}.cloud_pricing_export`
             WHERE {date_condition}
@@ -273,7 +268,7 @@ class PricingConnector(BaseConnector):
 
         return query
 
-    def _transform_pricing_row(self, row) -> Dict:
+    def _transform_pricing_row(self, row) -> dict:
         """Pricing 데이터 행을 표준 형식으로 변환"""
 
         # tiered_rates 파싱 - 원본 타입 유지
@@ -337,7 +332,7 @@ class PricingConnector(BaseConnector):
         # 기타 타입은 0으로 처리
         return 0
 
-    def list_pricing_tables(self) -> List[Dict]:
+    def list_pricing_tables(self) -> list[dict]:
         """Pricing Export 데이터셋의 테이블 목록 조회"""
         try:
             query = {

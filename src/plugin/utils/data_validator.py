@@ -6,7 +6,7 @@ TDD로 구현된 새로운 기능
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -31,7 +31,7 @@ class DataValidator:
             "billed_date",
         ]
 
-    def validate_cost_data(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_cost_data(self, record: dict[str, Any]) -> dict[str, Any]:
         """비용 데이터 종합 검증
 
         Args:
@@ -84,7 +84,7 @@ class DataValidator:
             self.stats["total_records"] += 1
             return validation_result
 
-    def validate_data_types(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_data_types(self, record: dict[str, Any]) -> dict[str, Any]:
         """데이터 타입 검증
 
         Args:
@@ -102,7 +102,7 @@ class DataValidator:
 
         return validation_result
 
-    def validate_business_rules(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_business_rules(self, record: dict[str, Any]) -> dict[str, Any]:
         """비즈니스 규칙 검증
 
         Args:
@@ -120,7 +120,7 @@ class DataValidator:
 
         return validation_result
 
-    def get_validation_summary(self) -> Dict[str, Any]:
+    def get_validation_summary(self) -> dict[str, Any]:
         """검증 통계 요약 반환
 
         Returns:
@@ -148,7 +148,7 @@ class DataValidator:
             "validation_errors": [],
         }
 
-    def _check_required_fields(self, record: Dict[str, Any]) -> List[str]:
+    def _check_required_fields(self, record: dict[str, Any]) -> list[str]:
         """필수 필드 존재 여부 확인"""
         missing_fields = []
         for field in self.required_fields:
@@ -156,7 +156,7 @@ class DataValidator:
                 missing_fields.append(field)
         return missing_fields
 
-    def _validate_data_types(self, record: Dict[str, Any]) -> List[str]:
+    def _validate_data_types(self, record: dict[str, Any]) -> list[str]:
         """데이터 타입 검증"""
         errors = []
 
@@ -235,7 +235,7 @@ class DataValidator:
 
         return errors
 
-    def _validate_business_rules(self, record: Dict[str, Any]) -> List[str]:
+    def _validate_business_rules(self, record: dict[str, Any]) -> list[str]:
         """비즈니스 규칙 검증"""
         errors = []
 
