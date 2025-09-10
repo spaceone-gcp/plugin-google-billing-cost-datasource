@@ -285,12 +285,10 @@ class FieldMapper:
         self, source_data: dict, mapped_data: dict, listed_price
     ) -> dict:
         """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
-        # 기본 비용 정보
+        # 기본 비용 정보 (숫자 타입으로 처리)
         data_structure = {
-            "listed_price": str(listed_price)
-            if listed_price not in [None, "", 0]
-            else "",
-            "cost": str(mapped_data.get("cost", "")),
+            "listed_price": self._convert_to_numeric(listed_price),
+            "cost": self._convert_to_numeric(mapped_data.get("cost", 0)),
         }
 
         # 추가 정보 수집
@@ -300,12 +298,37 @@ class FieldMapper:
 
         return data_structure
 
+    def _convert_to_numeric(self, value):
+        """값을 적절한 숫자 타입으로 변환"""
+        if value is None or value == "":
+            return 0.0
+
+        try:
+            # 이미 숫자인 경우 그대로 반환
+            if isinstance(value, (int, float)):
+                return float(value)
+
+            # 문자열인 경우 숫자로 변환
+            if isinstance(value, str):
+                cleaned_value = value.strip()
+                if not cleaned_value:
+                    return 0.0
+                return float(cleaned_value)
+
+            # 기타 타입은 float로 변환 시도
+            return float(value)
+
+        except (ValueError, TypeError):
+            return 0.0
+
     def _add_billing_cost_info(self, data_structure: dict, source_data: dict):
         """빌링 비용 관련 정보 추가"""
         # 크레딧 적용 후 비용
         cost_after_credits = source_data.get("cost_after_credits")
         if cost_after_credits is not None and cost_after_credits != "":
-            data_structure["cost_after_credits"] = str(cost_after_credits)
+            data_structure["cost_after_credits"] = self._convert_to_numeric(
+                cost_after_credits
+            )
 
         # 크레딧 정보
         credits = source_data.get("credits", [])
@@ -316,7 +339,7 @@ class FieldMapper:
                 if isinstance(credit, dict)
             )
             if total_credits != 0:
-                data_structure["total_credits"] = str(total_credits)
+                data_structure["total_credits"] = total_credits
 
         # 환율 정보
         currency_conversion_rate = source_data.get("currency_conversion_rate")
@@ -325,7 +348,9 @@ class FieldMapper:
             and currency_conversion_rate != ""
             and currency_conversion_rate != 1
         ):
-            data_structure["currency_conversion_rate"] = str(currency_conversion_rate)
+            data_structure["currency_conversion_rate"] = self._convert_to_numeric(
+                currency_conversion_rate
+            )
 
     def _add_usage_and_price_info(self, data_structure: dict, source_data: dict):
         """사용량 및 가격 정보 추가"""
@@ -334,7 +359,7 @@ class FieldMapper:
         if isinstance(usage_info, dict):
             usage_amount = usage_info.get("amount")
             if usage_amount is not None and usage_amount != "":
-                data_structure["usage_amount"] = str(usage_amount)
+                data_structure["usage_amount"] = self._convert_to_numeric(usage_amount)
 
             usage_unit = usage_info.get("unit")
             if usage_unit and usage_unit != "":
@@ -349,7 +374,9 @@ class FieldMapper:
                 and effective_price != ""
                 and effective_price != 0
             ):
-                data_structure["effective_price"] = str(effective_price)
+                data_structure["effective_price"] = self._convert_to_numeric(
+                    effective_price
+                )
 
     def _add_identifier_info(self, data_structure: dict, source_data: dict):
         """핵심 식별자 정보 추가"""
