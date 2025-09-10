@@ -337,7 +337,6 @@ class PricingConnector(BaseConnector):
         # 기타 타입은 0으로 처리
         return 0
 
-
     def list_pricing_tables(self) -> List[Dict]:
         """Pricing Export 데이터셋의 테이블 목록 조회"""
         try:

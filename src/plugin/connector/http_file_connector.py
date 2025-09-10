@@ -318,4 +318,3 @@ class HttpFileConnector(BaseConnector):
             if name_lower.endswith(f".{compression}"):
                 return compression
         return None
-

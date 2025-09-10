@@ -107,10 +107,11 @@ class ParquetParser(BaseParser):
                     _LOGGER.error(f"[ParquetParser] Failed to process batch: {e}")
                     continue
 
-
         except Exception as e:
             _LOGGER.error(f"[ParquetParser] Failed to parse Parquet stream: {e}")
-            raise ERROR_FILE_PARSING_FAILED(file_path="parquet_stream", reason=str(e)) from e
+            raise ERROR_FILE_PARSING_FAILED(
+                file_path="parquet_stream", reason=str(e)
+            ) from e
 
     def _clean_nan_values(self, row_dict: dict) -> dict:
         """NaN 값을 적절한 기본값으로 변환"""

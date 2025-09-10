@@ -131,7 +131,6 @@ class CSVParser(BaseParser):
                 )
                 yield self._create_batch_result(batch_records)
 
-
         except Exception as e:
             _LOGGER.error(f"[CSVParser] Failed to parse CSV stream: {e}")
             raise ERROR_FILE_PARSING_FAILED(file_path="csv_stream", reason=str(e))

@@ -68,6 +68,7 @@ def _data_source_init_logic(params: dict) -> dict:
         )
         raise
 
+
 # 데이터 소스 초기화
 @app.route("DataSource.init")
 def data_source_init(params: dict) -> dict:
@@ -122,6 +123,7 @@ def data_source_init(params: dict) -> dict:
         _LOGGER.error(f"[data_source_init] API endpoint failed: {e}")
         raise
 
+
 # 데이터 소스 검증
 def _data_source_verify_logic(params: dict) -> None:
     """verify plugin - 실제 로직"""
@@ -168,6 +170,7 @@ def _data_source_verify_logic(params: dict) -> None:
     except Exception as e:
         _LOGGER.error(f"[_data_source_verify_logic] Failed to verify data source: {e}")
         raise
+
 
 # 데이터 소스 검증
 @app.route("DataSource.verify")
@@ -217,6 +220,7 @@ def data_source_verify(params: dict) -> None:
     except Exception as e:
         _LOGGER.error(f"[data_source_verify] API endpoint failed: {e}")
         raise
+
 
 # 작업 태스크 생성
 def _job_get_tasks_logic(params: dict) -> dict:
@@ -438,7 +442,6 @@ def _cost_get_linked_accounts_logic(params: dict) -> dict:
             f"[_cost_get_linked_accounts_logic] Secret data keys: {list(secret_data.keys())}"
         )
 
-
         # 선택적 파라미터 추출
         schema = params.get("schema")
         _LOGGER.debug(
@@ -528,5 +531,3 @@ def cost_get_linked_accounts(params: dict) -> dict:
     except Exception as e:
         _LOGGER.error(f"[cost_get_linked_accounts] API endpoint failed: {e}")
         raise
-
-

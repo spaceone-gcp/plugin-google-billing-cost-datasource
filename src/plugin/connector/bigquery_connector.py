@@ -15,6 +15,7 @@ except ImportError:
         def __init__(self, *args, **kwargs):
             pass
 
+
 _LOGGER = logging.getLogger("spaceone")
 
 REQUIRED_SECRET_KEYS = ["project_id", "private_key", "token_uri", "client_email"]
@@ -147,4 +148,3 @@ class BigqueryConnector(BaseConnector):
         cleaned_key += "-----END PRIVATE KEY-----\n"
 
         return cleaned_key
-

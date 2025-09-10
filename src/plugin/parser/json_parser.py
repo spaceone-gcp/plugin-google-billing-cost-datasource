@@ -53,7 +53,9 @@ class JSONParser(BaseParser):
 
         except Exception as e:
             _LOGGER.error(f"[JSONParser] Failed to parse JSON stream: {e}")
-            raise ERROR_FILE_PARSING_FAILED(file_path="json_stream", reason=str(e)) from e
+            raise ERROR_FILE_PARSING_FAILED(
+                file_path="json_stream", reason=str(e)
+            ) from e
         finally:
             # TextIOWrapper 정리 (원본 스트림은 닫지 않음)
             if hasattr(text_stream, "detach"):
@@ -108,7 +110,6 @@ class JSONParser(BaseParser):
             )
             yield self._create_batch_result(batch_records)
 
-
     def _parse_json_array(
         self, text_stream: IO, field_mapper: FieldMapper, root_path: str = None
     ) -> Generator[dict, None, None]:
@@ -157,7 +158,6 @@ class JSONParser(BaseParser):
                 )
                 yield self._create_batch_result(batch_records)
 
-
         except json.JSONDecodeError as e:
             raise ERROR_FILE_PARSING_FAILED(
                 file_path="json_stream", reason=f"Invalid JSON format: {e}"
@@ -191,7 +191,6 @@ class JSONParser(BaseParser):
             is_json_lines = (
                 valid_json_lines >= len([line for line in sample_lines if line]) * 0.5
             )
-
 
             return is_json_lines
 

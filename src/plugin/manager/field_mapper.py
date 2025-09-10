@@ -47,6 +47,15 @@ class FieldMapper:
         self.compiled_mappings = {}
         self._compile_mappings()
 
+        # 일별 카운트 추적을 위한 딕셔너리
+        self.daily_count_tracker = {}
+        self.total_processed_count = 0
+
+        _LOGGER.info(
+            f"[FieldMapper] Initialized - Provider: {self.provider}, "
+            f"SelectCost: {self.select_cost}, CostMetric: {self.cost_metric}"
+        )
+
     def map_record(self, source_data: dict) -> dict:
         """단일 레코드를 SpaceONE 형식으로 변환
 
@@ -57,152 +66,306 @@ class FieldMapper:
             SpaceONE 형식으로 변환된 데이터
         """
         try:
-            # 디버깅: 첫 번째 레코드에서만 로그 출력 (BigQuery 구조 확인)
-            if not hasattr(self, "_debug_record_logged"):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: BigQuery source data keys: {list(source_data.keys())}"
-                )
-                # BigQuery 중첩 필드들 확인
-                for key in [
-                    "service",
-                    "sku",
-                    "project",
-                    "usage",
-                    "invoice",
-                    "location",
-                    "price",
-                ]:
-                    if key in source_data:
-                        _LOGGER.info(
-                            f"[FieldMapper] DEBUG: {key} = {repr(source_data[key])}"
-                        )
-                self._debug_record_logged = True
+            # 디버깅 로깅 (첫 번째 레코드만)
+            self._log_debug_info_once(source_data)
 
-            # select_cost 옵션에 따라 비용 필드 결정
+            # 기본 필드 매핑
             cost_value = self._get_cost_by_option(source_data)
             usage_quantity_value = self._map_field("usage_quantity", source_data, 0)
+            billed_date_value = self._process_billed_date(source_data)
 
-            # billed_date 필드는 반드시 YYYY-MM-DD 형식으로 변환 (필수 필드)
-            billed_date_value = self._map_field("billed_date", source_data, "")
+            # additional_info 필드 병합 처리
+            final_additional_info = self._merge_additional_info(source_data)
 
-            # 디버깅: billed_date 매핑 과정 로깅
-            if not hasattr(self, "_debug_billed_date_logged"):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: billed_date mapping result: {repr(billed_date_value)}"
-                )
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: usage_start_time in source: {repr(source_data.get('usage_start_time', 'NOT_FOUND'))}"
-                )
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: export_time in source: {repr(source_data.get('export_time', 'NOT_FOUND'))}"
-                )
-                self._debug_billed_date_logged = True
+            # 주요 필드들 매핑
+            mapped_fields = self._map_core_fields(source_data)
 
-            if not billed_date_value or billed_date_value == "":
-                # billed_date가 없으면 현재 날짜를 기본값으로 사용
-                from datetime import datetime
-
-                billed_date_value = datetime.now().strftime("%Y-%m-%d")
-                _LOGGER.warning(
-                    f"[FieldMapper] billed_date missing, using current date: {billed_date_value}"
-                )
-            else:
-                billed_date_value = self._format_date(billed_date_value)
-
-            # additional_info 필드 특별 처리 - 기존 데이터와 매핑 데이터 병합
-            mapped_additional_info = self._map_field("additional_info", source_data, {})
-            existing_additional_info = source_data.get("additional_info", {})
-
-            # 기존 additional_info와 매핑된 additional_info 병합
-            # 매핑된 값이 우선순위를 가짐
-            final_additional_info = {}
-            if isinstance(existing_additional_info, dict):
-                final_additional_info.update(existing_additional_info)
-            if isinstance(mapped_additional_info, dict):
-                final_additional_info.update(mapped_additional_info)
-
-            # 중요 필드들 개별 매핑 및 디버깅
-            product_value = self._map_field("product", source_data, "")
-            usage_type_value = self._map_field("usage_type", source_data, "")
-            resource_value = self._map_field("resource", source_data, "")
-
-            # 디버깅: 매핑 결과 확인
-            if not hasattr(self, "_debug_mapping_logged"):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: product mapping result: {repr(product_value)}"
-                )
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: usage_type mapping result: {repr(usage_type_value)}"
-                )
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: resource mapping result: {repr(resource_value)}"
-                )
-                self._debug_mapping_logged = True
-
+            # 매핑된 데이터 구성
             mapped_data = {
                 "cost": cost_value,
                 "usage_quantity": usage_quantity_value,
                 "usage_unit": self._map_field("usage_unit", source_data, ""),
                 "provider": self.provider,
                 "region_code": self._map_field("region_code", source_data, "global"),
-                "product": product_value,
-                "usage_type": usage_type_value,
-                "resource": resource_value,
+                "product": mapped_fields["product"],
+                "usage_type": mapped_fields["usage_type"],
+                "resource": mapped_fields["resource"],
                 "billed_date": billed_date_value,
                 "tags": self._map_tags_field(source_data),
                 "additional_info": final_additional_info,
             }
 
-            # 🚨 CRITICAL: billed_date 필드 강제 보장
-            if not mapped_data.get("billed_date") or mapped_data["billed_date"] == "":
-                from datetime import datetime
-
-                mapped_data["billed_date"] = datetime.now().strftime("%Y-%m-%d")
-                _LOGGER.warning(
-                    f"[FieldMapper] CRITICAL: Force-set billed_date to current date: {mapped_data['billed_date']}"
-                )
-
-            # 디버깅: 최종 매핑 결과 확인
-            if not hasattr(self, "_debug_final_result_logged"):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: Final mapped_data billed_date: {repr(mapped_data.get('billed_date'))}"
-                )
-                self._debug_final_result_logged = True
-
-            # 🚨 CRITICAL: data 필드 생성을 완전히 비활성화하여 검증 오류 방지
-            # 원본 데이터 포함 옵션 처리 (현재 비활성화)
-            # if self.include_raw_data:
-            #     # 🚨 CRITICAL: source_data를 직렬화 가능한 형태로 변환 후 포함
-            #     sanitized_source_data = self._sanitize_for_serialization({"temp": source_data})["temp"]
-            #
-            #     if self.wrap_as_sample_data:
-            #         # sample_response_formatted.json 형태로 래핑
-            #         mapped_data["data"] = {"sample_data": sanitized_source_data}
-            #     else:
-            #         # 원본 데이터를 data 필드에 직접 포함
-            #         mapped_data["data"] = sanitized_source_data if isinstance(sanitized_source_data, dict) else {}
-
-            # 연산이 필요한 경우에만 Decimal로 변환하여 정확성 보장 후 원본 타입으로 복원
-            mapped_data["cost"] = self._process_numeric_field(mapped_data["cost"])
-            mapped_data["usage_quantity"] = self._process_numeric_field(
-                mapped_data["usage_quantity"]
-            )
-
-            # 🚨 CRITICAL: 모든 Pandas 객체를 JSON 직렬화 가능한 타입으로 변환
-            mapped_data = self._sanitize_for_serialization(mapped_data)
-
-            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
-            # data 필드에 listed_price와 cost 정보 추가
-            mapped_data["data"] = {
-                "listed_price": self._map_field("cost_at_list", source_data, ""),
-                "cost": str(mapped_data.get("cost", ""))
-            }
-
-            return mapped_data
+            # 최종 후처리
+            return self._finalize_mapped_data(mapped_data, source_data)
 
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
             raise ERROR_INVALID_ARGUMENT(key=f"field_mapper_error: {str(e)}") from e
+
+    def _log_debug_info_once(self, source_data: dict):
+        """디버깅 정보를 첫 번째 레코드에서만 로깅"""
+        if not hasattr(self, "_debug_record_logged"):
+            _LOGGER.info(
+                f"[FieldMapper] DEBUG: BigQuery source data keys: {list(source_data.keys())}"
+            )
+            # BigQuery 중첩 필드들 확인
+            for key in [
+                "service",
+                "sku",
+                "project",
+                "usage",
+                "invoice",
+                "location",
+                "price",
+            ]:
+                if key in source_data:
+                    _LOGGER.info(
+                        f"[FieldMapper] DEBUG: {key} = {repr(source_data[key])}"
+                    )
+            self._debug_record_logged = True
+
+    def _process_billed_date(self, source_data: dict) -> str:
+        """billed_date 필드 처리"""
+        billed_date_value = self._map_field("billed_date", source_data, "")
+
+        # 디버깅: billed_date 매핑 과정 로깅 (더 자세히)
+        if not hasattr(self, "_debug_billed_date_count"):
+            self._debug_billed_date_count = 0
+
+        # 처음 20개 레코드에 대해서만 상세 로깅
+        if self._debug_billed_date_count < 20:
+            self._debug_billed_date_count += 1
+
+        if not billed_date_value or billed_date_value == "":
+            # billed_date가 없으면 현재 날짜를 기본값으로 사용
+            from datetime import datetime
+
+            billed_date_value = datetime.now().strftime("%Y-%m-%d")
+            _LOGGER.warning(
+                f"[FieldMapper] billed_date missing, using current date: {billed_date_value}"
+            )
+        else:
+            billed_date_value = self._format_date(billed_date_value)
+
+        return billed_date_value
+
+    def _merge_additional_info(self, source_data: dict) -> dict:
+        """additional_info 필드 병합 처리"""
+        mapped_additional_info = self._map_field("additional_info", source_data, {})
+        existing_additional_info = source_data.get("additional_info", {})
+
+        # 기존 additional_info와 매핑된 additional_info 병합
+        # 매핑된 값이 우선순위를 가짐
+        final_additional_info = {}
+        if isinstance(existing_additional_info, dict):
+            final_additional_info.update(existing_additional_info)
+        if isinstance(mapped_additional_info, dict):
+            final_additional_info.update(mapped_additional_info)
+
+        return final_additional_info
+
+    def _map_core_fields(self, source_data: dict) -> dict:
+        """핵심 필드들 매핑"""
+        product_value = self._map_field("product", source_data, "")
+        usage_type_value = self._map_field("usage_type", source_data, "")
+        resource_value = self._map_field("resource", source_data, "")
+
+        # 디버깅: 매핑 결과 확인 (첫 번째 레코드만)
+        if not hasattr(self, "_debug_mapping_logged"):
+            _LOGGER.info(
+                f"[FieldMapper] DEBUG: product mapping result: {repr(product_value)}"
+            )
+            _LOGGER.info(
+                f"[FieldMapper] DEBUG: usage_type mapping result: {repr(usage_type_value)}"
+            )
+            _LOGGER.info(
+                f"[FieldMapper] DEBUG: resource mapping result: {repr(resource_value)}"
+            )
+            self._debug_mapping_logged = True
+
+        return {
+            "product": product_value,
+            "usage_type": usage_type_value,
+            "resource": resource_value,
+        }
+
+    def _finalize_mapped_data(self, mapped_data: dict, source_data: dict) -> dict:
+        """매핑된 데이터 최종 후처리"""
+        # 🚨 CRITICAL: billed_date 필드 강제 보장
+        if not mapped_data.get("billed_date") or mapped_data["billed_date"] == "":
+            from datetime import datetime
+
+            mapped_data["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+            _LOGGER.warning(
+                f"[FieldMapper] CRITICAL: Force-set billed_date to current date: {mapped_data['billed_date']}"
+            )
+
+        # 디버깅: 최종 매핑 결과 확인 (첫 번째 레코드만)
+        if not hasattr(self, "_debug_final_result_logged"):
+            self._debug_final_result_logged = True
+
+        # 연산이 필요한 경우에만 Decimal로 변환하여 정확성 보장 후 원본 타입으로 복원
+        mapped_data["cost"] = self._process_numeric_field(mapped_data["cost"])
+        mapped_data["usage_quantity"] = self._process_numeric_field(
+            mapped_data["usage_quantity"]
+        )
+
+        # 🚨 CRITICAL: 모든 Pandas 객체를 JSON 직렬화 가능한 타입으로 변환
+        mapped_data = self._sanitize_for_serialization(mapped_data)
+
+        # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+        # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
+        listed_price = self._get_listed_price_from_source(source_data)
+        mapped_data["data"] = self._create_spaceone_billing_data(
+            source_data, mapped_data, listed_price
+        )
+
+        # 일별 카운트 추적
+        self._track_daily_count(mapped_data.get("billed_date", "unknown"))
+
+        return mapped_data
+
+    def _get_listed_price_from_source(self, source_data: dict):
+        """다양한 소스에서 listed_price(정가) 정보를 추출
+
+        Google Cloud Billing 데이터에서 정가 정보는 다음 순서로 확인:
+        1. cost_at_list (최상위 레벨)
+        2. price.list_price (중첩 구조)
+        3. price.list_price_consumption_model (소비 모델 기준 정가)
+        4. cost (정가 정보가 없는 경우 실제 비용 사용)
+        """
+        # 1. 최상위 레벨의 cost_at_list 필드 확인
+        cost_at_list = source_data.get("cost_at_list")
+        if cost_at_list is not None and cost_at_list != "" and cost_at_list != 0:
+            return cost_at_list
+
+        # 2. price.list_price 중첩 구조 확인
+        price_info = source_data.get("price", {})
+        if isinstance(price_info, dict):
+            list_price = price_info.get("list_price")
+            if list_price is not None and list_price != "" and list_price != 0:
+                # 문자열인 경우 숫자로 변환 시도
+                try:
+                    return (
+                        float(list_price) if isinstance(list_price, str) else list_price
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+            # 3. 소비 모델 기준 정가 확인
+            list_price_consumption = price_info.get("list_price_consumption_model")
+            if (
+                list_price_consumption is not None
+                and list_price_consumption != ""
+                and list_price_consumption != 0
+            ):
+                try:
+                    return (
+                        float(list_price_consumption)
+                        if isinstance(list_price_consumption, str)
+                        else list_price_consumption
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+        # 4. FieldMapper를 통한 매핑 시도
+        mapped_value = self._map_field("cost_at_list", source_data, None)
+        if mapped_value is not None and mapped_value != "" and mapped_value != 0:
+            return mapped_value
+
+        # 5. 정가 정보가 없는 경우 실제 비용 사용 (fallback)
+        cost_value = source_data.get("cost")
+        if cost_value is not None and cost_value != "":
+            return cost_value
+
+        # 6. 모든 시도가 실패한 경우 빈 문자열 반환
+        return ""
+
+    def _create_spaceone_billing_data(
+        self, source_data: dict, mapped_data: dict, listed_price
+    ) -> dict:
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
+        # 기본 비용 정보
+        data_structure = {
+            "listed_price": str(listed_price)
+            if listed_price not in [None, "", 0]
+            else "",
+            "cost": str(mapped_data.get("cost", "")),
+        }
+
+        # 추가 정보 수집
+        self._add_billing_cost_info(data_structure, source_data)
+        self._add_usage_and_price_info(data_structure, source_data)
+        self._add_identifier_info(data_structure, source_data)
+
+        return data_structure
+
+    def _add_billing_cost_info(self, data_structure: dict, source_data: dict):
+        """빌링 비용 관련 정보 추가"""
+        # 크레딧 적용 후 비용
+        cost_after_credits = source_data.get("cost_after_credits")
+        if cost_after_credits is not None and cost_after_credits != "":
+            data_structure["cost_after_credits"] = str(cost_after_credits)
+
+        # 크레딧 정보
+        credits = source_data.get("credits", [])
+        if credits and isinstance(credits, list) and len(credits) > 0:
+            total_credits = sum(
+                float(credit.get("amount", 0))
+                for credit in credits
+                if isinstance(credit, dict)
+            )
+            if total_credits != 0:
+                data_structure["total_credits"] = str(total_credits)
+
+        # 환율 정보
+        currency_conversion_rate = source_data.get("currency_conversion_rate")
+        if (
+            currency_conversion_rate is not None
+            and currency_conversion_rate != ""
+            and currency_conversion_rate != 1
+        ):
+            data_structure["currency_conversion_rate"] = str(currency_conversion_rate)
+
+    def _add_usage_and_price_info(self, data_structure: dict, source_data: dict):
+        """사용량 및 가격 정보 추가"""
+        # 사용량 정보 (중첩 구조 처리)
+        usage_info = source_data.get("usage", {})
+        if isinstance(usage_info, dict):
+            usage_amount = usage_info.get("amount")
+            if usage_amount is not None and usage_amount != "":
+                data_structure["usage_amount"] = str(usage_amount)
+
+            usage_unit = usage_info.get("unit")
+            if usage_unit and usage_unit != "":
+                data_structure["usage_unit"] = str(usage_unit)
+
+        # 가격 정보 (중첩 구조 처리)
+        price_info = source_data.get("price", {})
+        if isinstance(price_info, dict):
+            effective_price = price_info.get("effective_price")
+            if (
+                effective_price is not None
+                and effective_price != ""
+                and effective_price != 0
+            ):
+                data_structure["effective_price"] = str(effective_price)
+
+    def _add_identifier_info(self, data_structure: dict, source_data: dict):
+        """핵심 식별자 정보 추가"""
+        # 프로젝트 정보
+        project_info = source_data.get("project", {})
+        if isinstance(project_info, dict):
+            project_id = project_info.get("id")
+            if project_id and project_id != "":
+                data_structure["project_id"] = str(project_id)
+
+        # 서비스 정보
+        service_info = source_data.get("service", {})
+        if isinstance(service_info, dict):
+            service_id = service_info.get("id")
+            if service_id and service_id != "":
+                data_structure["service_id"] = str(service_id)
 
     def _sanitize_for_serialization(self, data: dict) -> dict:
         """모든 데이터를 JSON 직렬화 가능한 타입으로 변환
@@ -221,79 +384,110 @@ class FieldMapper:
 
         def convert_value(value):
             """개별 값을 직렬화 가능한 타입으로 변환"""
-            # 🚨 CRITICAL: None 체크를 먼저 수행
-            if value is None:
-                return None
-            # 🚨 CRITICAL: Pandas NA 체크는 안전하게 수행
-            try:
-                if pd.isna(value):
-                    return None
-            except (TypeError, ValueError):
-                # pd.isna()가 실패하면 무시하고 계속 진행
-                pass
-
-            if isinstance(value, (pd.Timestamp, pd.Timedelta)):
-                # Pandas Timestamp/Timedelta -> 문자열
-                return str(value)
-            elif isinstance(value, (np.integer, np.floating)):
-                # Numpy 숫자 타입 -> Python 기본 타입
-                return value.item()
-            elif isinstance(value, np.ndarray):
-                # Numpy 배열 -> 리스트
-                return [convert_value(item) for item in value]
-            elif isinstance(value, (datetime, date)):
-                # Python datetime -> 문자열
-                return value.isoformat()
-            elif isinstance(value, Decimal):
-                # Decimal -> float (이미 _process_numeric_field에서 처리되지만 안전장치)
-                return float(value)
-            elif isinstance(value, dict):
-                # 중첩 딕셔너리 재귀 처리
-                return {k: convert_value(v) for k, v in value.items()}
-            elif isinstance(value, (list, tuple)):
-                # 리스트/튜플 재귀 처리
-                return [convert_value(item) for item in value]
-            else:
-                return value
+            return self._convert_single_value(value, pd, np, datetime, date, Decimal)
 
         # 전체 데이터 변환
         sanitized_data = {}
         for key, value in data.items():
-            try:
-                sanitized_value = convert_value(value)
-
-                # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
-                # data 필드는 SpaceONE에서 필수로 요구하므로 빈 딕셔너리로 설정
-                # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
-                if key == "data":
-                    # data 필드가 dict가 아니면 빈 딕셔너리로 강제 설정
-                    if not isinstance(sanitized_value, dict):
-                        sanitized_data[key] = {}
-                        _LOGGER.debug(
-                            f"[_sanitize_for_serialization] Force-set data field to empty dict (was {type(sanitized_value)})"
-                        )
-                    else:
-                        sanitized_data[key] = sanitized_value
-                    continue
-
-                sanitized_data[key] = sanitized_value
-
-            except Exception as e:
-                _LOGGER.warning(
-                    f"[FieldMapper] Failed to sanitize field {key}: {e}, keeping original value"
-                )
-                if key == "data":
-                    # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
-                    # data 필드는 SpaceONE에서 필수로 요구하므로 빈 딕셔너리로 설정
-                    sanitized_data[key] = {}  # 에러 발생 시에도 빈 딕셔너리로 설정
-                    _LOGGER.debug(
-                        "[FieldMapper] Force-set data field to empty dict due to sanitization error"
-                    )
-                    continue
-                else:
-                    sanitized_data[key] = str(value)  # 실패 시 문자열로 변환
+            sanitized_data[key] = self._sanitize_single_field(key, value, convert_value)
 
         return sanitized_data
+
+    def _convert_single_value(self, value, pd, np, datetime, date, decimal_type):
+        """개별 값을 직렬화 가능한 타입으로 변환"""
+        # 🚨 CRITICAL: None 체크를 먼저 수행
+        if value is None:
+            return None
+
+        # 🚨 CRITICAL: Pandas NA 체크는 안전하게 수행
+        if self._is_pandas_na(value, pd):
+            return None
+
+        return self._convert_value_by_type(value, pd, np, datetime, date, decimal_type)
+
+    def _is_pandas_na(self, value, pd) -> bool:
+        """Pandas NA 값인지 안전하게 확인"""
+        try:
+            return pd.isna(value)
+        except (TypeError, ValueError):
+            # pd.isna()가 실패하면 False 반환
+            return False
+
+    def _convert_value_by_type(self, value, pd, np, datetime, date, decimal_type):
+        """타입별 값 변환"""
+        if isinstance(value, (pd.Timestamp, pd.Timedelta)):
+            # Pandas Timestamp/Timedelta -> 문자열
+            return str(value)
+        elif isinstance(value, (np.integer, np.floating)):
+            # Numpy 숫자 타입 -> Python 기본 타입
+            return value.item()
+        elif isinstance(value, np.ndarray):
+            # Numpy 배열 -> 리스트
+            return [
+                self._convert_single_value(item, pd, np, datetime, date, decimal_type)
+                for item in value
+            ]
+        elif isinstance(value, (datetime, date)):
+            # Python datetime -> 문자열
+            return value.isoformat()
+        elif isinstance(value, decimal_type):
+            # Decimal -> float (이미 _process_numeric_field에서 처리되지만 안전장치)
+            return float(value)
+        elif isinstance(value, dict):
+            # 중첩 딕셔너리 재귀 처리
+            return {
+                k: self._convert_single_value(v, pd, np, datetime, date, decimal_type)
+                for k, v in value.items()
+            }
+        elif isinstance(value, (list, tuple)):
+            # 리스트/튜플 재귀 처리
+            return [
+                self._convert_single_value(item, pd, np, datetime, date, decimal_type)
+                for item in value
+            ]
+        else:
+            return value
+
+    def _sanitize_single_field(self, key: str, value, convert_value_func):
+        """단일 필드를 직렬화 가능한 타입으로 변환"""
+        try:
+            sanitized_value = convert_value_func(value)
+
+            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+            # data 필드는 SpaceONE에서 필수로 요구하므로 빈 딕셔너리로 설정
+            if key == "data":
+                return self._handle_data_field(sanitized_value)
+
+            return sanitized_value
+
+        except Exception as e:
+            return self._handle_sanitization_error(key, value, e)
+
+    def _handle_data_field(self, sanitized_value):
+        """data 필드 특별 처리"""
+        # data 필드가 dict가 아니면 빈 딕셔너리로 강제 설정
+        if not isinstance(sanitized_value, dict):
+            _LOGGER.debug(
+                f"[_sanitize_for_serialization] Force-set data field to empty dict (was {type(sanitized_value)})"
+            )
+            return {}
+        else:
+            return sanitized_value
+
+    def _handle_sanitization_error(self, key: str, value, error: Exception):
+        """직렬화 오류 처리"""
+        _LOGGER.warning(
+            f"[FieldMapper] Failed to sanitize field {key}: {error}, keeping original value"
+        )
+        if key == "data":
+            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+            # data 필드는 SpaceONE에서 필수로 요구하므로 빈 딕셔너리로 설정
+            _LOGGER.debug(
+                "[FieldMapper] Force-set data field to empty dict due to sanitization error"
+            )
+            return {}  # 에러 발생 시에도 빈 딕셔너리로 설정
+        else:
+            return str(value)  # 실패 시 문자열로 변환
 
     def _get_cost_by_option(self, source_data: dict):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
@@ -344,111 +538,133 @@ class FieldMapper:
         if isinstance(tags_value, dict):
             return tags_value
 
-        # Google Cloud labels 배열 형태 처리 [{"key": "k1", "value": "v1"}, ...]
+        # Google Cloud labels 배열 형태 처리
         if isinstance(tags_value, list):
-            try:
-                result_dict = {}
-                for item in tags_value:
-                    if isinstance(item, dict) and "key" in item and "value" in item:
-                        result_dict[item["key"]] = item["value"]
-                return result_dict
-            except Exception as e:
-                _LOGGER.warning(f"[FieldMapper] Failed to process labels array: {e}")
-                return {}
+            return self._process_labels_array(tags_value)
 
         # 문자열인 경우 JSON 파싱 시도
         if isinstance(tags_value, str) and tags_value.strip():
-            # 이미 처리한 잘린 문자열인지 캐시 확인 (성능 최적화)
-            if not hasattr(self, "_truncated_cache"):
-                self._truncated_cache = set()
+            return self._process_tags_string(tags_value)
 
-            tags_hash = hash(tags_value[:100])  # 처음 100자로 해시 생성
-            if tags_hash in self._truncated_cache:
-                return {}  # 이미 잘린 것으로 확인된 문자열
+        # 기타 모든 경우 빈 딕셔너리 반환
+        return {}
 
-            # 디버깅을 위한 로깅 (처음 몇 개만)
-            if not hasattr(self, "_debug_logged"):
-                _LOGGER.debug(f"[FieldMapper] Raw tags_value: {repr(tags_value[:100])}")
-                self._debug_logged = True
+    def _process_labels_array(self, labels_array: list) -> dict:
+        """Google Cloud labels 배열을 딕셔너리로 변환"""
+        try:
+            result_dict = {}
+            for item in labels_array:
+                if isinstance(item, dict) and "key" in item and "value" in item:
+                    result_dict[item["key"]] = item["value"]
+            return result_dict
+        except Exception as e:
+            _LOGGER.warning(f"[FieldMapper] Failed to process labels array: {e}")
+            return {}
 
+    def _process_tags_string(self, tags_value: str) -> dict:
+        """문자열 형태의 tags를 딕셔너리로 변환"""
+        # 이미 처리한 잘린 문자열인지 캐시 확인 (성능 최적화)
+        if not hasattr(self, "_truncated_cache"):
+            self._truncated_cache = set()
+
+        tags_hash = hash(tags_value[:100])  # 처음 100자로 해시 생성
+        if tags_hash in self._truncated_cache:
+            return {}  # 이미 잘린 것으로 확인된 문자열
+
+        # 디버깅을 위한 로깅 (처음 몇 개만)
+        if not hasattr(self, "_debug_logged"):
+            _LOGGER.debug(f"[FieldMapper] Raw tags_value: {repr(tags_value[:100])}")
+            self._debug_logged = True
+
+        # JSON 파싱 시도
+        json_result = self._try_parse_json_tags(tags_value)
+        if json_result is not None:
+            return json_result
+
+        # JSON 파싱 실패 시 key=value 형태 파싱 시도
+        return self._parse_key_value_pairs(tags_value)
+
+    def _try_parse_json_tags(self, tags_value: str) -> dict:
+        """JSON 형태의 tags 파싱 시도"""
+        try:
+            import json
+
+            parsed_tags = json.loads(tags_value)
+
+            # 파싱된 결과가 딕셔너리인 경우
+            if isinstance(parsed_tags, dict):
+                return parsed_tags
+
+            # 파싱된 결과가 Google Cloud labels 배열인 경우
+            elif isinstance(parsed_tags, list):
+                return self._process_labels_array(parsed_tags)
+            else:
+                _LOGGER.warning(
+                    f"[FieldMapper] Parsed tags is not a dict or labels array: {type(parsed_tags)}"
+                )
+                return {}
+
+        except (json.JSONDecodeError, ValueError) as e:
+            return self._handle_json_parse_error(tags_value, e)
+
+    def _handle_json_parse_error(self, tags_value: str, error: Exception) -> dict:
+        """JSON 파싱 오류 처리"""
+        # 잘린 JSON 문자열인지 확인
+        if self._is_truncated_json(tags_value):
+            # 잘린 문자열로 보이는 경우 - 캐시에 추가하고 빈 딕셔너리 반환
+            if hasattr(self, "_truncated_cache"):
+                tags_hash = hash(tags_value[:100])
+                self._truncated_cache.add(tags_hash)
+            return {}
+
+        # 로깅 빈도 제한 - 같은 오류는 최대 5번만 로깅
+        self._log_json_error_limited(error, tags_value)
+
+        # 일반적인 잘못된 JSON 형식들을 수정 시도
+        return self._try_fix_and_parse_json(tags_value)
+
+    def _is_truncated_json(self, tags_value: str) -> bool:
+        """JSON 문자열이 잘렸는지 확인"""
+        truncated_patterns = [
+            "', 'value': '",  # 잘린 key-value 패턴
+            "'key':",  # 시작만 있는 패턴
+            '"key":',  # 시작만 있는 패턴
+            "'value': '",  # value만 있는 패턴
+            '"value": "',  # value만 있는 패턴
+        ]
+
+        return (
+            len(tags_value) > 50
+            and not tags_value.strip().endswith(("}", "]", '"', "'"))
+        ) or any(pattern in tags_value[:50] for pattern in truncated_patterns)
+
+    def _log_json_error_limited(self, error: Exception, tags_value: str):
+        """JSON 오류 로깅 (빈도 제한)"""
+        if not hasattr(self, "_json_error_count"):
+            self._json_error_count = {}
+        error_key = str(error)[:50]  # 오류 메시지의 처음 50자로 키 생성
+        if self._json_error_count.get(error_key, 0) < 5:
+            self._json_error_count[error_key] = (
+                self._json_error_count.get(error_key, 0) + 1
+            )
+            _LOGGER.debug(
+                f"[FieldMapper] JSON parsing failed for: {repr(tags_value[:50])}, error: {error}"
+            )
+
+    def _try_fix_and_parse_json(self, tags_value: str) -> dict:
+        """잘못된 JSON 형식을 수정하고 다시 파싱 시도"""
+        cleaned_value = self._try_fix_malformed_json(tags_value)
+        if cleaned_value != tags_value:
             try:
                 import json
 
-                parsed_tags = json.loads(tags_value)
-
-                # 파싱된 결과가 딕셔너리인 경우
+                parsed_tags = json.loads(cleaned_value)
                 if isinstance(parsed_tags, dict):
                     return parsed_tags
-
-                # 파싱된 결과가 Google Cloud labels 배열인 경우
                 elif isinstance(parsed_tags, list):
-                    result_dict = {}
-                    for item in parsed_tags:
-                        if isinstance(item, dict) and "key" in item and "value" in item:
-                            result_dict[item["key"]] = item["value"]
-                    return result_dict
-                else:
-                    _LOGGER.warning(
-                        f"[FieldMapper] Parsed tags is not a dict or labels array: {type(parsed_tags)}"
-                    )
-                    return {}
-            except (json.JSONDecodeError, ValueError) as e:
-                # 잘린 JSON 문자열인 경우 로깅 생략 (스팸 방지)
-                truncated_patterns = [
-                    "', 'value': '",  # 잘린 key-value 패턴
-                    "'key':",  # 시작만 있는 패턴
-                    '"key":',  # 시작만 있는 패턴
-                    "'value': '",  # value만 있는 패턴
-                    '"value": "',  # value만 있는 패턴
-                ]
-
-                is_truncated = (
-                    len(tags_value) > 50
-                    and not tags_value.strip().endswith(("}", "]", '"', "'"))
-                ) or any(pattern in tags_value[:50] for pattern in truncated_patterns)
-
-                if is_truncated:
-                    # 잘린 문자열로 보이는 경우 - 캐시에 추가하고 빈 딕셔너리 반환
-                    if hasattr(self, "_truncated_cache"):
-                        self._truncated_cache.add(tags_hash)
-                    return {}
-
-                # 로깅 빈도 제한 - 같은 오류는 최대 5번만 로깅
-                if not hasattr(self, "_json_error_count"):
-                    self._json_error_count = {}
-                error_key = str(e)[:50]  # 오류 메시지의 처음 50자로 키 생성
-                if self._json_error_count.get(error_key, 0) < 5:
-                    self._json_error_count[error_key] = (
-                        self._json_error_count.get(error_key, 0) + 1
-                    )
-                    _LOGGER.debug(
-                        f"[FieldMapper] JSON parsing failed for: {repr(tags_value[:50])}, error: {e}"
-                    )
-
-                # 일반적인 잘못된 JSON 형식들을 수정 시도
-                cleaned_value = self._try_fix_malformed_json(tags_value)
-                if cleaned_value != tags_value:
-                    try:
-                        parsed_tags = json.loads(cleaned_value)
-                        if isinstance(parsed_tags, dict):
-                            return parsed_tags
-                        elif isinstance(parsed_tags, list):
-                            result_dict = {}
-                            for item in parsed_tags:
-                                if (
-                                    isinstance(item, dict)
-                                    and "key" in item
-                                    and "value" in item
-                                ):
-                                    result_dict[item["key"]] = item["value"]
-                            return result_dict
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-
-                # key=value 형태 파싱 시도
-                return self._parse_key_value_pairs(tags_value)
-
-        # 기타 모든 경우 빈 딕셔너리 반환
+                    return self._process_labels_array(parsed_tags)
+            except (json.JSONDecodeError, ValueError):
+                pass
         return {}
 
     def _try_fix_malformed_json(self, json_str: str) -> str:
@@ -529,94 +745,7 @@ class FieldMapper:
             return lambda data, rule=mapping_rule: self._get_nested_value(data, rule)
 
         elif isinstance(mapping_rule, dict):
-            if "field" in mapping_rule:
-                # 필드 매핑 + 변환: {"field": "source_field", "transform": "function_name"}
-                field_name = mapping_rule["field"]
-                transform = mapping_rule.get("transform")
-                default_value = mapping_rule.get("default", "")
-                fallback_field = mapping_rule.get("fallback")
-
-                def field_mapper_with_fallback(
-                    data,
-                    field=field_name,
-                    trans=transform,
-                    default=default_value,
-                    fallback=fallback_field,
-                ):
-                    # 주 필드 시도 (중첩 경로 지원)
-                    value = self._get_nested_value(data, field)
-                    # None이 아니고 빈 문자열이 아닌 경우 사용 (빈 딕셔너리 {} 도 유효한 값)
-                    if value is not None and value != "":
-                        return self._apply_transform(value, trans)
-
-                    # fallback 필드 시도 (중첩 경로 지원)
-                    if fallback:
-                        fallback_value = self._get_nested_value(data, fallback)
-                        if fallback_value is not None and fallback_value != "":
-                            return self._apply_transform(fallback_value, trans)
-
-                    # 기본값 사용
-                    return self._apply_transform(default, trans) if default else ""
-
-                return field_mapper_with_fallback
-
-            elif "expression" in mapping_rule:
-                # 표현식 매핑: {"expression": "field1 + field2"}
-                expression = mapping_rule["expression"]
-                return lambda data, expr=expression: self._evaluate_expression(
-                    expr, data
-                )
-
-            elif "constant" in mapping_rule:
-                # 상수 값: {"constant": "fixed_value"}
-                constant_value = mapping_rule["constant"]
-                return lambda data, const=constant_value: const
-
-            else:
-                # 딕셔너리 형태의 복합 매핑: {"field1": "source1", "field2": "source2"}
-                # additional_info와 같은 복합 필드에 사용
-                def map_dict_fields(data, rules=mapping_rule):
-                    result = {}
-                    # 디버깅: 첫 번째 레코드에서만 로그 출력
-                    if not hasattr(self, "_debug_dict_mapping_logged"):
-                        _LOGGER.info(
-                            f"[FieldMapper] DEBUG: map_dict_fields called with data keys: {list(data.keys())}"
-                        )
-                        _LOGGER.info(f"[FieldMapper] DEBUG: mapping rules: {rules}")
-                        self._debug_dict_mapping_logged = True
-
-                    for target_field, source_config in rules.items():
-                        if isinstance(source_config, str):
-                            # 단순 필드 매핑 (중첩 경로 지원)
-                            value = self._get_nested_value(data, source_config, "")
-                            result[target_field] = value
-
-                            # 디버깅: 중요한 필드들만 로그
-                            if target_field in [
-                                "project_id",
-                                "service_id",
-                                "sku_id",
-                            ] and not hasattr(self, f"_debug_{target_field}_logged"):
-                                _LOGGER.info(
-                                    f"[FieldMapper] DEBUG: {target_field} = '{source_config}' -> '{value}'"
-                                )
-                                setattr(self, f"_debug_{target_field}_logged", True)
-
-                        elif (
-                            isinstance(source_config, dict) and "field" in source_config
-                        ):
-                            # 변환이 포함된 필드 매핑 (중첩 경로 지원)
-                            field_name = source_config["field"]
-                            transform = source_config.get("transform")
-                            value = self._get_nested_value(data, field_name, "")
-                            result[target_field] = self._apply_transform(
-                                value, transform
-                            )
-                        else:
-                            result[target_field] = ""
-                    return result
-
-                return map_dict_fields
+            return self._compile_dict_mapping(mapping_rule)
 
         elif callable(mapping_rule):
             # 함수 매핑
@@ -624,6 +753,109 @@ class FieldMapper:
 
         # 기본값 반환
         return lambda data: mapping_rule
+
+    def _compile_dict_mapping(self, mapping_rule: dict) -> Callable:
+        """딕셔너리 형태의 매핑 규칙을 컴파일"""
+        if "field" in mapping_rule:
+            return self._compile_field_mapping(mapping_rule)
+        elif "expression" in mapping_rule:
+            return self._compile_expression_mapping(mapping_rule)
+        elif "constant" in mapping_rule:
+            return self._compile_constant_mapping(mapping_rule)
+        else:
+            return self._compile_complex_dict_mapping(mapping_rule)
+
+    def _compile_field_mapping(self, mapping_rule: dict) -> Callable:
+        """필드 매핑 + 변환 규칙을 컴파일"""
+        field_name = mapping_rule["field"]
+        transform = mapping_rule.get("transform")
+        default_value = mapping_rule.get("default", "")
+        fallback_field = mapping_rule.get("fallback")
+
+        def field_mapper_with_fallback(
+            data,
+            field=field_name,
+            trans=transform,
+            default=default_value,
+            fallback=fallback_field,
+        ):
+            # 주 필드 시도 (중첩 경로 지원)
+            value = self._get_nested_value(data, field)
+            # None이 아니고 빈 문자열이 아닌 경우 사용 (빈 딕셔너리 {} 도 유효한 값)
+            if value is not None and value != "":
+                return self._apply_transform(value, trans)
+
+            # fallback 필드 시도 (중첩 경로 지원)
+            if fallback:
+                fallback_value = self._get_nested_value(data, fallback)
+                if fallback_value is not None and fallback_value != "":
+                    return self._apply_transform(fallback_value, trans)
+
+            # 기본값 사용
+            return self._apply_transform(default, trans) if default else ""
+
+        return field_mapper_with_fallback
+
+    def _compile_expression_mapping(self, mapping_rule: dict) -> Callable:
+        """표현식 매핑 규칙을 컴파일"""
+        expression = mapping_rule["expression"]
+        return lambda data, expr=expression: self._evaluate_expression(expr, data)
+
+    def _compile_constant_mapping(self, mapping_rule: dict) -> Callable:
+        """상수 값 매핑 규칙을 컴파일"""
+        constant_value = mapping_rule["constant"]
+        return lambda data, const=constant_value: const
+
+    def _compile_complex_dict_mapping(self, mapping_rule: dict) -> Callable:
+        """복합 딕셔너리 매핑 규칙을 컴파일"""
+
+        def map_dict_fields(data, rules=mapping_rule):
+            result = {}
+            # 디버깅: 첫 번째 레코드에서만 로그 출력
+            if not hasattr(self, "_debug_dict_mapping_logged"):
+                _LOGGER.info(
+                    f"[FieldMapper] DEBUG: map_dict_fields called with data keys: {list(data.keys())}"
+                )
+                _LOGGER.info(f"[FieldMapper] DEBUG: mapping rules: {rules}")
+                self._debug_dict_mapping_logged = True
+
+            for target_field, source_config in rules.items():
+                result[target_field] = self._process_dict_field_mapping(
+                    data, target_field, source_config
+                )
+            return result
+
+        return map_dict_fields
+
+    def _process_dict_field_mapping(
+        self, data: dict, target_field: str, source_config
+    ) -> str:
+        """딕셔너리 매핑에서 개별 필드 처리"""
+        if isinstance(source_config, str):
+            # 단순 필드 매핑 (중첩 경로 지원)
+            value = self._get_nested_value(data, source_config, "")
+
+            # 디버깅: 중요한 필드들만 로그
+            if target_field in [
+                "project_id",
+                "service_id",
+                "sku_id",
+            ] and not hasattr(self, f"_debug_{target_field}_logged"):
+                _LOGGER.info(
+                    f"[FieldMapper] DEBUG: {target_field} = '{source_config}' -> '{value}'"
+                )
+                setattr(self, f"_debug_{target_field}_logged", True)
+
+            return value
+
+        elif isinstance(source_config, dict) and "field" in source_config:
+            # 변환이 포함된 필드 매핑 (중첩 경로 지원)
+            field_name = source_config["field"]
+            transform = source_config.get("transform")
+            value = self._get_nested_value(data, field_name, "")
+            return self._apply_transform(value, transform)
+        else:
+            return ""
 
     def _map_field(
         self, field_name: str, source_data: dict, default_value: Any = None
@@ -687,65 +919,7 @@ class FieldMapper:
         try:
             # 점(.)으로 구분된 경로 처리
             if "." in path:
-                keys = path.split(".")
-                current_value = data
-
-                for i, key in enumerate(keys):
-                    if isinstance(current_value, dict):
-                        current_value = current_value.get(key)
-                        if current_value is None:
-                            # 디버깅을 위한 상세 로그 (중요 필드만)
-                            if path in ["project.id", "service.id", "sku.id"]:
-                                _LOGGER.debug(
-                                    f"[FieldMapper] Nested path '{path}' failed at key '{key}' (step {i + 1}/{len(keys)})"
-                                )
-                                _LOGGER.debug(
-                                    f"[FieldMapper] Available keys at this level: {list(data.keys()) if i == 0 else 'N/A'}"
-                                )
-                            return default_value
-                    elif isinstance(current_value, str):
-                        # 문자열인 경우 JSON 파싱 시도
-                        try:
-                            import json
-
-                            parsed_value = json.loads(current_value)
-                            if isinstance(parsed_value, dict):
-                                current_value = parsed_value.get(key)
-                                if current_value is None:
-                                    return default_value
-                            else:
-                                return default_value
-                        except (json.JSONDecodeError, ValueError):
-                            return default_value
-                    else:
-                        # 중요한 필드들에 대해서만 로그 출력
-                        if path in ["project.id", "service.id", "sku.id"]:
-                            _LOGGER.debug(
-                                f"[FieldMapper] Nested path '{path}' expected dict but got {type(current_value)} at key '{key}'"
-                            )
-                        return default_value
-
-                # 결과 검증 및 로깅
-                result = current_value if current_value is not None else default_value
-
-                # 중요한 필드들에 대해 결과 로깅 (처음 몇 번만)
-                if path in [
-                    "project.id",
-                    "service.id",
-                    "sku.id",
-                    "service.description",
-                    "sku.description",
-                    "project.name",
-                    "invoice.month",
-                ]:
-                    log_key = f"_nested_log_{path.replace('.', '_')}"
-                    if not hasattr(self, log_key):
-                        _LOGGER.info(
-                            f"[FieldMapper] DEBUG: Nested path '{path}' resolved to: {repr(result)}"
-                        )
-                        setattr(self, log_key, True)
-
-                return result
+                return self._process_nested_path(data, path, default_value)
             else:
                 # 단순 필드명
                 return data.get(path, default_value)
@@ -755,6 +929,96 @@ class FieldMapper:
                 f"[FieldMapper] Failed to get nested value for path '{path}': {e}"
             )
             return default_value
+
+    def _process_nested_path(self, data: dict, path: str, default_value: Any) -> Any:
+        """중첩 경로 처리"""
+        keys = path.split(".")
+        current_value = data
+
+        for i, key in enumerate(keys):
+            current_value = self._process_single_key(
+                current_value, key, path, i, len(keys), data
+            )
+            if current_value is None:
+                return default_value
+
+        # 결과 검증 및 로깅
+        result = current_value if current_value is not None else default_value
+        self._log_nested_result(path, result)
+        return result
+
+    def _process_single_key(
+        self,
+        current_value,
+        key: str,
+        path: str,
+        step: int,
+        total_steps: int,
+        original_data: dict,
+    ):
+        """단일 키 처리"""
+        if isinstance(current_value, dict):
+            value = current_value.get(key)
+            if value is None:
+                self._log_nested_failure(path, key, step, total_steps, original_data)
+            return value
+        elif isinstance(current_value, str):
+            return self._parse_json_for_key(current_value, key)
+        else:
+            self._log_type_mismatch(path, key, current_value)
+            return None
+
+    def _log_nested_failure(
+        self, path: str, key: str, step: int, total_steps: int, original_data: dict
+    ):
+        """중첩 경로 실패 로깅"""
+        if path in ["project.id", "service.id", "sku.id"]:
+            _LOGGER.debug(
+                f"[FieldMapper] Nested path '{path}' failed at key '{key}' (step {step + 1}/{total_steps})"
+            )
+            _LOGGER.debug(
+                f"[FieldMapper] Available keys at this level: {list(original_data.keys()) if step == 0 else 'N/A'}"
+            )
+
+    def _parse_json_for_key(self, json_str: str, key: str):
+        """JSON 문자열에서 키 값 추출"""
+        try:
+            import json
+
+            parsed_value = json.loads(json_str)
+            if isinstance(parsed_value, dict):
+                return parsed_value.get(key)
+            else:
+                return None
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def _log_type_mismatch(self, path: str, key: str, current_value):
+        """타입 불일치 로깅"""
+        if path in ["project.id", "service.id", "sku.id"]:
+            _LOGGER.debug(
+                f"[FieldMapper] Nested path '{path}' expected dict but got {type(current_value)} at key '{key}'"
+            )
+
+    def _log_nested_result(self, path: str, result):
+        """중첩 경로 결과 로깅"""
+        important_paths = [
+            "project.id",
+            "service.id",
+            "sku.id",
+            "service.description",
+            "sku.description",
+            "project.name",
+            "invoice.month",
+        ]
+
+        if path in important_paths:
+            log_key = f"_nested_log_{path.replace('.', '_')}"
+            if not hasattr(self, log_key):
+                _LOGGER.info(
+                    f"[FieldMapper] DEBUG: Nested path '{path}' resolved to: {repr(result)}"
+                )
+                setattr(self, log_key, True)
 
     def _apply_transform(self, value: Any, transform: Optional[str]) -> Any:
         """값 변환 함수 적용"""
@@ -771,41 +1035,7 @@ class FieldMapper:
             elif transform == "date_format":
                 return self._format_date(value)
             elif transform == "json_parse":
-                import json
-
-                if not value:
-                    return {}
-
-                # 문자열로 변환
-                json_str = str(value).strip()
-
-                # 빈 문자열이거나 None인 경우
-                if not json_str or json_str.lower() in ("none", "null", ""):
-                    return {}
-
-                # 이미 딕셔너리인 경우 그대로 반환
-                if isinstance(value, dict):
-                    return value
-
-                # JSON 파싱 시도
-                try:
-                    parsed = json.loads(json_str)
-                    # 파싱된 결과가 딕셔너리가 아닌 경우 빈 딕셔너리 반환
-                    return parsed if isinstance(parsed, dict) else {}
-                except (json.JSONDecodeError, ValueError):
-                    # JSON 파싱 실패 시 문자열을 단일 키-값으로 처리 시도
-                    if "=" in json_str:
-                        # key=value 형태 처리
-                        try:
-                            pairs = {}
-                            for pair in json_str.split(","):
-                                if "=" in pair:
-                                    k, v = pair.split("=", 1)
-                                    pairs[k.strip()] = v.strip()
-                            return pairs
-                        except Exception:
-                            return {}
-                    return {}
+                return self._apply_json_parse_transform(value)
             else:
                 _LOGGER.warning(f"[FieldMapper] Unknown transform: {transform}")
                 return value
@@ -813,6 +1043,48 @@ class FieldMapper:
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Transform failed: {transform}, error: {e}")
             return value
+
+    def _apply_json_parse_transform(self, value: Any) -> dict:
+        """JSON 파싱 변환 적용"""
+        import json
+
+        if not value:
+            return {}
+
+        # 문자열로 변환
+        json_str = str(value).strip()
+
+        # 빈 문자열이거나 None인 경우
+        if not json_str or json_str.lower() in ("none", "null", ""):
+            return {}
+
+        # 이미 딕셔너리인 경우 그대로 반환
+        if isinstance(value, dict):
+            return value
+
+        # JSON 파싱 시도
+        try:
+            parsed = json.loads(json_str)
+            # 파싱된 결과가 딕셔너리가 아닌 경우 빈 딕셔너리 반환
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, ValueError):
+            return self._parse_json_fallback(json_str)
+
+    def _parse_json_fallback(self, json_str: str) -> dict:
+        """JSON 파싱 실패 시 대안 처리"""
+        # JSON 파싱 실패 시 문자열을 단일 키-값으로 처리 시도
+        if "=" in json_str:
+            # key=value 형태 처리
+            try:
+                pairs = {}
+                for pair in json_str.split(","):
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        pairs[k.strip()] = v.strip()
+                return pairs
+            except Exception:
+                return {}
+        return {}
 
     def _evaluate_expression(self, expression: str, data: dict) -> Any:
         """간단한 표현식 평가 (보안상 제한적으로 구현)"""
@@ -893,15 +1165,11 @@ class FieldMapper:
 
     def _format_date(self, value: Any) -> str:
         """날짜 형식 변환"""
-        # 디버깅: 날짜 변환 과정 로깅
-        if not hasattr(self, "_debug_format_date_logged"):
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: _format_date called with value: {repr(value)} (type: {type(value)})"
-            )
-            self._debug_format_date_logged = True
+        # 디버깅 로깅 (처음 10개만)
+        self._log_date_debug_info(value)
 
-        if not value or str(value).strip() == "" or str(value) == "today":
-            # 빈 값이거나 "today"일 경우 현재 날짜를 기본값으로 사용
+        # 빈 값이나 "today" 처리
+        if self._is_empty_or_today(value):
             result = datetime.now().strftime("%Y-%m-%d")
             _LOGGER.info(
                 f"[FieldMapper] DEBUG: _format_date returning default date: {result}"
@@ -909,59 +1177,82 @@ class FieldMapper:
             return result
 
         try:
-            # pandas.Timestamp 객체 처리 (Parquet 파일에서 읽어온 날짜)
-            if hasattr(value, "to_pydatetime"):
-                # pandas.Timestamp를 Python datetime으로 변환 후 포맷팅
-                return value.to_pydatetime().strftime("%Y-%m-%d")
-            elif isinstance(value, datetime):
-                return value.strftime("%Y-%m-%d")
-            elif isinstance(value, str):
-                # 이미 올바른 형식인지 확인
-                if len(value) == 10 and value.count("-") == 2:
-                    try:
-                        # YYYY-MM-DD 형식 검증
-                        datetime.strptime(value, "%Y-%m-%d")
-                        return value
-                    except ValueError:
-                        pass
-
-                # 다양한 날짜 형식 파싱 시도
-                date_formats = [
-                    "%Y-%m-%d",
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%SZ",  # ISO 8601 with Z suffix
-                    "%Y-%m-%dT%H:%M:%S.%fZ",  # ISO 8601 with microseconds
-                    "%Y-%m-%d %H:%M:%S UTC",  # Google Cloud usage_start_time 형식
-                    "%Y-%m-%d %H:%M:%S.%f UTC",  # Google Cloud export_time 형식
-                    "%Y/%m/%d",
-                    "%m/%d/%Y",
-                    "%d/%m/%Y",
-                ]
-
-                for fmt in date_formats:
-                    try:
-                        parsed_date = datetime.strptime(value, fmt)
-                        return parsed_date.strftime("%Y-%m-%d")
-                    except ValueError:
-                        continue
-
-                # 파싱 실패 시 현재 날짜를 기본값으로 사용
-                _LOGGER.warning(
-                    f"[FieldMapper] Failed to parse date: {value}, using current date"
-                )
-                return datetime.now().strftime("%Y-%m-%d")
-            else:
-                # 기타 타입은 현재 날짜를 기본값으로 사용
-                _LOGGER.warning(
-                    f"[FieldMapper] Unsupported date type: {type(value)}, value: {value}, using current date"
-                )
-                return datetime.now().strftime("%Y-%m-%d")
-
+            return self._parse_date_value(value)
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Date format failed: {value}, error: {e}")
             # 예외 발생 시에도 올바른 YYYY-MM-DD 형식으로 반환
             return datetime.now().strftime("%Y-%m-%d")
+
+    def _log_date_debug_info(self, value: Any):
+        """날짜 변환 디버깅 정보 로깅"""
+        if not hasattr(self, "_debug_format_date_count"):
+            self._debug_format_date_count = 0
+
+        # 처음 10개 레코드에 대해서만 상세 로깅
+        if self._debug_format_date_count < 10:
+            self._debug_format_date_count += 1
+
+    def _is_empty_or_today(self, value: Any) -> bool:
+        """빈 값이거나 'today'인지 확인"""
+        return not value or str(value).strip() == "" or str(value) == "today"
+
+    def _parse_date_value(self, value: Any) -> str:
+        """날짜 값 파싱"""
+        # pandas.Timestamp 객체 처리
+        if hasattr(value, "to_pydatetime"):
+            result = value.to_pydatetime().strftime("%Y-%m-%d")
+            if self._debug_format_date_count <= 10:
+                # _LOGGER.info(f"[FieldMapper] DEBUG: pandas.Timestamp {repr(value)} -> {repr(result)}")
+                pass
+            return result
+        elif isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d")
+        elif isinstance(value, str):
+            return self._parse_string_date(value)
+        else:
+            # 기타 타입은 현재 날짜를 기본값으로 사용
+            _LOGGER.warning(
+                f"[FieldMapper] Unsupported date type: {type(value)}, value: {value}, using current date"
+            )
+            return datetime.now().strftime("%Y-%m-%d")
+
+    def _parse_string_date(self, value: str) -> str:
+        """문자열 형태의 날짜 파싱"""
+        # 이미 올바른 형식인지 확인
+        if len(value) == 10 and value.count("-") == 2:
+            try:
+                # YYYY-MM-DD 형식 검증
+                datetime.strptime(value, "%Y-%m-%d")
+                return value
+            except ValueError:
+                pass
+
+        # 다양한 날짜 형식 파싱 시도
+        date_formats = [
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M:%SZ",  # ISO 8601 with Z suffix
+            "%Y-%m-%dT%H:%M:%S.%fZ",  # ISO 8601 with microseconds
+            "%Y-%m-%d %H:%M:%S UTC",  # Google Cloud usage_start_time 형식
+            "%Y-%m-%d %H:%M:%S.%f UTC",  # Google Cloud export_time 형식
+            "%Y/%m/%d",
+            "%m/%d/%Y",
+            "%d/%m/%Y",
+        ]
+
+        for fmt in date_formats:
+            try:
+                parsed_date = datetime.strptime(value, fmt)
+                return parsed_date.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
+        # 파싱 실패 시 현재 날짜를 기본값으로 사용
+        _LOGGER.warning(
+            f"[FieldMapper] Failed to parse date: {value}, using current date"
+        )
+        return datetime.now().strftime("%Y-%m-%d")
 
     def _get_default_mapping(self, provider: str) -> dict:
         """프로바이더별 기본 매핑 반환"""
@@ -1195,3 +1486,79 @@ class FieldMapper:
                 "tags": "tags",
                 "additional_info": "additional_info",
             }
+
+    def _track_daily_count(self, billed_date: str):
+        """일별 카운트 추적 및 주기적 로깅"""
+        if not billed_date or billed_date == "unknown":
+            billed_date = "unknown_date"
+
+        # 카운트 증가
+        self.daily_count_tracker[billed_date] = (
+            self.daily_count_tracker.get(billed_date, 0) + 1
+        )
+        self.total_processed_count += 1
+
+        # 100개마다 중간 요약 로깅
+        if self.total_processed_count % 100 == 0:
+            self._log_daily_count_summary(is_intermediate=True)
+
+        # 1000개마다 상세 로깅
+        if self.total_processed_count % 1000 == 0:
+            self._log_daily_count_summary(is_intermediate=False)
+
+    def _log_daily_count_summary(self, is_intermediate: bool = False):
+        """일별 카운트 요약 로깅"""
+        if not self.daily_count_tracker:
+            return
+
+        # log_type = "중간" if is_intermediate else "상세"
+        # _LOGGER.info(f"[FieldMapper] === {log_type} 일별 카운트 요약 (총 {self.total_processed_count:,}개 처리) ===")
+
+        # 날짜순으로 정렬하여 로깅 (주석 처리됨)
+        # sorted_dates = sorted(self.daily_count_tracker.items())
+        # for date, count in sorted_dates:
+        #     percentage = (count / self.total_processed_count) * 100 if self.total_processed_count > 0 else 0
+        #     _LOGGER.info(f"[FieldMapper]   📅 {date}: {count:,}개 ({percentage:.1f}%)")
+
+    def log_final_daily_count_summary(self):
+        """최종 일별 카운트 요약 로깅 (외부에서 호출 가능)"""
+        _LOGGER.info("[FieldMapper] 🎯 === 최종 일별 카운트 요약 ===")
+        _LOGGER.info(
+            f"[FieldMapper] 📊 총 처리 레코드: {self.total_processed_count:,}개"
+        )
+
+        if self.daily_count_tracker:
+            _LOGGER.info(
+                f"[FieldMapper] 📅 처리 기간: {min(self.daily_count_tracker.keys())} ~ {max(self.daily_count_tracker.keys())}"
+            )
+            _LOGGER.info(
+                f"[FieldMapper] 🗓️ 고유 날짜 수: {len(self.daily_count_tracker)}개"
+            )
+
+            # 날짜별 상세 정보
+            sorted_dates = sorted(self.daily_count_tracker.items())
+            for date, count in sorted_dates:
+                percentage = (count / self.total_processed_count) * 100
+                _LOGGER.info(
+                    f"[FieldMapper]   📅 {date}: {count:,}개 레코드 ({percentage:.2f}%)"
+                )
+
+            # 최다/최소 처리 날짜
+            max_date = max(self.daily_count_tracker.items(), key=lambda x: x[1])
+            min_date = min(self.daily_count_tracker.items(), key=lambda x: x[1])
+            _LOGGER.info(
+                f"[FieldMapper] 🥇 최다 처리: {max_date[0]} ({max_date[1]:,}개)"
+            )
+            _LOGGER.info(
+                f"[FieldMapper] 🥉 최소 처리: {min_date[0]} ({min_date[1]:,}개)"
+            )
+        else:
+            _LOGGER.warning("[FieldMapper] ⚠️ 처리된 데이터가 없습니다")
+
+        _LOGGER.info("[FieldMapper] 🎯 === 일별 카운트 요약 완료 ===")
+
+    def reset_daily_count_tracker(self):
+        """일별 카운트 추적기 초기화"""
+        self.daily_count_tracker.clear()
+        self.total_processed_count = 0
+        _LOGGER.info("[FieldMapper] 일별 카운트 추적기가 초기화되었습니다")

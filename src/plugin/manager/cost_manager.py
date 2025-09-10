@@ -262,13 +262,13 @@ class CostManager(BaseManager):
                 _LOGGER.info(
                     f"[CostManager] Starting GCS file processing: {total_files} files to process"
                 )
-                
+
                 for file_index, file_info in enumerate(files_to_process, 1):
                     file_name = file_info.get("name", "unknown")
                     _LOGGER.info(
                         f"[CostManager] Processing file {file_index}/{total_files}: {file_name}"
                     )
-                    
+
                     file_processed_count = 0
                     for batch_result in self._process_gcs_file(
                         bucket_name, file_info, task_options
@@ -282,15 +282,19 @@ class CostManager(BaseManager):
                                 f"(File total: {file_processed_count:,})"
                             )
                         yield batch_result
-                    
+
                     _LOGGER.info(
                         f"[CostManager] Completed file {file_index}/{total_files} ({file_name}): "
                         f"Total {file_processed_count:,} records processed"
                     )
-                
+
                 _LOGGER.info(
                     f"[CostManager] Completed GCS file processing: {total_files} files processed"
                 )
+
+                # 최종 일별 카운트 요약 로깅
+                if hasattr(self, "field_mapper") and self.field_mapper:
+                    self.field_mapper.log_final_daily_count_summary()
 
         except Exception as e:
             _LOGGER.error(
@@ -377,12 +381,14 @@ class CostManager(BaseManager):
             # 특정 파일만 조회
             specific_files = self.http_file_connector.list_files(bucket_name, file_path)
             if specific_files:
-                _LOGGER.info(f"[CostManager] Found specific file: {specific_files[0]['name']}")
+                _LOGGER.info(
+                    f"[CostManager] Found specific file: {specific_files[0]['name']}"
+                )
                 return specific_files
             else:
                 _LOGGER.warning(f"[CostManager] Specified file not found: {file_path}")
                 return []
-        
+
         # 사용자 정의 패턴이 있으면 우선 적용
         custom_pattern = task_options.get("file_pattern")
         if custom_pattern:
@@ -503,7 +509,7 @@ class CostManager(BaseManager):
                 # 데이터 스트림 처리 - BigQuery results 구조로 변환
                 _LOGGER.info("[CostManager] Starting HTTP file processing")
                 total_processed_count = 0
-                
+
                 for batch_result in parser.parse_stream(
                     file_stream, self.field_mapper, **parsing_options
                 ):
@@ -519,11 +525,15 @@ class CostManager(BaseManager):
                             batch_result
                         )
                         yield converted_result
-                
+
                 _LOGGER.info(
                     f"[CostManager] Completed HTTP file processing: "
                     f"Total {total_processed_count:,} records processed"
                 )
+
+                # 최종 일별 카운트 요약 로깅
+                if hasattr(self, "field_mapper") and self.field_mapper:
+                    self.field_mapper.log_final_daily_count_summary()
 
         except Exception as e:
             _LOGGER.error(
@@ -554,12 +564,89 @@ class CostManager(BaseManager):
         if "results" in gcs_result and isinstance(gcs_result["results"], list):
             for record in gcs_result["results"]:
                 if isinstance(record, dict):
-                    # data 필드에 listed_price와 cost 정보 추가
-                    record["data"] = {
-                        "listed_price": record.get("cost_at_list", ""),
-                        "cost": str(record.get("cost", ""))
-                    }
+                    # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
+                    listed_price = self._get_listed_price_from_record(record)
+                    record["data"] = self._create_spaceone_billing_data(
+                        record, listed_price
+                    )
         return gcs_result
+
+    def _get_listed_price_from_record(self, record: dict):
+        """레코드에서 listed_price(정가) 정보를 추출
+
+        Google Cloud Billing 데이터에서 정가 정보는 다음 순서로 확인:
+        1. cost_at_list (최상위 레벨)
+        2. price.list_price (중첩 구조)
+        3. price.list_price_consumption_model (소비 모델 기준 정가)
+        4. cost (정가 정보가 없는 경우 실제 비용 사용)
+        """
+        # 1. 최상위 레벨의 cost_at_list 필드 확인
+        cost_at_list = record.get("cost_at_list")
+        if cost_at_list is not None and cost_at_list != "" and cost_at_list != 0:
+            return cost_at_list
+
+        # 2. price.list_price 중첩 구조 확인
+        price_info = record.get("price", {})
+        if isinstance(price_info, dict):
+            list_price = price_info.get("list_price")
+            if list_price is not None and list_price != "" and list_price != 0:
+                # 문자열인 경우 숫자로 변환 시도
+                try:
+                    return (
+                        float(list_price) if isinstance(list_price, str) else list_price
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+            # 3. 소비 모델 기준 정가 확인
+            list_price_consumption = price_info.get("list_price_consumption_model")
+            if (
+                list_price_consumption is not None
+                and list_price_consumption != ""
+                and list_price_consumption != 0
+            ):
+                try:
+                    return (
+                        float(list_price_consumption)
+                        if isinstance(list_price_consumption, str)
+                        else list_price_consumption
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+        # 4. 정가 정보가 없는 경우 실제 비용 사용 (fallback)
+        cost_value = record.get("cost")
+        if cost_value is not None and cost_value != "":
+            return cost_value
+
+        # 5. 모든 시도가 실패한 경우 빈 문자열 반환
+        return ""
+
+    def _create_spaceone_billing_data(self, record: dict, listed_price) -> dict:
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
+        # 기본 비용 정보
+        data_structure = {
+            "listed_price": str(listed_price)
+            if listed_price not in [None, "", 0]
+            else "",
+            "cost": str(record.get("cost", "")),
+        }
+
+        # 추가 비용 정보 (Google Cloud Billing 특화)
+        cost_after_credits = record.get("cost_after_credits")
+        if cost_after_credits is not None and cost_after_credits != "":
+            data_structure["cost_after_credits"] = str(cost_after_credits)
+
+        # 환율 정보
+        currency_conversion_rate = record.get("currency_conversion_rate")
+        if (
+            currency_conversion_rate is not None
+            and currency_conversion_rate != ""
+            and currency_conversion_rate != 1
+        ):
+            data_structure["currency_conversion_rate"] = str(currency_conversion_rate)
+
+        return data_structure
 
     def _make_cost_data(self, row) -> dict:
         """Source Data Model (DataFrame)

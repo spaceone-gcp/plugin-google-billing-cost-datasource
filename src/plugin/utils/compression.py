@@ -27,7 +27,6 @@ class CompressionHandler:
         """
         name_lower = file_name.lower()
 
-
         # 내용 기반 검증이 있는 경우 우선 확인 (파일 내용이 최우선)
         if content_sample and len(content_sample) >= 4:
             # Parquet 파일 매직 넘버 확인 (PAR1) - 최우선 처리

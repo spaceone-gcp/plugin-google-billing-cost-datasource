@@ -8,11 +8,7 @@ GRANULARITY = {"DAILY": "DAILY", "MONTHLY": "MONTHLY"}
 COST_METRIC = ["net_cost", "credits", "currency", "AmortizedCost"]
 
 # Data Source Types Configuration
-DATA_SOURCE_TYPES = {
-    "bigquery": "bigquery",
-    "gcs": "gcs",
-    "http_file": "http_file"
-}
+DATA_SOURCE_TYPES = {"bigquery": "bigquery", "gcs": "gcs", "http_file": "http_file"}
 
 HTTP_FILE_CONFIG = {
     "supported_formats": ["csv", "json", "parquet"],

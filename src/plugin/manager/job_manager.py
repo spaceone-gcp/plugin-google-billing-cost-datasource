@@ -386,9 +386,7 @@ class JobManager(BaseManager):
         last_synchronized_at: datetime = None,
     ) -> dict:
         """HTTP 파일 기반 작업 생성 (신규)"""
-        _LOGGER.info(
-            f"[JobManager._get_http_file_tasks] domain: {domain_id}"
-        )
+        _LOGGER.info(f"[JobManager._get_http_file_tasks] domain: {domain_id}")
         _LOGGER.debug(
             f"[JobManager._get_http_file_tasks] Parameters - Schema: {schema}, Start: {start}, "
             f"Last sync: {last_synchronized_at}"
@@ -751,9 +749,7 @@ class JobManager(BaseManager):
 
         # 2. 'source' 파라미터 지원 (3개 고정 값: bigquery, gcs, http)
         source = options.get("source")
-        _LOGGER.debug(
-            f"[JobManager._get_data_source_type] Source parameter: {source}"
-        )
+        _LOGGER.debug(f"[JobManager._get_data_source_type] Source parameter: {source}")
 
         if source == "bigquery":
             _LOGGER.info(
@@ -761,9 +757,7 @@ class JobManager(BaseManager):
             )
             return DATA_SOURCE_TYPES["bigquery"]
         elif source == "gcs":
-            _LOGGER.info(
-                "[JobManager._get_data_source_type] Using source=gcs -> gcs"
-            )
+            _LOGGER.info("[JobManager._get_data_source_type] Using source=gcs -> gcs")
             return DATA_SOURCE_TYPES["gcs"]
         elif source == "http":
             _LOGGER.info(
