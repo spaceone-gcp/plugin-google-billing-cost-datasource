@@ -623,32 +623,15 @@ class CostManager(BaseManager):
         return ""
 
     def _create_spaceone_billing_data(self, record: dict, listed_price) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
-        # 기본 비용 정보 (숫자 타입으로 처리)
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (간단한 구조: listed_price, cost만)"""
+        # 기본 비용 정보만 포함 (숫자 타입으로 처리)
         data_structure = {
             "listed_price": self._convert_to_numeric(listed_price),
             "cost": self._convert_to_numeric(record.get("cost", 0)),
         }
 
-        # 추가 비용 정보 (Google Cloud Billing 특화)
-        cost_after_credits = record.get("cost_after_credits")
-        if cost_after_credits is not None and cost_after_credits != "":
-            data_structure["cost_after_credits"] = self._convert_to_numeric(
-                cost_after_credits
-            )
-
-        # 환율 정보
-        currency_conversion_rate = record.get("currency_conversion_rate")
-        if (
-            currency_conversion_rate is not None
-            and currency_conversion_rate != ""
-            and currency_conversion_rate != 1
-        ):
-            data_structure["currency_conversion_rate"] = self._convert_to_numeric(
-                currency_conversion_rate
-            )
-
         return data_structure
+
 
     def _convert_to_numeric(self, value):
         """값을 적절한 숫자 타입으로 변환"""
@@ -724,6 +707,11 @@ class CostManager(BaseManager):
                     },
                     "tags": {},
                 }
+
+                # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수 - data 필드 추가
+                # BigQuery 소스도 GCS와 동일한 풍부한 data 구조 제공
+                listed_price = getattr(row, "cost_at_list", selected_cost)
+                data["data"] = self._create_spaceone_billing_data(data, listed_price)
 
                 costs_data.append(data)
 
