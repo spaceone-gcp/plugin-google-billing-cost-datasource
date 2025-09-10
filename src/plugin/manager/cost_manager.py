@@ -554,8 +554,11 @@ class CostManager(BaseManager):
         if "results" in gcs_result and isinstance(gcs_result["results"], list):
             for record in gcs_result["results"]:
                 if isinstance(record, dict):
-                    # SpaceONE 검증 오류 해결을 위해 data 필드를 빈 딕셔너리로 설정
-                    record["data"] = {}
+                    # data 필드에 listed_price와 cost 정보 추가
+                    record["data"] = {
+                        "listed_price": record.get("cost_at_list", ""),
+                        "cost": str(record.get("cost", ""))
+                    }
         return gcs_result
 
     def _make_cost_data(self, row) -> dict:

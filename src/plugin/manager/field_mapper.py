@@ -192,10 +192,11 @@ class FieldMapper:
             mapped_data = self._sanitize_for_serialization(mapped_data)
 
             # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
-            # Google Cloud Billing에는 data 필드가 없지만, SpaceONE에서 필수로 요구함
-            # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
-            # SpaceONE 검증 오류 해결을 위해 빈 딕셔너리 제공
-            mapped_data["data"] = {}
+            # data 필드에 listed_price와 cost 정보 추가
+            mapped_data["data"] = {
+                "listed_price": self._map_field("cost_at_list", source_data, ""),
+                "cost": str(mapped_data.get("cost", ""))
+            }
 
             return mapped_data
 

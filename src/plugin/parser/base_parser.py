@@ -53,21 +53,24 @@ class BaseParser(ABC):
             sanitized_record = self._sanitize_record_for_serialization(record)
 
             # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
-            # Google Cloud Billing에는 data 필드가 없지만, SpaceONE에서 필수로 요구함
-            # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
-            # SpaceONE 검증 오류 해결을 위해 빈 딕셔너리 제공
-            sanitized_record["data"] = {}
+            # data 필드에 listed_price와 cost 정보 추가
+            sanitized_record["data"] = {
+                "listed_price": record.get("cost_at_list", ""),
+                "cost": str(record.get("cost", ""))
+            }
 
             validated_records.append(sanitized_record)
 
         # 🚨 FINAL CRITICAL: SpaceONE 프레임워크 요구사항 최종 확인
-        # Google Cloud Billing에는 data 필드가 없지만, SpaceONE에서 필수로 요구함
-        # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
+        # data 필드에 listed_price와 cost 정보가 포함되었는지 최종 확인
         final_results = []
         for record in validated_records:
-            # SpaceONE 검증 오류 해결을 위해 data 필드를 빈 딕셔너리로 보장
+            # data 필드가 올바르게 설정되었는지 확인하고 보장
             if "data" not in record or not isinstance(record["data"], dict):
-                record["data"] = {}
+                record["data"] = {
+                    "listed_price": record.get("cost_at_list", ""),
+                    "cost": str(record.get("cost", ""))
+                }
             final_results.append(record)
 
         return {"results": final_results}
