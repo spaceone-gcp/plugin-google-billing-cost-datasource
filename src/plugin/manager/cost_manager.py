@@ -931,8 +931,9 @@ class CostManager(BaseManager):
             while (year < current_year) or (
                 year == current_year and month <= current_month
             ):
-                # 년도/월 형식으로 디렉토리 패턴 생성 (예: mkkang-project/2024/02)
-                pattern = f"{project_id}/{year:04d}/{month:02d}"
+                # 년도/월 형식으로 디렉토리 패턴 생성 (예: mkkang-project/2024/02/)
+                # 끝에 /를 추가하여 정확한 디렉토리 매칭 (09-backup 등 방지)
+                pattern = f"{project_id}/{year:04d}/{month:02d}/"
                 patterns.append(pattern)
 
                 # 다음 달로 이동

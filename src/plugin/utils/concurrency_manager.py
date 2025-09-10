@@ -5,9 +5,18 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
-from typing import Dict, Optional, Set
+from typing import Optional
+
+from plugin.conf.cost_conf import DATA_SOURCE_TYPES, DEFAULT_DATA_SOURCE_TYPE
 
 _LOGGER = logging.getLogger("spaceone")
+
+# BigQuery 필수 옵션 (JobManager와 동일)
+REQUIRED_OPTIONS = [
+    "billing_export_project_id",
+    "billing_dataset_id",
+    "billing_account_id",
+]
 
 
 class ConcurrencyManager:
@@ -26,9 +35,9 @@ class ConcurrencyManager:
 
     def __init__(self):
         if not hasattr(self, "_initialized"):
-            self._file_locks: Dict[str, threading.RLock] = {}
-            self._processing_files: Set[str] = set()
-            self._session_cache: Dict[str, Dict] = {}
+            self._file_locks: dict[str, threading.RLock] = {}
+            self._processing_files: set[str] = set()
+            self._session_cache: dict[str, dict] = {}
             self._main_lock = threading.RLock()
             self._initialized = True
 
@@ -82,7 +91,7 @@ class ConcurrencyManager:
         with self._main_lock:
             return file_key in self._processing_files
 
-    def cache_session(self, project_id: str, bucket_name: str, session_data: Dict):
+    def cache_session(self, project_id: str, bucket_name: str, session_data: dict):
         """GCS 세션 캐싱"""
         session_key = self._get_session_key(project_id, bucket_name)
         with self._main_lock:
@@ -93,7 +102,7 @@ class ConcurrencyManager:
 
     def get_cached_session(
         self, project_id: str, bucket_name: str, max_age: float = 300.0
-    ) -> Optional[Dict]:
+    ) -> Optional[dict]:
         """캐시된 GCS 세션 조회 (기본 5분 TTL)"""
         session_key = self._get_session_key(project_id, bucket_name)
 
@@ -123,7 +132,7 @@ class ConcurrencyManager:
             for key in expired_keys:
                 del self._session_cache[key]
 
-    def get_processing_stats(self) -> Dict:
+    def get_processing_stats(self) -> dict:
         """현재 처리 상태 통계"""
         with self._main_lock:
             return {
@@ -139,18 +148,47 @@ class RequestDeduplicator:
 
     def __init__(self, ttl: float = 30.0):
         self.ttl = ttl
-        self._requests: Dict[str, float] = {}
+        self._requests: dict[str, float] = {}
         self._lock = threading.RLock()
 
-    def generate_request_hash(self, options: Dict, task_options: Dict) -> str:
-        """요청의 해시 생성"""
-        # 중복 제거를 위한 핵심 파라미터만 사용
+    def _get_data_source_type(self, options: dict) -> str:
+        """데이터 소스 타입 결정 (JobManager와 동일한 로직)"""
+        # 1. 명시적 data_source_type 확인
+        data_source_type = options.get("data_source_type")
+        if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
+            return data_source_type
+
+        # 2. 'source' 파라미터 지원 (3개 고정 값: bigquery, gcs, http)
+        source = options.get("source")
+        if source == "bigquery":
+            return DATA_SOURCE_TYPES["bigquery"]
+        elif source == "gcs":
+            return DATA_SOURCE_TYPES["gcs"]
+        elif source == "http":
+            return DATA_SOURCE_TYPES["http_file"]
+
+        # 3. 파라미터 기반 자동 감지
+        has_bucket = "bucket_name" in options
+        has_bigquery_params = all(key in options for key in REQUIRED_OPTIONS)
+
+        if has_bucket and not has_bigquery_params:
+            return DATA_SOURCE_TYPES["gcs"]  # GCS로 변경
+        elif has_bigquery_params:
+            return DATA_SOURCE_TYPES["bigquery"]
+
+        # 4. 기본값 반환
+        return DEFAULT_DATA_SOURCE_TYPE
+
+    def generate_request_hash(self, options: dict, task_options: dict) -> str:
+        """요청의 해시 생성 - 데이터 소스 타입으로만 식별"""
+        # 데이터 소스 타입 결정
+        data_source_type = self._get_data_source_type(options)
+
+        # 데이터 소스 타입을 기반으로 한 핵심 파라미터만 사용
         key_data = {
-            "bucket_name": options.get("bucket_name"),
+            "data_source_type": data_source_type,
             "file_path": task_options.get("file_path"),
-            "base_url": options.get("base_url") or task_options.get("base_url"),
             "project_id": options.get("project_id"),
-            "source": options.get("source"),
             "field_mapper": options.get("field_mapper", {}),
             "select_cost": options.get("select_cost"),
         }

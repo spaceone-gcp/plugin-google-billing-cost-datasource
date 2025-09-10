@@ -54,8 +54,8 @@ python test/grpc/test_grpcurl_batch.py
 - **Google Storage**: `bucket_name`을 사용한 초기화 테스트
 
 ### 3. `DataSource.verify`
-- **HTTP 파일**: `base_url`과 `secret_data`를 사용한 연결 검증 테스트
-- **Google Storage**: `bucket_name`과 `secret_data`를 사용한 연결 검증 테스트
+- **HTTP 파일**: `base_url`을 사용한 연결 검증 테스트 (secret_data는 선택사항)
+- **Google Storage**: `bucket_name`을 사용한 연결 검증 테스트 (secret_data는 선택사항)
 
 ### 4. `Job.get_tasks`
 - **Google Storage**: 동기화 작업을 위한 태스크 생성 기능 테스트

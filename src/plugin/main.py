@@ -68,7 +68,7 @@ def _data_source_init_logic(params: dict) -> dict:
         )
         raise
 
-
+# 데이터 소스 초기화
 @app.route("DataSource.init")
 def data_source_init(params: dict) -> dict:
     """init plugin by options
@@ -122,7 +122,7 @@ def data_source_init(params: dict) -> dict:
         _LOGGER.error(f"[data_source_init] API endpoint failed: {e}")
         raise
 
-
+# 데이터 소스 검증
 def _data_source_verify_logic(params: dict) -> None:
     """verify plugin - 실제 로직"""
     _LOGGER.info(
@@ -169,7 +169,7 @@ def _data_source_verify_logic(params: dict) -> None:
         _LOGGER.error(f"[_data_source_verify_logic] Failed to verify data source: {e}")
         raise
 
-
+# 데이터 소스 검증
 @app.route("DataSource.verify")
 def data_source_verify(params: dict) -> None:
     """Verifying data source plugin
@@ -218,7 +218,7 @@ def data_source_verify(params: dict) -> None:
         _LOGGER.error(f"[data_source_verify] API endpoint failed: {e}")
         raise
 
-
+# 작업 태스크 생성
 def _job_get_tasks_logic(params: dict) -> dict:
     """get tasks - 실제 로직"""
     _LOGGER.info("[_job_get_tasks_logic] Starting job task generation process")
@@ -236,7 +236,6 @@ def _job_get_tasks_logic(params: dict) -> dict:
     _LOGGER.debug(
         f"[_job_get_tasks_logic] Secret data keys: {list(secret_data.keys()) if secret_data else 'None'}"
     )
-
 
     # 선택적 파라미터 추출
     schema = params.get("schema")
@@ -326,6 +325,7 @@ def job_get_tasks(params: dict) -> dict:
             "[job_get_tasks] All required parameters present, delegating to logic function"
         )
 
+        # 작업 태스크 생성
         result = _job_get_tasks_logic(params)
 
         _LOGGER.info(

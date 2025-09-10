@@ -104,22 +104,31 @@ class JobManager(BaseManager):
 
         # 데이터 소스 타입별 작업 생성 분기
         try:
-            if "source" in options and options["source"] == "gcs":
+            if data_source_type == DATA_SOURCE_TYPES["gcs"]:
                 _LOGGER.info(
-                    "[JobManager.get_tasks] Using HTTP file mode (forced by source=gcs)"
+                    f"[JobManager.get_tasks] Using GCS mode (data_source_type: {data_source_type})"
                 )
                 result = self._get_http_file_tasks(
                     domain_id, options, secret_data, schema, start, last_synchronized_at
                 )
             elif data_source_type == DATA_SOURCE_TYPES["http_file"]:
                 _LOGGER.info(
-                    "[JobManager.get_tasks] Using HTTP file mode (auto-detected)"
+                    f"[JobManager.get_tasks] Using HTTP file mode (data_source_type: {data_source_type})"
                 )
                 result = self._get_http_file_tasks(
                     domain_id, options, secret_data, schema, start, last_synchronized_at
                 )
+            elif data_source_type == DATA_SOURCE_TYPES["bigquery"]:
+                _LOGGER.info(
+                    f"[JobManager.get_tasks] Using BigQuery mode (data_source_type: {data_source_type})"
+                )
+                result = self._get_bigquery_tasks(
+                    domain_id, options, secret_data, schema, start, last_synchronized_at
+                )
             else:
-                _LOGGER.info("[JobManager.get_tasks] Using BigQuery mode")
+                _LOGGER.warning(
+                    f"[JobManager.get_tasks] Unknown data_source_type: {data_source_type}, defaulting to BigQuery"
+                )
                 result = self._get_bigquery_tasks(
                     domain_id, options, secret_data, schema, start, last_synchronized_at
                 )
@@ -378,7 +387,7 @@ class JobManager(BaseManager):
     ) -> dict:
         """HTTP 파일 기반 작업 생성 (신규)"""
         _LOGGER.info(
-            f"[JobManager._get_http_file_tasks] Starting HTTP file task generation for domain: {domain_id}"
+            f"[JobManager._get_http_file_tasks] domain: {domain_id}"
         )
         _LOGGER.debug(
             f"[JobManager._get_http_file_tasks] Parameters - Schema: {schema}, Start: {start}, "
@@ -740,26 +749,31 @@ class JobManager(BaseManager):
                 f"Valid types: {list(DATA_SOURCE_TYPES.values())}"
             )
 
-        # 2. 레거시 'source' 파라미터 지원
+        # 2. 'source' 파라미터 지원 (3개 고정 값: bigquery, gcs, http)
         source = options.get("source")
         _LOGGER.debug(
-            f"[JobManager._get_data_source_type] Legacy source parameter: {source}"
+            f"[JobManager._get_data_source_type] Source parameter: {source}"
         )
 
-        if source == "gcs":
-            _LOGGER.info(
-                "[JobManager._get_data_source_type] Using source=gcs -> http_file"
-            )
-            return DATA_SOURCE_TYPES["http_file"]
-        elif source == "bigquery":
+        if source == "bigquery":
             _LOGGER.info(
                 "[JobManager._get_data_source_type] Using source=bigquery -> bigquery"
             )
             return DATA_SOURCE_TYPES["bigquery"]
+        elif source == "gcs":
+            _LOGGER.info(
+                "[JobManager._get_data_source_type] Using source=gcs -> gcs"
+            )
+            return DATA_SOURCE_TYPES["gcs"]
+        elif source == "http":
+            _LOGGER.info(
+                "[JobManager._get_data_source_type] Using source=http -> http_file"
+            )
+            return DATA_SOURCE_TYPES["http_file"]
         elif source:
             _LOGGER.warning(
                 f"[JobManager._get_data_source_type] Unknown source parameter: {source}, "
-                f"Valid sources: gcs, bigquery"
+                f"Valid sources: bigquery, gcs, http"
             )
 
         # 3. 파라미터 기반 자동 감지
@@ -785,9 +799,9 @@ class JobManager(BaseManager):
 
         if has_bucket and not has_bigquery_params:
             _LOGGER.info(
-                "[JobManager._get_data_source_type] Auto-detected http_file mode (bucket_name present, BigQuery params missing)"
+                "[JobManager._get_data_source_type] Auto-detected gcs mode (bucket_name present, BigQuery params missing)"
             )
-            return DATA_SOURCE_TYPES["http_file"]
+            return DATA_SOURCE_TYPES["gcs"]
         elif has_bigquery_params:
             _LOGGER.info(
                 "[JobManager._get_data_source_type] Auto-detected bigquery mode (all BigQuery params present)"
@@ -940,6 +954,20 @@ class JobManager(BaseManager):
                 file_project_id = path_parts[0]
                 file_year = path_parts[1]
                 file_month = path_parts[2]
+
+                # 월 형식 검증: 정확히 2자리 숫자여야 함 (09-backup 등 방지)
+                if not (file_month.isdigit() and len(file_month) == 2):
+                    _LOGGER.debug(
+                        f"[_filter_files_by_date] ❌ Invalid month format: {file_month} in {file_path}"
+                    )
+                    continue
+
+                # 년도 형식 검증: 정확히 4자리 숫자여야 함
+                if not (file_year.isdigit() and len(file_year) == 4):
+                    _LOGGER.debug(
+                        f"[_filter_files_by_date] ❌ Invalid year format: {file_year} in {file_path}"
+                    )
+                    continue
 
                 # 날짜 매칭 검증
                 date_match = file_year == target_year and file_month == target_month

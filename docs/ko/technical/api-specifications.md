@@ -17,7 +17,7 @@ def create_session(
     
     Args:
         options: 설정 옵션
-        secret_data: 서비스 계정 인증 정보
+        secret_data: 서비스 계정 인증 정보 (선택사항)
         schema: 스키마 정보
         
     Features:
