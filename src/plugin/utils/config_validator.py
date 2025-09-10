@@ -136,55 +136,9 @@ class ConfigValidator:
             self._validate_metadata(plugin_info["metadata"])
 
     def _validate_security(self, config: Dict):
-        """보안 관련 검증"""
-        # secret_data에서 실제 키 값 검사
-        if "plugin_info" in config and "secret_data" in config["plugin_info"]:
-            secret_data = config["plugin_info"]["secret_data"]
-
-            # 실제 개인 키 검사
-            if "private_key" in secret_data:
-                private_key = secret_data["private_key"]
-                if self._is_actual_private_key(private_key):
-                    self.security_issues.append(
-                        {
-                            "type": "critical",
-                            "category": "security",
-                            "message": "🚨 CRITICAL: Actual private key detected in configuration! This is a severe security risk.",
-                            "field": "plugin_info.secret_data.private_key",
-                            "recommendation": "Use environment variables like '${GCP_PRIVATE_KEY}' instead",
-                            "action_required": "Immediately revoke this service account key and generate a new one",
-                        }
-                    )
-
-            # 실제 이메일 주소 검사
-            if "client_email" in secret_data:
-                client_email = secret_data["client_email"]
-                if self._is_actual_email(client_email):
-                    self.security_issues.append(
-                        {
-                            "type": "warning",
-                            "category": "security",
-                            "message": "Actual service account email detected. Consider using environment variables.",
-                            "field": "plugin_info.secret_data.client_email",
-                            "value": client_email,
-                            "recommendation": "Use environment variable like '${GCP_SERVICE_ACCOUNT_EMAIL}'",
-                        }
-                    )
-
-            # 실제 프로젝트 ID 검사
-            if "project_id" in secret_data:
-                project_id = secret_data["project_id"]
-                if self._is_actual_project_id(project_id):
-                    self.warnings.append(
-                        {
-                            "type": "warning",
-                            "category": "security",
-                            "message": "Actual project ID detected. Consider using environment variables.",
-                            "field": "plugin_info.secret_data.project_id",
-                            "value": project_id,
-                            "recommendation": "Use environment variable like '${GCP_PROJECT_ID}'",
-                        }
-                    )
+        """보안 관련 검증 - secret_data 검증은 제거됨"""
+        # secret_data 검증은 더 이상 수행하지 않음
+        pass
 
     def _validate_metadata(self, metadata: Dict):
         """메타데이터 검증"""

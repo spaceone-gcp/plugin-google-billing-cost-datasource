@@ -1,7 +1,8 @@
 import csv
 import logging
+from collections.abc import Generator
 from io import TextIOWrapper
-from typing import IO, Generator
+from typing import IO
 
 from ..error.cost import ERROR_FILE_PARSING_FAILED
 from ..manager.field_mapper import FieldMapper
@@ -119,9 +120,6 @@ class CSVParser(BaseParser):
             if batch_records:
                 yield self._create_batch_result(batch_records)
 
-            _LOGGER.info(
-                f"[CSVParser] Successfully processed {processed_count} records"
-            )
 
         except Exception as e:
             _LOGGER.error(f"[CSVParser] Failed to parse CSV stream: {e}")
@@ -139,10 +137,8 @@ class CSVParser(BaseParser):
         try:
             sniffer = csv.Sniffer()
             delimiter = sniffer.sniff(sample_data[:1024]).delimiter
-            _LOGGER.debug(f"[CSVParser] Detected delimiter: '{delimiter}'")
             return delimiter
         except Exception:
-            _LOGGER.debug("[CSVParser] Could not detect delimiter, using default ','")
             return ","
 
     def detect_encoding(self, sample_bytes: bytes) -> str:
@@ -155,18 +151,10 @@ class CSVParser(BaseParser):
             confidence = result.get("confidence", 0)
 
             if confidence > 0.7:
-                _LOGGER.debug(
-                    f"[CSVParser] Detected encoding: {encoding} (confidence: {confidence})"
-                )
                 return encoding
             else:
-                _LOGGER.debug(
-                    "[CSVParser] Low confidence encoding detection, using utf-8"
-                )
                 return "utf-8"
         except ImportError:
-            _LOGGER.debug("[CSVParser] chardet not available, using utf-8")
             return "utf-8"
-        except Exception as e:
-            _LOGGER.debug(f"[CSVParser] Encoding detection failed: {e}, using utf-8")
+        except Exception:
             return "utf-8"

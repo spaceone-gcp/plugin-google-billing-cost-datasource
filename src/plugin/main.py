@@ -1,5 +1,5 @@
 import logging
-from typing import Generator
+from collections.abc import Generator
 
 # SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
 try:
@@ -135,27 +135,13 @@ def _data_source_verify_logic(params: dict) -> None:
     try:
         # 필수 파라미터 추출
         options = params["options"]
-        secret_data = params["secret_data"]
+        secret_data = params.get("secret_data", {})
         _LOGGER.debug(
             f"[_data_source_verify_logic] Options keys: {list(options.keys())}"
         )
         _LOGGER.debug(
-            f"[_data_source_verify_logic] Secret data keys: {list(secret_data.keys())}"
+            f"[_data_source_verify_logic] Secret data keys: {list(secret_data.keys()) if secret_data else 'None'}"
         )
-
-        # Private key 정리 처리
-        if "private_key" in secret_data:
-            original_key_length = len(secret_data["private_key"])
-            secret_data["private_key"] = _clean_pem(secret_data["private_key"])
-            cleaned_key_length = len(secret_data["private_key"])
-            _LOGGER.debug(
-                f"[_data_source_verify_logic] Private key cleaned - "
-                f"Original length: {original_key_length}, Cleaned length: {cleaned_key_length}"
-            )
-        else:
-            _LOGGER.warning(
-                "[_data_source_verify_logic] No private_key found in secret_data"
-            )
 
         # 선택적 파라미터 추출
         domain_id = params.get("domain_id")
@@ -191,7 +177,7 @@ def data_source_verify(params: dict) -> None:
     Args:
         params (CollectorVerifyRequest): {
             'options': 'dict',      # Required
-            'secret_data': 'dict',  # Required
+            'secret_data': 'dict',  # Optional
             'schema': 'str',
             'domain_id': 'str'      # Required
         }
@@ -211,7 +197,7 @@ def data_source_verify(params: dict) -> None:
             raise ValueError("Parameters are required")
 
         # 필수 파라미터 확인
-        required_params = ["options", "secret_data", "domain_id"]
+        required_params = ["options", "domain_id"]
         missing_params = [param for param in required_params if param not in params]
 
         if missing_params:
@@ -251,17 +237,6 @@ def _job_get_tasks_logic(params: dict) -> dict:
         f"[_job_get_tasks_logic] Secret data keys: {list(secret_data.keys()) if secret_data else 'None'}"
     )
 
-    # private_key 정리 처리
-    if "private_key" in secret_data:
-        original_key_length = len(secret_data["private_key"])
-        secret_data["private_key"] = _clean_pem(secret_data["private_key"])
-        cleaned_key_length = len(secret_data["private_key"])
-        _LOGGER.debug(
-            f"[_job_get_tasks_logic] Private key cleaned - "
-            f"Original length: {original_key_length}, Cleaned length: {cleaned_key_length}"
-        )
-    else:
-        _LOGGER.debug("[_job_get_tasks_logic] No private_key found in secret_data")
 
     # 선택적 파라미터 추출
     schema = params.get("schema")
@@ -367,48 +342,20 @@ def job_get_tasks(params: dict) -> dict:
 
 def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
     """get cost data - 실제 로직"""
-    _LOGGER.info("[_cost_get_data_logic] Starting cost data retrieval process")
-    _LOGGER.debug(f"[_cost_get_data_logic] Input parameters: {list(params.keys())}")
-
     try:
         # 필수 파라미터 추출
         options = params["options"]
         secret_data = params["secret_data"]
-        _LOGGER.debug(f"[_cost_get_data_logic] Options keys: {list(options.keys())}")
-        _LOGGER.debug(
-            f"[_cost_get_data_logic] Secret data keys: {list(secret_data.keys())}"
-        )
-
-        # private_key가 있는 경우에만 PEM 정리
-        if "private_key" in secret_data:
-            original_key_length = len(secret_data["private_key"])
-            secret_data["private_key"] = _clean_pem(secret_data["private_key"])
-            cleaned_key_length = len(secret_data["private_key"])
-            _LOGGER.debug(
-                f"[_cost_get_data_logic] Private key cleaned - "
-                f"Original length: {original_key_length}, Cleaned length: {cleaned_key_length}"
-            )
-        else:
-            _LOGGER.debug("[_cost_get_data_logic] No private_key found in secret_data")
 
         # 선택적 파라미터 추출
         task_options = params.get("task_options", {})
         schema = params.get("schema")
-        _LOGGER.debug(
-            f"[_cost_get_data_logic] Optional parameters - "
-            f"Task options keys: {list(task_options.keys()) if task_options else 'None'}, "
-            f"Schema: {schema}"
-        )
 
         # CostManager 인스턴스 생성
-        _LOGGER.debug("[_cost_get_data_logic] Creating CostManager instance")
         cost_mgr = CostManager()
-        _LOGGER.debug("[_cost_get_data_logic] CostManager created successfully")
 
-        _LOGGER.info("[_cost_get_data_logic] Starting cost data generation")
         result_generator = cost_mgr.get_data(options, secret_data, task_options, schema)
 
-        _LOGGER.info("[_cost_get_data_logic] Cost data generator created successfully")
         return result_generator
 
     except Exception as e:
@@ -446,11 +393,6 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             'billed_date': 'str'
         }
     """
-    _LOGGER.info("[cost_get_data] API endpoint called - Cost.get_data")
-    _LOGGER.debug(
-        f"[cost_get_data] Request received with parameters: {list(params.keys()) if params else 'None'}"
-    )
-
     try:
         # 파라미터 기본 검증
         if not params:
@@ -467,15 +409,7 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             )
             raise ValueError(f"Missing required parameters: {missing_params}")
 
-        _LOGGER.debug(
-            "[cost_get_data] All required parameters present, delegating to logic function"
-        )
-
         result_generator = _cost_get_data_logic(params)
-
-        _LOGGER.info(
-            "[cost_get_data] API endpoint completed successfully, returning data generator"
-        )
 
         return result_generator
 
@@ -504,19 +438,6 @@ def _cost_get_linked_accounts_logic(params: dict) -> dict:
             f"[_cost_get_linked_accounts_logic] Secret data keys: {list(secret_data.keys())}"
         )
 
-        # Private key 정리 처리
-        if "private_key" in secret_data:
-            original_key_length = len(secret_data["private_key"])
-            secret_data["private_key"] = _clean_pem(secret_data["private_key"])
-            cleaned_key_length = len(secret_data["private_key"])
-            _LOGGER.debug(
-                f"[_cost_get_linked_accounts_logic] Private key cleaned - "
-                f"Original length: {original_key_length}, Cleaned length: {cleaned_key_length}"
-            )
-        else:
-            _LOGGER.warning(
-                "[_cost_get_linked_accounts_logic] No private_key found in secret_data"
-            )
 
         # 선택적 파라미터 추출
         schema = params.get("schema")
@@ -609,31 +530,3 @@ def cost_get_linked_accounts(params: dict) -> dict:
         raise
 
 
-def _clean_pem(pem_key: str) -> str:
-    """PEM 키의 개행 문자 정리"""
-    _LOGGER.debug(
-        f"[_clean_pem] Starting PEM key cleaning process - Original length: {len(pem_key)}"
-    )
-
-    try:
-        # 개행 문자 정리 처리
-        _LOGGER.debug("[_clean_pem] Replacing escaped newlines with actual newlines")
-        cleaned_key = pem_key.replace("\\n", "\n")
-
-        # 결과 확인
-        newline_count_original = pem_key.count("\\n")
-        newline_count_cleaned = cleaned_key.count("\n")
-
-        _LOGGER.debug(
-            f"[_clean_pem] PEM key cleaning completed - "
-            f"Original length: {len(pem_key)}, "
-            f"Cleaned length: {len(cleaned_key)}, "
-            f"Escaped newlines replaced: {newline_count_original}, "
-            f"Actual newlines in result: {newline_count_cleaned}"
-        )
-
-        return cleaned_key
-
-    except Exception as e:
-        _LOGGER.error(f"[_clean_pem] Failed to clean PEM key: {e}")
-        raise

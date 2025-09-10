@@ -1,6 +1,6 @@
 import logging
+from collections.abc import Generator
 from datetime import datetime, timedelta
-from typing import Generator, List
 
 # SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
 try:
@@ -81,8 +81,7 @@ class CostManager(BaseManager):
 
         query = self._create_linked_accounts_google_sql(start_month)
         response_stream = self.bigquery_connector.read_df_from_bigquery(query)
-        for index, row in response_stream.iterrows():
-            _LOGGER.debug(f"[get_linked_accounts] row: {row}]")
+        for _, row in response_stream.iterrows():
             if row.id is not None:
                 linked_accounts.append({"account_id": row.id, "name": row.project_name})
 
@@ -96,16 +95,21 @@ class CostManager(BaseManager):
         import hashlib
         import json
 
+        # source 값 추출 (options에서만)
+        source = self._get_source_value(options)
+
         # secret_data 제외하고 요청 식별을 위한 핵심 데이터만 사용
         request_data = {
-            "bucket_name": options.get("bucket_name"),
+            "source": source,  # source 항목 추가
             "project_id": options.get("project_id"),
-            "file_path": task_options.get("file_path"),
-            "base_url": options.get("base_url") or task_options.get("base_url"),
-            "data_source_type": task_options.get("data_source_type"),
             "select_cost": options.get("select_cost"),
             "field_mapper": options.get("field_mapper"),
+            "bucket_name": options.get("bucket_name"),
+            "base_url": options.get("base_url") or task_options.get("base_url"),
+            "file_path": task_options.get("file_path"),
+            "data_source_type": task_options.get("data_source_type"),
         }
+        # 해시 생성 (중복 제거를 위해)
         request_hash = hashlib.md5(
             json.dumps(request_data, sort_keys=True).encode()
         ).hexdigest()
@@ -113,29 +117,26 @@ class CostManager(BaseManager):
         # 중복 요청 확인
         from ..utils.concurrency_manager import request_deduplicator
 
-        _LOGGER.debug(
-            f"[get_data] Generated request_hash: {request_hash[:8]} for data: {request_data}"
-        )
-
         if request_deduplicator.is_duplicate_request(request_hash):
-            _LOGGER.info(
-                f"[get_data] Duplicate request detected, skipping: {request_hash[:8]}"
-            )
             return
 
-        data_source_type = self._get_data_source_type(options, task_options)
-
-        _LOGGER.debug(
-            f"[get_data] data_source_type: {data_source_type}, request_hash: {request_hash[:8]}"
-        )
-
-        if data_source_type == DATA_SOURCE_TYPES["http_file"]:
-            yield from self._get_data_from_http_file(
+        # source 기반 분기 처리
+        if source == "bigquery":
+            yield from self._get_data_from_bigquery(
+                options, secret_data, task_options, schema
+            )
+        elif source == "gcs":
+            yield from self._get_data_from_gcs(
+                options, secret_data, task_options, schema
+            )
+        elif source == "http":
+            yield from self._get_data_from_http(
                 options, secret_data, task_options, schema
             )
         else:
-            yield from self._get_data_from_bigquery(
-                options, secret_data, task_options, schema
+            # 지원하지 않는 source 타입에 대한 에러 처리
+            raise ERROR_REQUIRED_PARAMETER(
+                key=f"source (unsupported value: {source}. Supported values: bigquery, gcs, http)"
             )
 
     def _get_data_from_bigquery(
@@ -158,12 +159,6 @@ class CostManager(BaseManager):
         self.cost_metric_option = task_options.get("cost_metric") or options.get(
             "cost_metric"
         )
-        _LOGGER.debug(
-            f"[get_data_from_bigquery] select_cost option: {self.select_cost_option}"
-        )
-        _LOGGER.debug(
-            f"[get_data_from_bigquery] cost_metric option: {self.cost_metric_option}"
-        )
 
         start = task_options["start"]
         self.billing_export_project_id = task_options["billing_export_project_id"]
@@ -178,35 +173,28 @@ class CostManager(BaseManager):
         )
         self._validate_table_exists()
 
-        _LOGGER.debug(
-            f"[get_data_from_bigquery] task_options: {task_options} / start: {start})"
-        )
-
         query = self._create_google_sql(start)
         response_stream = self.bigquery_connector.read_df_from_bigquery(query)
-        for index, row in response_stream.iterrows():
+        for _, row in response_stream.iterrows():
             yield self._make_cost_data(row)
 
         # BigQuery 데이터의 경우 빈 results 반환
         yield {"results": []}
 
-    def _get_data_from_http_file(
+    def _get_data_from_gcs(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
-        """HTTP 파일에서 데이터 조회 (신규) - 동시성 제어 및 중복 요청 처리"""
+        """GCS 버킷에서 데이터 조회 - 동시성 제어 및 중복 요청 처리"""
         try:
             # 요청 중복 제거 검사
             request_hash = request_deduplicator.generate_request_hash(
                 options, task_options
             )
             if request_deduplicator.is_duplicate_request(request_hash):
-                _LOGGER.warning(
-                    f"[get_data_from_http_file] Skipping duplicate request: {request_hash}"
-                )
                 return
 
-            # HTTP 파일 처리용 파라미터 검증
-            self._check_http_file_task_options(task_options, options, secret_data)
+            # GCS 버킷 처리용 파라미터 검증
+            self._check_gcs_task_options(task_options, options, secret_data)
 
             # select_cost 옵션 설정 (task_options 우선, options 차순)
             self.select_cost_option = task_options.get("select_cost") or options.get(
@@ -216,25 +204,207 @@ class CostManager(BaseManager):
             self.cost_metric_option = task_options.get("cost_metric") or options.get(
                 "cost_metric"
             )
-            _LOGGER.debug(
-                f"[get_data_from_http_file] select_cost option: {self.select_cost_option}"
+
+            # bucket_name 추출 (task_options 우선)
+            bucket_name = task_options.get("bucket_name") or options.get("bucket_name")
+
+            if bucket_name:
+                # GCS 버킷 접근을 위해 인증 필요
+                self.http_file_connector.create_session(options, secret_data, schema)
+
+                # Field Mapper 초기화 (기본 매핑 사용)
+                # filed_mapper 오타 처리 (하위 호환성을 위해)
+                field_mapper_config = options.get("field_mapper") or options.get(
+                    "filed_mapper", {}
+                )
+                mapping_config = (
+                    task_options.get("field_mapper", {}) or field_mapper_config
+                )
+                provider = options.get("provider", "google_cloud")
+
+                # 원본 데이터 포함 옵션 처리
+                include_raw_data = options.get("include_raw_data", False)
+                wrap_as_sample_data = options.get("wrap_as_sample_data", False)
+
+                self.field_mapper = FieldMapper(
+                    mapping_config,
+                    provider,
+                    self.select_cost_option,
+                    self.cost_metric_option,
+                    include_raw_data,
+                    wrap_as_sample_data,
+                )
+
+                # 압축 처리를 위한 import는 필요한 곳에서만 사용
+
+                # 경로 패턴 생성: bucket_name/project_id/date_range 구조
+                project_id = task_options.get("project_id") or options.get("project_id")
+                start_period = task_options.get("start")
+
+                # 파일 목록 가져오기
+                files = self._get_gcs_file_list(
+                    bucket_name, project_id, start_period, task_options
+                )
+
+                if not files:
+                    # 파일이 없을 때는 빈 결과를 반환 (에러가 아닌 정상적인 상황일 수 있음)
+                    yield {"results": []}
+                    return
+
+                # 여러 파일 처리 지원
+                max_files = int(
+                    task_options.get("max_files", 10)
+                )  # 기본값: 최대 10개 파일
+                files_to_process = files[:max_files]
+
+                # 각 파일을 순차적으로 처리 (동시성 제어 적용)
+                for file_info in files_to_process:
+                    yield from self._process_gcs_file(
+                        bucket_name, file_info, task_options
+                    )
+
+        except Exception as e:
+            _LOGGER.error(
+                f"[_get_data_from_gcs] Failed to process GCS file: {e}", exc_info=True
             )
-            _LOGGER.debug(
-                f"[get_data_from_http_file] cost_metric option: {self.cost_metric_option}"
+            raise e
+
+    def _process_gcs_file(
+        self, bucket_name: str, file_info: dict, task_options: dict
+    ) -> Generator[dict, None, None]:
+        """개별 GCS 파일 처리"""
+        file_name = file_info["name"]
+
+        # 파일이 이미 처리 중인지 확인
+        if concurrency_manager.is_file_processing(bucket_name, file_name):
+            return
+
+        try:
+            # 파일 처리 락 획득
+            with concurrency_manager.acquire_file_lock(
+                bucket_name, file_name, timeout=60.0
+            ) as lock_result:
+                # 락 획득 실패 시 (이미 처리 중인 파일) 건너뛰기
+                if lock_result is None:
+                    return
+
+                # 파일 다운로드
+                file_stream = self.http_file_connector.download_file_stream(
+                    bucket_name, file_name
+                )
+
+                # 파일 내용 샘플 읽기 (파일 형식 감지를 위해)
+                file_stream.seek(0)
+                content_sample = file_stream.read(1024)  # 처음 1KB 읽기
+                file_stream.seek(0)  # 스트림 위치 리셋
+
+                # 파일 형식 감지 (내용 샘플 포함)
+                file_format = file_info.get(
+                    "format"
+                ) or FileProcessorFactory.detect_file_format(file_name, content_sample)
+
+                # 압축 해제 (필요한 경우)
+                from ..utils.compression import CompressionHandler
+
+                compression_type = CompressionHandler.detect_compression(
+                    file_name, content_sample
+                )
+                if compression_type:
+                    file_stream = CompressionHandler.decompress_stream(
+                        file_stream, compression_type
+                    )
+
+                # 파서 생성 및 데이터 처리
+                parser = FileProcessorFactory.create_parser(file_format)
+
+                # 파싱 옵션 설정
+                parsing_options = task_options.get("parsing_options", {})
+
+                # 데이터 스트림 처리 - BigQuery results 구조로 변환
+                for batch_result in parser.parse_stream(
+                    file_stream, self.field_mapper, **parsing_options
+                ):
+                    if batch_result and "results" in batch_result:
+                        # GCS 응답을 BigQuery results 구조로 변환
+                        converted_result = self._convert_to_bigquery_structure(
+                            batch_result
+                        )
+                        yield converted_result
+
+        except Exception as file_error:
+            _LOGGER.error(
+                f"[_process_gcs_file] Failed to process file {file_name}: {file_error}"
+            )
+            # 개별 파일 처리 실패 시 다음 파일로 계속 진행
+
+    def _get_gcs_file_list(
+        self, bucket_name: str, project_id: str, start_period: str, task_options: dict
+    ) -> list[dict]:
+        """GCS 버킷에서 파일 목록 가져오기"""
+        # 사용자 정의 패턴이 있으면 우선 적용
+        custom_pattern = task_options.get("file_pattern")
+        if custom_pattern:
+            file_pattern = custom_pattern
+            return self.http_file_connector.list_files(bucket_name, file_pattern)
+        elif project_id and start_period:
+            # start부터 현재 월까지의 날짜 범위로 파일 수집
+            all_files = []
+            date_patterns = self._generate_date_range_patterns(project_id, start_period)
+
+            for pattern in date_patterns:
+                pattern_files = self.http_file_connector.list_files(
+                    bucket_name, pattern
+                )
+                all_files.extend(pattern_files)
+
+            # 중복 제거 (파일명 기준)
+            seen_files = set()
+            files = []
+            for file_info in all_files:
+                if file_info["name"] not in seen_files:
+                    files.append(file_info)
+                    seen_files.add(file_info["name"])
+            return files
+
+        elif project_id:
+            file_pattern = f"{project_id}/"
+            return self.http_file_connector.list_files(bucket_name, file_pattern)
+        else:
+            # 패턴 없이 모든 파일 검색
+            return self.http_file_connector.list_files(bucket_name, None)
+
+    def _get_data_from_http(
+        self, options: dict, secret_data: dict, task_options: dict, schema: str = None
+    ) -> Generator[dict, None, None]:
+        """HTTP URL에서 데이터 조회 - 인증 불필요"""
+        try:
+            # 요청 중복 제거 검사
+            request_hash = request_deduplicator.generate_request_hash(
+                options, task_options
+            )
+            if request_deduplicator.is_duplicate_request(request_hash):
+                return
+
+            # HTTP URL 처리용 파라미터 검증
+            self._check_http_task_options(task_options, options)
+
+            # select_cost 옵션 설정 (task_options 우선, options 차순)
+            self.select_cost_option = task_options.get("select_cost") or options.get(
+                "select_cost", "cost"
+            )
+            # cost_metric 옵션 설정 (task_options 우선, options 차순)
+            self.cost_metric_option = task_options.get("cost_metric") or options.get(
+                "cost_metric"
             )
 
-            # base_url 또는 bucket_name 추출 (task_options 우선)
+            # base_url 추출 (task_options 우선)
             base_url = task_options.get("base_url") or options.get("base_url")
-            bucket_name = task_options.get("bucket_name") or options.get("bucket_name")
 
             # URL 유효성 검증 및 정리
             if base_url:
                 # 잘못된 파일 확장자 수정 (jparquet -> parquet)
                 base_url = base_url.replace(".jparquet.", ".parquet.")
-                _LOGGER.debug(f"[get_data_from_http_file] Using base_url: {base_url}")
 
-            if base_url:
-                _LOGGER.info(f"[get_data_from_http_file] Processing URL: {base_url}")
                 # HTTP URL 처리 - 인증 불필요, GCS 세션 생성 건너뛰기
                 file_stream = self.http_file_connector.download_file_from_url(base_url)
 
@@ -255,9 +425,6 @@ class CostManager(BaseManager):
                     base_url, content_sample
                 )
                 if compression_type:
-                    _LOGGER.debug(
-                        f"[get_data_from_http_file] Decompressing {compression_type} file from URL: {base_url}"
-                    )
                     file_stream = CompressionHandler.decompress_stream(
                         file_stream, compression_type
                     )
@@ -285,10 +452,6 @@ class CostManager(BaseManager):
                     wrap_as_sample_data,
                 )
 
-                _LOGGER.debug(
-                    f"[get_data_from_http_file] Detected format: {file_format}"
-                )
-
                 # 파서 생성 및 데이터 처리
                 parser = FileProcessorFactory.create_parser(file_format)
 
@@ -300,230 +463,15 @@ class CostManager(BaseManager):
                     file_stream, self.field_mapper, **parsing_options
                 ):
                     if batch_result and "results" in batch_result:
-                        # GCS 응답을 BigQuery results 구조로 변환
+                        # 응답을 BigQuery results 구조로 변환
                         converted_result = self._convert_to_bigquery_structure(
                             batch_result
                         )
                         yield converted_result
 
-                # URL 처리 완료 메시지
-                _LOGGER.info(
-                    f"[get_data_from_http_file] Successfully processed URL: {base_url}"
-                )
-
-            elif bucket_name:
-                _LOGGER.info(
-                    f"[get_data_from_http_file] Processing GCS bucket: {bucket_name}"
-                )
-                # GCS 버킷 접근을 위해 인증 필요
-                self.http_file_connector.create_session(options, secret_data, schema)
-
-                # Field Mapper 초기화 (기본 매핑 사용)
-                # filed_mapper 오타 처리 (하위 호환성을 위해)
-                field_mapper_config = options.get("field_mapper") or options.get(
-                    "filed_mapper", {}
-                )
-                mapping_config = (
-                    task_options.get("field_mapper", {}) or field_mapper_config
-                )
-                provider = options.get("provider", "google_cloud")
-
-                # 원본 데이터 포함 옵션 처리
-                include_raw_data = options.get("include_raw_data", False)
-                wrap_as_sample_data = options.get("wrap_as_sample_data", False)
-
-                self.field_mapper = FieldMapper(
-                    mapping_config,
-                    provider,
-                    self.select_cost_option,
-                    self.cost_metric_option,
-                    include_raw_data,
-                    wrap_as_sample_data,
-                )
-
-                # 압축 처리를 위한 import
-                from ..utils.compression import CompressionHandler
-
-                # 경로 패턴 생성: bucket_name/project_id/date_range 구조
-                project_id = task_options.get("project_id") or options.get("project_id")
-                start_period = task_options.get("start")
-
-                # 사용자 정의 패턴이 있으면 우선 적용
-                custom_pattern = task_options.get("file_pattern")
-                if custom_pattern:
-                    file_pattern = custom_pattern
-                    _LOGGER.info(
-                        f"[get_data_from_http_file] Using custom pattern: {file_pattern}"
-                    )
-                    files = self.http_file_connector.list_files(
-                        bucket_name, file_pattern
-                    )
-                elif project_id and start_period:
-                    # start부터 현재 월까지의 날짜 범위로 파일 수집
-                    all_files = []
-                    date_patterns = self._generate_date_range_patterns(
-                        project_id, start_period
-                    )
-
-                    for pattern in date_patterns:
-                        _LOGGER.info(
-                            f"[get_data_from_http_file] Searching with pattern: {pattern}"
-                        )
-                        pattern_files = self.http_file_connector.list_files(
-                            bucket_name, pattern
-                        )
-                        all_files.extend(pattern_files)
-
-                    # 중복 제거 (파일명 기준)
-                    seen_files = set()
-                    files = []
-                    for file_info in all_files:
-                        if file_info["name"] not in seen_files:
-                            files.append(file_info)
-                            seen_files.add(file_info["name"])
-
-                    _LOGGER.info(
-                        f"[get_data_from_http_file] Found {len(files)} unique files across {len(date_patterns)} date patterns"
-                    )
-                elif project_id:
-                    file_pattern = f"{project_id}/"
-                    _LOGGER.info(
-                        f"[get_data_from_http_file] Using project pattern: {file_pattern}"
-                    )
-                    files = self.http_file_connector.list_files(
-                        bucket_name, file_pattern
-                    )
-                else:
-                    # 패턴 없이 모든 파일 검색
-                    files = self.http_file_connector.list_files(bucket_name, None)
-
-                if not files:
-                    warning_msg = f"No supported files found in bucket: {bucket_name}"
-                    if custom_pattern:
-                        warning_msg += f" with pattern: {custom_pattern}"
-                    elif project_id and start_period:
-                        warning_msg += f" for project: {project_id} from {start_period} to current month"
-                    elif project_id:
-                        warning_msg += f" for project: {project_id}"
-                    _LOGGER.warning(f"[get_data_from_http_file] {warning_msg}")
-                    # 파일이 없을 때는 빈 결과를 반환 (에러가 아닌 정상적인 상황일 수 있음)
-                    yield {"results": []}
-                    return
-
-                # 여러 파일 처리 지원
-                max_files = int(
-                    task_options.get("max_files", 10)
-                )  # 기본값: 최대 10개 파일
-                files_to_process = files[:max_files]
-
-                _LOGGER.info(
-                    f"[get_data_from_http_file] Processing {len(files_to_process)} files from bucket: {bucket_name}"
-                )
-
-                # 각 파일을 순차적으로 처리 (동시성 제어 적용)
-                for file_info in files_to_process:
-                    file_name = file_info["name"]
-
-                    # 파일이 이미 처리 중인지 확인
-                    if concurrency_manager.is_file_processing(bucket_name, file_name):
-                        _LOGGER.info(
-                            f"[get_data_from_http_file] Skipping file already being processed: {file_name}"
-                        )
-                        continue
-
-                    _LOGGER.info(
-                        f"[get_data_from_http_file] Processing file: {file_name} ({file_info['size']} bytes, format: {file_info.get('format', 'auto-detect')})"
-                    )
-
-                    # 동시성 관리 상태 로깅
-                    stats = concurrency_manager.get_processing_stats()
-                    _LOGGER.debug(
-                        f"[get_data_from_http_file] Concurrency stats before processing {file_name}: {stats}"
-                    )
-
-                    try:
-                        # 파일 처리 락 획득
-                        with concurrency_manager.acquire_file_lock(
-                            bucket_name, file_name, timeout=60.0
-                        ) as lock_result:
-                            # 락 획득 실패 시 (이미 처리 중인 파일) 건너뛰기
-                            if lock_result is None:
-                                _LOGGER.info(
-                                    f"[get_data_from_http_file] File {file_name} is being processed by another request, skipping"
-                                )
-                                continue
-
-                            # 파일 다운로드
-                            file_stream = self.http_file_connector.download_file_stream(
-                                bucket_name, file_name
-                            )
-
-                            # 파일 내용 샘플 읽기 (파일 형식 감지를 위해)
-                            file_stream.seek(0)
-                            content_sample = file_stream.read(1024)  # 처음 1KB 읽기
-                            file_stream.seek(0)  # 스트림 위치 리셋
-
-                            # 파일 형식 감지 (내용 샘플 포함)
-                            file_format = file_info.get(
-                                "format"
-                            ) or FileProcessorFactory.detect_file_format(
-                                file_name, content_sample
-                            )
-
-                            # 압축 해제 (필요한 경우)
-                            compression_type = CompressionHandler.detect_compression(
-                                file_name, content_sample
-                            )
-                            if compression_type:
-                                _LOGGER.debug(
-                                    f"[get_data_from_http_file] Decompressing {compression_type} file: {file_name}"
-                                )
-                                file_stream = CompressionHandler.decompress_stream(
-                                    file_stream, compression_type
-                                )
-
-                            _LOGGER.debug(
-                                f"[get_data_from_http_file] Detected format: {file_format}"
-                            )
-
-                            # 파서 생성 및 데이터 처리
-                            parser = FileProcessorFactory.create_parser(file_format)
-
-                            # 파싱 옵션 설정
-                            parsing_options = task_options.get("parsing_options", {})
-
-                            # 데이터 스트림 처리 - BigQuery results 구조로 변환
-                            for batch_result in parser.parse_stream(
-                                file_stream, self.field_mapper, **parsing_options
-                            ):
-                                if batch_result and "results" in batch_result:
-                                    # GCS 응답을 BigQuery results 구조로 변환
-                                    converted_result = (
-                                        self._convert_to_bigquery_structure(
-                                            batch_result
-                                        )
-                                    )
-                                    yield converted_result
-
-                            _LOGGER.info(
-                                f"[get_data_from_http_file] Successfully processed file: {file_name}"
-                            )
-
-                    except Exception as file_error:
-                        _LOGGER.error(
-                            f"[get_data_from_http_file] Failed to process file {file_name}: {file_error}"
-                        )
-                        # 개별 파일 처리 실패 시 다음 파일로 계속 진행
-                        continue
-
-                # GCS 버킷 처리 완료 메시지
-                _LOGGER.info(
-                    f"[get_data_from_http_file] Successfully processed {len(files_to_process)} files from GCS bucket: {bucket_name}"
-                )
-
         except Exception as e:
             _LOGGER.error(
-                f"[get_data_from_http_file] Failed to process file: {e}", exc_info=True
+                f"[_get_data_from_http] Failed to process HTTP file: {e}", exc_info=True
             )
             raise e
 
@@ -548,18 +496,10 @@ class CostManager(BaseManager):
         # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
 
         if "results" in gcs_result and isinstance(gcs_result["results"], list):
-            for i, record in enumerate(gcs_result["results"]):
+            for record in gcs_result["results"]:
                 if isinstance(record, dict):
                     # SpaceONE 검증 오류 해결을 위해 data 필드를 빈 딕셔너리로 설정
                     record["data"] = {}
-                    if i < 3:  # 처음 3개만 로그
-                        _LOGGER.debug(
-                            f"[_convert_to_bigquery_structure] Set data field to empty dict for record {i} (SpaceONE framework compatibility)"
-                        )
-
-        _LOGGER.debug(
-            f"[_convert_to_bigquery_structure] Maintaining SpaceONE structure for {len(gcs_result['results'])} items with SpaceONE-compatible data fields"
-        )
         return gcs_result
 
     def _make_cost_data(self, row) -> dict:
@@ -634,9 +574,6 @@ class CostManager(BaseManager):
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric_option == "AmortizedCost":
             cost_value = getattr(row, "credits_amount", 0)
-            _LOGGER.debug(
-                f"[_get_cost_field_by_option] Using AmortizedCost (credits_amount): {cost_value}"
-            )
             return cost_value
 
         # 기존 select_cost 로직
@@ -668,17 +605,16 @@ class CostManager(BaseManager):
                 raise ERROR_REQUIRED_PARAMETER(key=f"task_options.{key}")
 
     @staticmethod
-    def _check_http_file_task_options(task_options, options, secret_data=None):
-        """HTTP 파일 데이터 소스용 필수 파라미터 검증"""
-        # base_url 또는 bucket_name이 있어야 함
-        base_url = options.get("base_url") or task_options.get("base_url")
+    def _check_gcs_task_options(task_options, options, secret_data=None):
+        """GCS 버킷 데이터 소스용 필수 파라미터 검증"""
+        # bucket_name이 있어야 함
         bucket_name = options.get("bucket_name") or task_options.get("bucket_name")
 
-        if not base_url and not bucket_name:
-            raise ERROR_REQUIRED_PARAMETER(key="base_url or bucket_name")
+        if not bucket_name:
+            raise ERROR_REQUIRED_PARAMETER(key="bucket_name")
 
-        # GCS 버킷 사용 시에만 secret_data 검증
-        if bucket_name and secret_data:
+        # GCS 버킷 사용 시 secret_data 검증
+        if secret_data:
             from ..connector.http_file_connector import REQUIRED_SECRET_KEYS
 
             missing_keys = [
@@ -687,6 +623,15 @@ class CostManager(BaseManager):
             if missing_keys:
                 for key in missing_keys:
                     raise ERROR_REQUIRED_PARAMETER(key=f"secret_data.{key}")
+
+    @staticmethod
+    def _check_http_task_options(task_options, options):
+        """HTTP URL 데이터 소스용 필수 파라미터 검증"""
+        # base_url이 있어야 함
+        base_url = options.get("base_url") or task_options.get("base_url")
+
+        if not base_url:
+            raise ERROR_REQUIRED_PARAMETER(key="base_url")
 
     @staticmethod
     def _extract_dataset_id(billing_dataset_id: str) -> str:
@@ -755,14 +700,12 @@ class CostManager(BaseManager):
         if detailed_table in bigquery_table_names:
             self.billing_table = detailed_table
             self.is_detailed_usage = True
-            _LOGGER.info(f"Using detailed usage table: {detailed_table}")
         elif self.billing_table not in bigquery_table_names:
             raise ERROR_REQUIRED_PARAMETER(
                 key=f"Neither detailed table '{detailed_table}' nor standard table '{self.billing_table}' found in dataset. Available tables: {bigquery_table_names}"
             )
         else:
             self.is_detailed_usage = False
-            _LOGGER.info(f"Using standard usage table: {self.billing_table}")
 
     def _create_google_sql(self, start):
         # 날짜 범위 검증 및 안전한 처리
@@ -809,12 +752,10 @@ class CostManager(BaseManager):
                 + SUM(IFNULL((SELECT SUM(c.amount)
                               FROM UNNEST(credits) c), 0))
                 AS cost,
-              
               -- AmortizedCost를 위한 credits_amount 계산 (크레딧 총액의 절대값)
               ABS(SUM(IFNULL((SELECT SUM(c.amount)
                               FROM UNNEST(credits) c), 0)))
                 AS credits_amount,
-
               SUM(usage.amount_in_pricing_units) as usage_quantity,
             FROM `{self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}`
             {where_condition}
@@ -873,9 +814,6 @@ class CostManager(BaseManager):
 
             # 입력 날짜 파싱
             if not start_date or len(start_date) != 7:  # YYYY-MM 형식 검증
-                _LOGGER.warning(
-                    f"[_validate_and_fix_date_range] Invalid date format: {start_date}, using current month"
-                )
                 return current_year_month
 
             start_year, start_month = map(int, start_date.split("-"))
@@ -883,25 +821,14 @@ class CostManager(BaseManager):
 
             # 미래 날짜 검증
             if start_datetime > current_date:
-                _LOGGER.warning(
-                    f"[_validate_and_fix_date_range] Future date detected: {start_date}, "
-                    f"adjusting to current month: {current_year_month}"
-                )
                 return current_year_month
 
             # 너무 과거 날짜 검증 (5년 이전)
             five_years_ago = current_date - timedelta(days=365 * 5)
             if start_datetime < five_years_ago:
                 safe_start = five_years_ago.strftime("%Y-%m")
-                _LOGGER.warning(
-                    f"[_validate_and_fix_date_range] Date too far in past: {start_date}, "
-                    f"adjusting to: {safe_start}"
-                )
                 return safe_start
 
-            _LOGGER.debug(
-                f"[_validate_and_fix_date_range] Valid date range: {start_date}"
-            )
             return start_date
 
         except Exception as e:
@@ -911,23 +838,14 @@ class CostManager(BaseManager):
 
     def _get_data_source_type(self, options: dict, task_options: dict) -> str:
         """데이터 소스 타입 결정"""
-        _LOGGER.debug(f"[_get_data_source_type] options: {options}")
-        _LOGGER.debug(f"[_get_data_source_type] task_options: {task_options}")
-
         # task_options에서 우선 확인
         data_source_type = task_options.get("data_source_type")
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
-            _LOGGER.debug(
-                f"[_get_data_source_type] Found in task_options: {data_source_type}"
-            )
             return data_source_type
 
         # options에서 확인
         data_source_type = options.get("data_source_type")
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
-            _LOGGER.debug(
-                f"[_get_data_source_type] Found in options: {data_source_type}"
-            )
             return data_source_type
 
         # base_url 또는 bucket_name이 있으면 http_file 타입으로 자동 감지
@@ -935,19 +853,6 @@ class CostManager(BaseManager):
         base_url_in_task_options = task_options.get("base_url")
         bucket_name_in_options = options.get("bucket_name")
         bucket_name_in_task_options = task_options.get("bucket_name")
-
-        _LOGGER.debug(
-            f"[_get_data_source_type] base_url in options: {base_url_in_options}"
-        )
-        _LOGGER.debug(
-            f"[_get_data_source_type] base_url in task_options: {base_url_in_task_options}"
-        )
-        _LOGGER.debug(
-            f"[_get_data_source_type] bucket_name in options: {bucket_name_in_options}"
-        )
-        _LOGGER.debug(
-            f"[_get_data_source_type] bucket_name in task_options: {bucket_name_in_task_options}"
-        )
 
         # HTTP 파일 관련 파라미터가 명확히 있는 경우에만 HTTP 파일로 결정
         has_http_file_params = (
@@ -958,7 +863,6 @@ class CostManager(BaseManager):
         )
 
         if has_http_file_params:
-            _LOGGER.debug("[_get_data_source_type] Auto-detected http_file type")
             return DATA_SOURCE_TYPES["http_file"]
 
         # BigQuery 필수 파라미터 확인 (task_options에서)
@@ -967,17 +871,11 @@ class CostManager(BaseManager):
             for key in REQUIRED_TASK_OPTIONS[1:]  # 'start' 제외
         )
         if bigquery_required_in_task:
-            _LOGGER.debug(
-                "[_get_data_source_type] Auto-detected bigquery type from task_options"
-            )
             return DATA_SOURCE_TYPES["bigquery"]
 
         # options에 BigQuery 필수 파라미터 확인
         bigquery_required_in_options = all(key in options for key in REQUIRED_OPTIONS)
         if bigquery_required_in_options:
-            _LOGGER.debug(
-                "[_get_data_source_type] Auto-detected bigquery type from options"
-            )
             return DATA_SOURCE_TYPES["bigquery"]
 
         # 명시적 데이터 소스 타입이 없고 자동 감지도 실패한 경우 에러
@@ -996,7 +894,7 @@ class CostManager(BaseManager):
 
     def _generate_date_range_patterns(
         self, project_id: str, start_period: str
-    ) -> List[str]:
+    ) -> list[str]:
         """start부터 현재 월까지의 디렉토리 패턴 목록 생성
 
         Args:
@@ -1004,16 +902,13 @@ class CostManager(BaseManager):
             start_period: 시작 기간 (YYYY-MM 형식)
 
         Returns:
-            List[str]: 디렉토리 패턴 목록 (예: ["project/2024-01", "project/2024-02", ...])
+            list[str]: 디렉토리 패턴 목록 (예: ["project/2024-01", "project/2024-02", ...])
         """
         import re
         from datetime import datetime
 
         # start_period 형식 검증 및 파싱
         if not start_period or not re.match(r"^\d{4}-\d{2}$", start_period):
-            _LOGGER.warning(
-                f"[_generate_date_range_patterns] Invalid start_period format: {start_period}"
-            )
             return [f"{project_id}/"]
 
         try:
@@ -1021,9 +916,6 @@ class CostManager(BaseManager):
 
             # 월 범위 검증
             if not (1 <= start_month <= 12):
-                _LOGGER.warning(
-                    f"[_generate_date_range_patterns] Invalid month: {start_month}"
-                )
                 return [f"{project_id}/"]
 
             current_date = datetime.now()
@@ -1051,19 +943,9 @@ class CostManager(BaseManager):
 
                 # 무한 루프 방지 (너무 많은 패턴 생성 방지)
                 if len(patterns) > 120:  # 10년치
-                    _LOGGER.warning(
-                        f"[_generate_date_range_patterns] Too many patterns generated, stopping at {len(patterns)}"
-                    )
                     break
 
-            if patterns:
-                _LOGGER.info(
-                    f"[_generate_date_range_patterns] Generated {len(patterns)} patterns from {start_period} to {current_year:04d}-{current_month:02d} (YYYY/MM format)"
-                )
-            else:
-                _LOGGER.warning(
-                    f"[_generate_date_range_patterns] No valid patterns generated for {start_period}"
-                )
+            if not patterns:
                 return [f"{project_id}/"]
 
             return patterns
@@ -1074,3 +956,33 @@ class CostManager(BaseManager):
             )
             # 오류 시 기본 project 패턴 반환
             return [f"{project_id}/"]
+
+    def _get_source_value(self, options: dict) -> str:
+        """source 값을 추출하고 검증합니다.
+
+        Args:
+            options: 데이터 소스 옵션
+
+        Returns:
+            str: source 타입 (bigquery, gcs, http)
+
+        Raises:
+            ERROR_REQUIRED_PARAMETER: source 값이 없거나 지원하지 않는 값
+        """
+        # 유효한 source 타입 정의
+        valid_sources = ["bigquery", "gcs", "http"]
+
+        # source 값 추출 (options에서만)
+        source = options.get("source")
+
+        if not source:
+            raise ERROR_REQUIRED_PARAMETER(
+                key=f"source (required parameter. Supported values: {', '.join(valid_sources)})"
+            )
+
+        if source not in valid_sources:
+            raise ERROR_REQUIRED_PARAMETER(
+                key=f"source (invalid value: {source}. Supported values: {', '.join(valid_sources)})"
+            )
+
+        return source

@@ -1,6 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import IO, Generator
+from collections.abc import Generator
+from typing import IO
 
 from ..conf.cost_conf import HTTP_FILE_CONFIG
 from ..manager.field_mapper import FieldMapper
@@ -43,23 +44,10 @@ class BaseParser(ABC):
         # 🚨 CRITICAL: 모든 레코드에 billed_date 필드가 있는지 검증
         validated_records = []
         for i, record in enumerate(records):
-            # 🚨 CRITICAL: 입력 레코드에 data 필드가 있는지 확인
-            if i < 3:  # 처음 3개만 로그
-                if "data" in record:
-                    _LOGGER.error(
-                        f"[BaseParser] CRITICAL: Input record {i} contains 'data' field: type={type(record['data'])}, value={repr(record['data'])[:100]}"
-                    )
-                else:
-                    _LOGGER.info(
-                        f"[BaseParser] Input record {i} does NOT contain 'data' field (good)"
-                    )
             if not record.get("billed_date"):
                 from datetime import datetime
 
                 record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
-                _LOGGER.warning(
-                    f"[BaseParser] CRITICAL: Missing billed_date in record {i}, force-set to current date"
-                )
 
             # 🚨 CRITICAL: 모든 Pandas/Numpy 객체를 직렬화 가능한 타입으로 변환
             sanitized_record = self._sanitize_record_for_serialization(record)
@@ -69,10 +57,6 @@ class BaseParser(ABC):
             # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
             # SpaceONE 검증 오류 해결을 위해 빈 딕셔너리 제공
             sanitized_record["data"] = {}
-            if i < 3:  # 처음 3개만 로그
-                _LOGGER.debug(
-                    f"[BaseParser] Set data field to empty dict for record {i} (SpaceONE framework compatibility)"
-                )
 
             validated_records.append(sanitized_record)
 
@@ -86,17 +70,15 @@ class BaseParser(ABC):
                 record["data"] = {}
             final_results.append(record)
 
-        _LOGGER.info(
-            f"[BaseParser] FINAL: Ensured all {len(final_results)} records have valid data field for SpaceONE framework"
-        )
         return {"results": final_results}
 
     def _sanitize_record_for_serialization(self, record: dict) -> dict:
         """레코드를 JSON 직렬화 가능한 타입으로 변환"""
-        import pandas as pd
-        import numpy as np
+        from datetime import date, datetime
         from decimal import Decimal
-        from datetime import datetime, date
+
+        import numpy as np
+        import pandas as pd
 
         def convert_value(value):
             """개별 값을 직렬화 가능한 타입으로 변환"""
@@ -175,10 +157,6 @@ class BaseParser(ABC):
             # 청크 크기를 줄여야 함
             new_chunk_size = max(100, int(self.chunk_size * 0.7))
             if new_chunk_size != self.chunk_size:
-                _LOGGER.info(
-                    f"[{self.__class__.__name__}] Reducing chunk size from {self.chunk_size} to {new_chunk_size} "
-                    f"(estimated size: {estimated_size / 1024 / 1024:.2f}MB)"
-                )
                 self.chunk_size = new_chunk_size
         elif (
             estimated_size < self.grpc_message_limit * 0.3
@@ -187,14 +165,8 @@ class BaseParser(ABC):
             # 청크 크기를 늘릴 수 있음
             new_chunk_size = min(self.max_chunk_size, int(self.chunk_size * 1.2))
             if new_chunk_size != self.chunk_size:
-                _LOGGER.debug(
-                    f"[{self.__class__.__name__}] Increasing chunk size from {self.chunk_size} to {new_chunk_size}"
-                )
                 self.chunk_size = new_chunk_size
 
     def _log_parsing_progress(self, processed_count: int, file_name: str = ""):
         """파싱 진행 상황 로깅"""
-        if processed_count % 10000 == 0:
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] Processed {processed_count} records from {file_name}"
-            )
+        pass

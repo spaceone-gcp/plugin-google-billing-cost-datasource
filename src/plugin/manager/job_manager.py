@@ -18,8 +18,8 @@ from ..connector.bigquery_connector import BigqueryConnector
 from ..connector.http_file_connector import HttpFileConnector
 from ..utils.error_handler import (
     GracefulErrorHandler,
-    validate_job_response,
     create_empty_job_response,
+    validate_job_response,
 )
 
 _LOGGER = logging.getLogger("spaceone")

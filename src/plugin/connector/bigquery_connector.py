@@ -4,7 +4,6 @@ import google.oauth2.service_account
 import pandas_gbq
 from googleapiclient.discovery import build
 from spaceone.core.connector import BaseConnector
-from spaceone.core.error import ERROR_REQUIRED_PARAMETER
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -19,8 +18,10 @@ class BigqueryConnector(BaseConnector):
         self.google_client = None
 
     def create_session(self, options: dict, secret_data: dict, schema: str):
-        self._check_secret_data(secret_data)
-        self.project_id = secret_data["project_id"]
+        if not secret_data:
+            return
+
+        self.project_id = secret_data.get("project_id")
 
         # private_key 처리 및 검증
         processed_secret_data = secret_data.copy()
@@ -36,8 +37,6 @@ class BigqueryConnector(BaseConnector):
                 private_key = self._validate_and_clean_private_key(private_key)
                 processed_secret_data["private_key"] = private_key
 
-                _LOGGER.debug("[BigqueryConnector] private_key validation successful")
-
             except Exception as e:
                 _LOGGER.error(f"[BigqueryConnector] private_key validation failed: {e}")
                 raise ValueError(f"Invalid private_key format: {e}")
@@ -47,9 +46,6 @@ class BigqueryConnector(BaseConnector):
                 google.oauth2.service_account.Credentials.from_service_account_info(
                     processed_secret_data
                 )
-            )
-            _LOGGER.debug(
-                "[BigqueryConnector] Service account credentials created successfully"
             )
         except Exception as e:
             _LOGGER.error(
@@ -86,9 +82,6 @@ class BigqueryConnector(BaseConnector):
         except Exception as e:
             _LOGGER.error(
                 f"[BigqueryConnector] Failed to list tables in dataset {dataset_id}: {e}"
-            )
-            _LOGGER.debug(
-                f"[BigqueryConnector] Query parameters: projectId={billing_export_project_id}, datasetId={dataset_id}"
             )
             # 데이터셋이 존재하지 않거나 접근 권한이 없는 경우 빈 리스트 반환
             return []
@@ -132,8 +125,7 @@ class BigqueryConnector(BaseConnector):
         # base64 디코딩 테스트 - 실패해도 계속 진행 (키가 손상된 경우)
         try:
             base64.b64decode(base64_content)
-        except Exception as e:
-            _LOGGER.warning(f"Base64 validation failed, but proceeding: {e}")
+        except Exception:
             # 키가 손상되었지만 그대로 반환 (Google API에서 처리하도록)
             return private_key
 
@@ -146,9 +138,3 @@ class BigqueryConnector(BaseConnector):
 
         return cleaned_key
 
-    @staticmethod
-    def _check_secret_data(secret_data):
-        missing_keys = [key for key in REQUIRED_SECRET_KEYS if key not in secret_data]
-        if missing_keys:
-            for key in missing_keys:
-                raise ERROR_REQUIRED_PARAMETER(key=f"secret_data.{key}")

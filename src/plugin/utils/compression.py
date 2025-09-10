@@ -27,33 +27,19 @@ class CompressionHandler:
         """
         name_lower = file_name.lower()
 
-        _LOGGER.debug(
-            f"[CompressionHandler] detect_compression called for file: {file_name}, "
-            f"content_sample length: {len(content_sample) if content_sample else 0}, "
-            f"first 8 bytes: {content_sample[:8].hex() if content_sample and len(content_sample) >= 8 else 'N/A'}"
-        )
 
         # 내용 기반 검증이 있는 경우 우선 확인 (파일 내용이 최우선)
         if content_sample and len(content_sample) >= 4:
             # Parquet 파일 매직 넘버 확인 (PAR1) - 최우선 처리
             if content_sample[:4] == b"PAR1":
-                _LOGGER.info(
-                    f"[CompressionHandler] File {file_name} is detected as uncompressed Parquet file based on content (PAR1 magic)"
-                )
                 return None
 
             # GZIP 매직 넘버 확인 (0x1f, 0x8b)
             if content_sample[:2] == b"\x1f\x8b":
-                _LOGGER.info(
-                    f"[CompressionHandler] File {file_name} is detected as GZIP based on content"
-                )
                 return "gz"
 
             # ZSTD 매직 넘버 확인 (0x28, 0xb5, 0x2f, 0xfd)
             if content_sample[:4] == b"\x28\xb5\x2f\xfd":
-                _LOGGER.info(
-                    f"[CompressionHandler] File {file_name} is detected as ZSTD based on content"
-                )
                 return "zstd"
 
             # Snappy 매직 넘버 확인 (다양한 형태 존재)
@@ -63,9 +49,6 @@ class CompressionHandler:
                 and content_sample[:4] == b"\xff\x06\x00\x00"
                 and content_sample[4:10] == b"sNaPpY"
             ):
-                _LOGGER.info(
-                    f"[CompressionHandler] File {file_name} is detected as Snappy framed format based on content"
-                )
                 return "snappy"
 
         # Parquet 파일에 대한 특별 처리 - 파일명 기반 압축 감지
@@ -83,20 +66,11 @@ class CompressionHandler:
                 # 내용 기반 검증이 있는 경우, 실제 압축 여부 확인
                 if content_sample and len(content_sample) >= 4:
                     if content_sample[:4] == b"PAR1":
-                        _LOGGER.warning(
-                            f"[CompressionHandler] File {file_name} has {compression_type} extension but content is uncompressed Parquet (PAR1 magic)"
-                        )
                         return None
                     else:
-                        _LOGGER.info(
-                            f"[CompressionHandler] File {file_name} detected as compressed Parquet ({compression_type}) based on extension and content verification"
-                        )
                         return compression_type
                 else:
                     # 내용 샘플이 없는 경우 파일명만으로 판단
-                    _LOGGER.info(
-                        f"[CompressionHandler] File {file_name} detected as {compression_type} based on Parquet extension only (no content verification)"
-                    )
                     return compression_type
 
         # 일반적인 압축 형식 감지
@@ -111,14 +85,8 @@ class CompressionHandler:
 
         for extension, compression_type in compression_mappings.items():
             if name_lower.endswith(extension):
-                _LOGGER.info(
-                    f"[CompressionHandler] File {file_name} detected as {compression_type} based on extension only (no content verification)"
-                )
                 return compression_type
 
-        _LOGGER.debug(
-            f"[CompressionHandler] No compression detected for file: {file_name}"
-        )
         return None
 
     @staticmethod
@@ -135,9 +103,6 @@ class CompressionHandler:
         Raises:
             ERROR_UNSUPPORTED_FILE_FORMAT: 지원하지 않는 압축 형식
         """
-        _LOGGER.info(
-            f"[CompressionHandler] decompress_stream called with compression_type: {compression_type}"
-        )
 
         if compression_type not in HTTP_FILE_CONFIG["supported_compressions"]:
             raise ERROR_UNSUPPORTED_FILE_FORMAT(format=compression_type)
@@ -172,43 +137,24 @@ class CompressionHandler:
             # Parquet 파일 매직 넘버 확인 (PAR1) - 최우선 처리
             if len(header) >= 4 and header[:4] == b"PAR1":
                 # Parquet 파일인 경우 압축 해제 없이 원본 스트림 반환
-                _LOGGER.info(
-                    "[CompressionHandler] File has .gz extension but is uncompressed Parquet file (PAR1 magic). "
-                    "Returning original stream without decompression."
-                )
                 stream.seek(0)
                 return stream
 
             # GZIP 매직 넘버 확인 (0x1f, 0x8b)
             if len(header) >= 2 and header[0] == 0x1F and header[1] == 0x8B:
                 # 실제 GZIP 파일인 경우 압축 해제
-                _LOGGER.debug(
-                    "[CompressionHandler] Detected GZIP magic number, decompressing..."
-                )
                 stream.seek(0)
                 compressed_data = stream.read()
                 decompressed_data = gzip.decompress(compressed_data)
                 decompressed_stream = BytesIO(decompressed_data)
 
-                _LOGGER.debug(
-                    f"[CompressionHandler] GZIP decompressed: "
-                    f"{len(compressed_data)} -> {len(decompressed_data)} bytes"
-                )
-
                 return decompressed_stream
             else:
                 # GZIP이 아닌 경우 원본 스트림 반환
-                _LOGGER.warning(
-                    f"[CompressionHandler] File has .gz extension but is not gzipped. "
-                    f"Header: {header.hex() if header else 'empty'}. Returning original stream."
-                )
                 stream.seek(0)
                 return stream
 
         except gzip.BadGzipFile as e:
-            _LOGGER.warning(
-                f"[CompressionHandler] Invalid GZIP file: {e}. Returning original stream."
-            )
             try:
                 stream.seek(0)
                 return stream
@@ -237,10 +183,6 @@ class CompressionHandler:
             # Parquet 파일 매직 넘버 확인 (PAR1)
             if len(header) >= 4 and header[:4] == b"PAR1":
                 # Parquet 파일인 경우 압축 해제 없이 원본 스트림 반환
-                _LOGGER.info(
-                    "[CompressionHandler] File has .snappy/.sz extension but is uncompressed Parquet file (PAR1 magic). "
-                    "Returning original stream without decompression."
-                )
                 stream.seek(0)
                 return stream
 
@@ -248,10 +190,6 @@ class CompressionHandler:
             try:
                 import snappy
             except ImportError:
-                _LOGGER.warning(
-                    "python-snappy library is not installed. "
-                    "Returning original stream without decompression."
-                )
                 stream.seek(0)
                 return stream
 
@@ -263,25 +201,17 @@ class CompressionHandler:
                 and header[:4] == b"\xff\x06\x00\x00"
                 and header[4:10] == b"sNaPpY"
             ):
-                _LOGGER.debug("[CompressionHandler] Detected Snappy framed format")
+                pass
 
             # Snappy 압축 해제 시도
             try:
                 decompressed_data = snappy.decompress(compressed_data)
                 decompressed_stream = BytesIO(decompressed_data)
 
-                _LOGGER.debug(
-                    f"[CompressionHandler] Snappy decompressed: "
-                    f"{len(compressed_data)} -> {len(decompressed_data)} bytes"
-                )
-
                 return decompressed_stream
 
-            except snappy.UncompressError as e:
+            except snappy.UncompressError:
                 # Snappy 압축이 아닌 경우 원본 스트림 반환
-                _LOGGER.warning(
-                    f"[CompressionHandler] File has .snappy/.sz extension but is not snappy compressed: {e}"
-                )
                 stream.seek(0)
                 return stream
 
@@ -308,30 +238,17 @@ class CompressionHandler:
             # Parquet 파일 매직 넘버 확인 (PAR1)
             if len(header) >= 4 and header[:4] == b"PAR1":
                 # Parquet 파일인 경우 압축 해제 없이 원본 스트림 반환
-                _LOGGER.info(
-                    "[CompressionHandler] File has .zst/.zstd extension but is uncompressed Parquet file (PAR1 magic). "
-                    "Returning original stream without decompression."
-                )
                 stream.seek(0)
                 return stream
 
             # ZSTD 매직 넘버 확인 (0x28, 0xb5, 0x2f, 0xfd)
             if len(header) >= 4 and header[:4] == b"\x28\xb5\x2f\xfd":
-                _LOGGER.debug("[CompressionHandler] Detected ZSTD magic number")
-            else:
-                _LOGGER.warning(
-                    f"[CompressionHandler] File has .zst/.zstd extension but no ZSTD magic number. "
-                    f"Header: {header.hex() if header else 'empty'}"
-                )
+                pass
 
             # zstandard 라이브러리 동적 임포트
             try:
                 import zstandard as zstd
             except ImportError:
-                _LOGGER.warning(
-                    "zstandard library is not installed. "
-                    "Returning original stream without decompression."
-                )
                 stream.seek(0)
                 return stream
 
@@ -343,18 +260,10 @@ class CompressionHandler:
                 decompressed_data = dctx.decompress(compressed_data)
                 decompressed_stream = BytesIO(decompressed_data)
 
-                _LOGGER.debug(
-                    f"[CompressionHandler] ZSTD decompressed: "
-                    f"{len(compressed_data)} -> {len(decompressed_data)} bytes"
-                )
-
                 return decompressed_stream
 
-            except zstd.ZstdError as e:
+            except zstd.ZstdError:
                 # ZSTD 압축이 아닌 경우 원본 스트림 반환
-                _LOGGER.warning(
-                    f"[CompressionHandler] File has .zst/.zstd extension but is not zstd compressed: {e}"
-                )
                 stream.seek(0)
                 return stream
 

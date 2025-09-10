@@ -196,9 +196,6 @@ class FieldMapper:
             # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
             # SpaceONE 검증 오류 해결을 위해 빈 딕셔너리 제공
             mapped_data["data"] = {}
-            _LOGGER.debug(
-                "[FieldMapper] Set data field to empty dict for SpaceONE framework compatibility"
-            )
 
             return mapped_data
 

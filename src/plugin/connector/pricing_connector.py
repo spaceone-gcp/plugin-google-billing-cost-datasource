@@ -4,15 +4,16 @@ Google Cloud의 cloud_pricing_export 테이블에서 가격 정보를 조회하�
 """
 
 import logging
+from collections.abc import Generator
 from decimal import Decimal
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas_gbq
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from spaceone.core.connector import BaseConnector
 
-from plugin.error.cost import ERROR_INVALID_ARGUMENT, ERROR_REQUIRED_PARAMETER
+from plugin.error.cost import ERROR_INVALID_ARGUMENT
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -32,8 +33,11 @@ class PricingConnector(BaseConnector):
 
     def create_session(self, options: dict, secret_data: dict, schema: str):
         """BigQuery 세션 생성 및 Pricing 관련 설정 초기화"""
-        self._check_secret_data(secret_data)
-        self.project_id = secret_data["project_id"]
+        if not secret_data:
+            _LOGGER.warning("[PricingConnector] No secret_data provided")
+            return
+
+        self.project_id = secret_data.get("project_id")
 
         # private_key의 \n 문자열을 실제 개행 문자로 변환
         processed_secret_data = secret_data.copy()
@@ -210,9 +214,7 @@ class PricingConnector(BaseConnector):
             where_conditions.append(f"DATE(_PARTITIONTIME) = '{date}'")
         else:
             where_conditions.append(
-                "DATE(_PARTITIONTIME) = (SELECT MAX(DATE(_PARTITIONTIME)) FROM `{}.{}.cloud_pricing_export`)".format(
-                    self.pricing_project_id, self.pricing_dataset_id
-                )
+                f"DATE(_PARTITIONTIME) = (SELECT MAX(DATE(_PARTITIONTIME)) FROM `{self.pricing_project_id}.{self.pricing_dataset_id}.cloud_pricing_export`)"
             )
 
         if service_id:
@@ -246,9 +248,7 @@ class PricingConnector(BaseConnector):
         if date:
             date_condition = f"DATE(_PARTITIONTIME) = '{date}'"
         else:
-            date_condition = "DATE(_PARTITIONTIME) = (SELECT MAX(DATE(_PARTITIONTIME)) FROM `{}.{}.cloud_pricing_export`)".format(
-                self.pricing_project_id, self.pricing_dataset_id
-            )
+            date_condition = f"DATE(_PARTITIONTIME) = (SELECT MAX(DATE(_PARTITIONTIME)) FROM `{self.pricing_project_id}.{self.pricing_dataset_id}.cloud_pricing_export`)"
 
         query = f"""
             SELECT 
@@ -337,11 +337,6 @@ class PricingConnector(BaseConnector):
         # 기타 타입은 0으로 처리
         return 0
 
-    def _check_secret_data(self, secret_data: dict):
-        """시크릿 데이터 검증"""
-        for key in REQUIRED_SECRET_KEYS:
-            if key not in secret_data:
-                raise ERROR_REQUIRED_PARAMETER(key=key)
 
     def list_pricing_tables(self) -> List[Dict]:
         """Pricing Export 데이터셋의 테이블 목록 조회"""

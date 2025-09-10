@@ -1,7 +1,8 @@
 import json
 import logging
+from collections.abc import Generator
 from io import TextIOWrapper
-from typing import IO, Generator
+from typing import IO
 
 from ..error.cost import ERROR_FILE_PARSING_FAILED
 from ..manager.field_mapper import FieldMapper
@@ -100,9 +101,6 @@ class JSONParser(BaseParser):
         if batch_records:
             yield self._create_batch_result(batch_records)
 
-        _LOGGER.info(
-            f"[JSONParser] Successfully processed {processed_count} JSON Lines records"
-        )
 
     def _parse_json_array(
         self, text_stream: IO, field_mapper: FieldMapper, root_path: str = None
@@ -145,9 +143,6 @@ class JSONParser(BaseParser):
             if batch_records:
                 yield self._create_batch_result(batch_records)
 
-            _LOGGER.info(
-                f"[JSONParser] Successfully processed {processed_count} JSON array records"
-            )
 
         except json.JSONDecodeError as e:
             raise ERROR_FILE_PARSING_FAILED(
@@ -183,15 +178,10 @@ class JSONParser(BaseParser):
                 valid_json_lines >= len([line for line in sample_lines if line]) * 0.5
             )
 
-            _LOGGER.debug(
-                f"[JSONParser] JSON Lines detection: {is_json_lines} "
-                f"({valid_json_lines}/{len(sample_lines)} valid lines)"
-            )
 
             return is_json_lines
 
-        except Exception as e:
-            _LOGGER.debug(f"[JSONParser] JSON Lines detection failed: {e}")
+        except Exception:
             return False
 
     def _extract_from_path(self, data: dict, path: str) -> any:
@@ -204,6 +194,5 @@ class JSONParser(BaseParser):
                 else:
                     raise KeyError(f"Path '{path}' not found in JSON data")
             return current
-        except Exception as e:
-            _LOGGER.warning(f"[JSONParser] Failed to extract path '{path}': {e}")
+        except Exception:
             return data
