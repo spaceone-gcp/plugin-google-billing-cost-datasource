@@ -258,10 +258,39 @@ class CostManager(BaseManager):
                 files_to_process = files[:max_files]
 
                 # 각 파일을 순차적으로 처리 (동시성 제어 적용)
-                for file_info in files_to_process:
-                    yield from self._process_gcs_file(
-                        bucket_name, file_info, task_options
+                total_files = len(files_to_process)
+                _LOGGER.info(
+                    f"[CostManager] Starting GCS file processing: {total_files} files to process"
+                )
+                
+                for file_index, file_info in enumerate(files_to_process, 1):
+                    file_name = file_info.get("name", "unknown")
+                    _LOGGER.info(
+                        f"[CostManager] Processing file {file_index}/{total_files}: {file_name}"
                     )
+                    
+                    file_processed_count = 0
+                    for batch_result in self._process_gcs_file(
+                        bucket_name, file_info, task_options
+                    ):
+                        if batch_result and "results" in batch_result:
+                            batch_size = len(batch_result["results"])
+                            file_processed_count += batch_size
+                            _LOGGER.info(
+                                f"[CostManager] File {file_index}/{total_files} ({file_name}): "
+                                f"Processed batch of {batch_size:,} records "
+                                f"(File total: {file_processed_count:,})"
+                            )
+                        yield batch_result
+                    
+                    _LOGGER.info(
+                        f"[CostManager] Completed file {file_index}/{total_files} ({file_name}): "
+                        f"Total {file_processed_count:,} records processed"
+                    )
+                
+                _LOGGER.info(
+                    f"[CostManager] Completed GCS file processing: {total_files} files processed"
+                )
 
         except Exception as e:
             _LOGGER.error(
@@ -341,6 +370,19 @@ class CostManager(BaseManager):
         self, bucket_name: str, project_id: str, start_period: str, task_options: dict
     ) -> list[dict]:
         """GCS 버킷에서 파일 목록 가져오기"""
+        # 특정 파일 경로가 지정된 경우 해당 파일만 반환
+        file_path = task_options.get("file_path")
+        if file_path:
+            _LOGGER.info(f"[CostManager] Specific file_path provided: {file_path}")
+            # 특정 파일만 조회
+            specific_files = self.http_file_connector.list_files(bucket_name, file_path)
+            if specific_files:
+                _LOGGER.info(f"[CostManager] Found specific file: {specific_files[0]['name']}")
+                return specific_files
+            else:
+                _LOGGER.warning(f"[CostManager] Specified file not found: {file_path}")
+                return []
+        
         # 사용자 정의 패턴이 있으면 우선 적용
         custom_pattern = task_options.get("file_pattern")
         if custom_pattern:
@@ -459,15 +501,29 @@ class CostManager(BaseManager):
                 parsing_options = task_options.get("parsing_options", {})
 
                 # 데이터 스트림 처리 - BigQuery results 구조로 변환
+                _LOGGER.info("[CostManager] Starting HTTP file processing")
+                total_processed_count = 0
+                
                 for batch_result in parser.parse_stream(
                     file_stream, self.field_mapper, **parsing_options
                 ):
                     if batch_result and "results" in batch_result:
+                        batch_size = len(batch_result["results"])
+                        total_processed_count += batch_size
+                        _LOGGER.info(
+                            f"[CostManager] HTTP file: Processed batch of {batch_size:,} records "
+                            f"(Total: {total_processed_count:,})"
+                        )
                         # 응답을 BigQuery results 구조로 변환
                         converted_result = self._convert_to_bigquery_structure(
                             batch_result
                         )
                         yield converted_result
+                
+                _LOGGER.info(
+                    f"[CostManager] Completed HTTP file processing: "
+                    f"Total {total_processed_count:,} records processed"
+                )
 
         except Exception as e:
             _LOGGER.error(

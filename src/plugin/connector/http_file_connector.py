@@ -5,8 +5,24 @@ from typing import IO, Dict, List, Optional
 import requests
 from google.cloud import storage
 from google.oauth2 import service_account
-from spaceone.core.connector import BaseConnector
-from spaceone.core.error import ERROR_INVALID_ARGUMENT
+
+# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
+try:
+    from spaceone.core.connector import BaseConnector
+    from spaceone.core.error import ERROR_INVALID_ARGUMENT
+except ImportError:
+    # Mock for local development
+    class BaseConnector:
+        """Mock BaseConnector for local development"""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class MockError:
+        def __call__(self, *args, **kwargs):
+            return Exception("Mock SpaceONE Error")
+
+    ERROR_INVALID_ARGUMENT = MockError()
 
 from ..conf.cost_conf import HTTP_FILE_CONFIG
 from ..error.cost import ERROR_FILE_DOWNLOAD_FAILED

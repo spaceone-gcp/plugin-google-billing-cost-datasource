@@ -3,7 +3,17 @@ import logging
 import google.oauth2.service_account
 import pandas_gbq
 from googleapiclient.discovery import build
-from spaceone.core.connector import BaseConnector
+
+# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
+try:
+    from spaceone.core.connector import BaseConnector
+except ImportError:
+    # Mock for local development
+    class BaseConnector:
+        """Mock BaseConnector for local development"""
+
+        def __init__(self, *args, **kwargs):
+            pass
 
 _LOGGER = logging.getLogger("spaceone")
 

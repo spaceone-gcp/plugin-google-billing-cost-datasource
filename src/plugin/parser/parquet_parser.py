@@ -35,17 +35,17 @@ class ParquetParser(BaseParser):
             try:
                 import pyarrow.parquet as pq
                 # import pyarrow as pa  # 현재 사용하지 않음
-            except ImportError:
+            except ImportError as e:
                 raise ERROR_FILE_PARSING_FAILED(
                     file_path="parquet_stream",
                     reason="pyarrow library is required for Parquet parsing. Install with: pip install pyarrow",
-                )
+                ) from e
 
             # 스트림에서 Parquet 파일 읽기
             parquet_file = pq.ParquetFile(stream)
 
-            # 메타데이터 정보
-            metadata = parquet_file.metadata
+            # 메타데이터 정보 (향후 사용을 위해 예비)
+            # metadata = parquet_file.metadata
 
             # 배치 단위로 데이터 읽기
             processed_count = 0
@@ -92,12 +92,16 @@ class ParquetParser(BaseParser):
 
                     # 배치 결과 yield
                     if batch_records:
+                        # 페이징 단위 처리 로깅
+                        self._log_batch_processing(
+                            len(batch_records), processed_count, "parquet_stream"
+                        )
                         # 동적 청크 크기 조정
                         self._adjust_chunk_size_dynamically(
                             len(batch_records), batch_records
                         )
                         yield self._create_batch_result(batch_records)
-                        self._log_parsing_progress(processed_count)
+                        self._log_parsing_progress(processed_count, "parquet_stream")
 
                 except Exception as e:
                     _LOGGER.error(f"[ParquetParser] Failed to process batch: {e}")
@@ -106,7 +110,7 @@ class ParquetParser(BaseParser):
 
         except Exception as e:
             _LOGGER.error(f"[ParquetParser] Failed to parse Parquet stream: {e}")
-            raise ERROR_FILE_PARSING_FAILED(file_path="parquet_stream", reason=str(e))
+            raise ERROR_FILE_PARSING_FAILED(file_path="parquet_stream", reason=str(e)) from e
 
     def _clean_nan_values(self, row_dict: dict) -> dict:
         """NaN 값을 적절한 기본값으로 변환"""
@@ -146,7 +150,7 @@ class ParquetParser(BaseParser):
                     else:
                         cleaned_dict[key] = value
 
-            except Exception as e:
+            except Exception:
                 # 예외 발생 시 기본값으로 처리
                 pass
                 # 중첩 구조 필드들은 빈 문자열로 변환하지 않음

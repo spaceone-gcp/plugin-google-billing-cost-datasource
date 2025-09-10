@@ -43,7 +43,7 @@ class BaseParser(ABC):
         """배치 결과 생성 - billed_date 필드 검증 및 직렬화 포함"""
         # 🚨 CRITICAL: 모든 레코드에 billed_date 필드가 있는지 검증
         validated_records = []
-        for i, record in enumerate(records):
+        for record in records:
             if not record.get("billed_date"):
                 from datetime import datetime
 
@@ -64,7 +64,7 @@ class BaseParser(ABC):
         # Google Cloud Billing에는 data 필드가 없지만, SpaceONE에서 필수로 요구함
         # 참조: https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage
         final_results = []
-        for i, record in enumerate(validated_records):
+        for record in validated_records:
             # SpaceONE 검증 오류 해결을 위해 data 필드를 빈 딕셔너리로 보장
             if "data" not in record or not isinstance(record["data"], dict):
                 record["data"] = {}
@@ -169,4 +169,14 @@ class BaseParser(ABC):
 
     def _log_parsing_progress(self, processed_count: int, file_name: str = ""):
         """파싱 진행 상황 로깅"""
-        pass
+        if processed_count > 0 and processed_count % 1000 == 0:
+            file_info = f" in {file_name}" if file_name else ""
+            _LOGGER.info(f"[{self.__class__.__name__}] Processed {processed_count:,} records{file_info}")
+
+    def _log_batch_processing(self, batch_size: int, total_processed: int, file_name: str = ""):
+        """배치 처리 로깅 - 페이징 단위 카운트 추가"""
+        file_info = f" from {file_name}" if file_name else ""
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Processing batch: {batch_size:,} records "
+            f"(Total processed: {total_processed:,}){file_info}"
+        )

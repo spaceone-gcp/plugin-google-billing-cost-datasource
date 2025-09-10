@@ -53,7 +53,7 @@ class JSONParser(BaseParser):
 
         except Exception as e:
             _LOGGER.error(f"[JSONParser] Failed to parse JSON stream: {e}")
-            raise ERROR_FILE_PARSING_FAILED(file_path="json_stream", reason=str(e))
+            raise ERROR_FILE_PARSING_FAILED(file_path="json_stream", reason=str(e)) from e
         finally:
             # TextIOWrapper 정리 (원본 스트림은 닫지 않음)
             if hasattr(text_stream, "detach"):
@@ -82,13 +82,17 @@ class JSONParser(BaseParser):
 
                 # 배치 단위로 yield
                 if len(batch_records) >= self.chunk_size:
+                    # 페이징 단위 처리 로깅
+                    self._log_batch_processing(
+                        len(batch_records), processed_count, "json_lines_stream"
+                    )
                     # 동적 청크 크기 조정
                     self._adjust_chunk_size_dynamically(
                         len(batch_records), batch_records
                     )
                     yield self._create_batch_result(batch_records)
                     batch_records = []
-                    self._log_parsing_progress(processed_count)
+                    self._log_parsing_progress(processed_count, "json_lines_stream")
 
             except json.JSONDecodeError as e:
                 _LOGGER.warning(f"[JSONParser] Invalid JSON at line {line_num}: {e}")
@@ -99,6 +103,9 @@ class JSONParser(BaseParser):
 
         # 남은 레코드 처리
         if batch_records:
+            self._log_batch_processing(
+                len(batch_records), processed_count, "json_lines_stream"
+            )
             yield self._create_batch_result(batch_records)
 
 
@@ -129,9 +136,13 @@ class JSONParser(BaseParser):
 
                     # 배치 단위로 yield
                     if len(batch_records) >= self.chunk_size:
+                        # 페이징 단위 처리 로깅
+                        self._log_batch_processing(
+                            len(batch_records), processed_count, "json_array_stream"
+                        )
                         yield self._create_batch_result(batch_records)
                         batch_records = []
-                        self._log_parsing_progress(processed_count)
+                        self._log_parsing_progress(processed_count, "json_array_stream")
 
                 except Exception as e:
                     _LOGGER.warning(
@@ -141,6 +152,9 @@ class JSONParser(BaseParser):
 
             # 남은 레코드 처리
             if batch_records:
+                self._log_batch_processing(
+                    len(batch_records), processed_count, "json_array_stream"
+                )
                 yield self._create_batch_result(batch_records)
 
 
@@ -154,7 +168,7 @@ class JSONParser(BaseParser):
         try:
             # 첫 몇 줄을 읽어서 JSON Lines 형식인지 확인
             sample_lines = []
-            for i in range(5):  # 최대 5줄 샘플링
+            for _ in range(5):  # 최대 5줄 샘플링
                 line = text_stream.readline()
                 if not line:
                     break

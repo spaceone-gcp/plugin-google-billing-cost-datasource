@@ -18,9 +18,9 @@ except ImportError:
             return decorator
 
 
-from .manager.cost_manager import CostManager
-from .manager.data_source_manager import DataSourceManager
-from .manager.job_manager import JobManager
+from plugin.manager.cost_manager import CostManager
+from plugin.manager.data_source_manager import DataSourceManager
+from plugin.manager.job_manager import JobManager
 
 _LOGGER = logging.getLogger("spaceone")
 
