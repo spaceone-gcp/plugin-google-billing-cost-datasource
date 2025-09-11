@@ -725,6 +725,97 @@ class CostManager(BaseManager):
         # 기타 타입은 문자열로 변환
         return str(value)
 
+    def _convert_credits_to_json_array(self, value):
+        """credits 값을 JSON 배열로 안전하게 변환"""
+        import json
+
+        if value is None:
+            return []
+
+        try:
+            # pandas의 NaN 값 체크
+            import pandas as pd
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError):
+            pass
+
+        # 이미 리스트인 경우 그대로 반환
+        if isinstance(value, list):
+            return value
+
+        # BigQuery TO_JSON_STRING 결과인 JSON 문자열 처리
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return parsed
+                else:
+                    return [parsed]  # 단일 객체인 경우 배열로 감쌈
+            except (json.JSONDecodeError, ValueError):
+                return []  # 파싱 실패 시 빈 배열
+
+        # 기타 타입은 빈 배열 반환
+        return []
+
+    def _convert_tags_to_json_object(self, value):
+        """tags 값을 JSON 객체로 안전하게 변환 (Google Cloud labels 배열 처리)"""
+        import json
+
+
+        if value is None:
+            return {}
+
+        try:
+            # pandas의 NaN 값 체크
+            import pandas as pd
+            if pd.isna(value):
+                return {}
+        except (TypeError, ValueError):
+            pass
+
+        # 이미 딕셔너리인 경우 키를 snake_case로 변환하여 반환
+        if isinstance(value, dict):
+            result_dict = {}
+            for key, val in value.items():
+                snake_case_key = self._to_snake_case(key)
+                result_dict[snake_case_key] = val
+            return result_dict
+
+        # Google Cloud labels 배열인 경우 딕셔너리로 변환 (키를 snake_case로 변환)
+        if isinstance(value, list):
+            result_dict = {}
+            for item in value:
+                if isinstance(item, dict) and "key" in item and "value" in item:
+                    # 키를 snake_case로 변환
+                    snake_case_key = self._to_snake_case(item["key"])
+                    result_dict[snake_case_key] = item["value"]
+            return result_dict
+
+        # BigQuery TO_JSON_STRING 결과인 JSON 문자열 처리
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+                elif isinstance(parsed, list):
+                    # Google Cloud labels 배열인 경우 딕셔너리로 변환 (키를 snake_case로 변환)
+                    result_dict = {}
+                    for item in parsed:
+                        if isinstance(item, dict) and "key" in item and "value" in item:
+                            # 키를 snake_case로 변환
+                            snake_case_key = self._to_snake_case(item["key"])
+                            result_dict[snake_case_key] = item["value"]
+                    return result_dict
+                else:
+                    return {}
+            except (json.JSONDecodeError, ValueError):
+                return {}  # 파싱 실패 시 빈 객체
+
+        # 기타 타입은 빈 객체 반환
+        return {}
+
+
     def _convert_bigquery_row_to_dict(self, row):
         """BigQuery DataFrame row를 딕셔너리로 변환 (GCS 파서와 호환, 부동소수점 정밀도 개선 포함)"""
         row_dict = {}
@@ -764,73 +855,78 @@ class CostManager(BaseManager):
     def _create_spaceone_billing_data_from_bigquery(
         self, row_dict: dict, listed_price
     ) -> dict:
-        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
-        # 기본 비용 정보 (숫자 타입으로 처리)
+        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost, listed_price만 포함)"""
+        # 요청된 두 개 필드만 포함
         data_structure = {
-            "listed_price": self._convert_to_numeric(listed_price),
             "cost": self._convert_to_numeric(row_dict.get("cost", 0)),
+            "listed_price": self._convert_to_numeric(listed_price),
         }
 
-        # 추가 비용 정보 (BigQuery 특화)
-        cost_after_credits = row_dict.get("cost_after_credits")
-        if cost_after_credits is not None and cost_after_credits != "":
-            data_structure["cost_after_credits"] = self._convert_to_numeric(
-                cost_after_credits
-            )
-
-        # 환율 정보
-        currency_conversion_rate = row_dict.get("currency_conversion_rate")
-        if (
-            currency_conversion_rate is not None
-            and currency_conversion_rate != ""
-            and currency_conversion_rate != 1
-        ):
-            data_structure["currency_conversion_rate"] = self._convert_to_numeric(
-                currency_conversion_rate
-            )
-
-        # BigQuery 특화 추가 정보
-        cost_at_list = row_dict.get("cost_at_list")
-        if cost_at_list is not None and cost_at_list != "":
-            data_structure["cost_at_list"] = self._convert_to_numeric(cost_at_list)
-
-        # 사용량 및 가격 정보
-        usage_amount = row_dict.get("usage_amount_in_pricing_units") or row_dict.get(
-            "usage_quantity"
-        )
-        if usage_amount is not None and usage_amount != "":
-            data_structure["usage_amount_in_pricing_units"] = self._convert_to_numeric(
-                usage_amount
-            )
-
-        pricing_unit = row_dict.get("pricing_unit")
-        if pricing_unit is not None and pricing_unit != "":
-            data_structure["pricing_unit"] = self._convert_to_string(pricing_unit)
-
-        # 식별자 정보
-        billing_account_id = row_dict.get("billing_account_id")
-        if billing_account_id is not None and billing_account_id != "":
-            data_structure["billing_account_id"] = self._convert_to_string(
-                billing_account_id
-            )
-
-        project_id = row_dict.get("project_id") or row_dict.get("id")
-        if project_id is not None and project_id != "":
-            data_structure["project_id"] = self._convert_to_string(project_id)
-
-        service_description = row_dict.get("service_description") or row_dict.get(
-            "description"
-        )
-        if service_description is not None and service_description != "":
-            data_structure["service_description"] = self._convert_to_string(
-                service_description
-            )
-
-        sku_description = row_dict.get("sku_description")
-        if sku_description is not None and sku_description != "":
-            data_structure["sku_description"] = self._convert_to_string(sku_description)
-
         return self._ensure_spaceone_response_types(data_structure)
+
+    def _convert_keys_to_title_case(self, data: dict) -> dict:
+        """딕셔너리의 모든 키를 Title Case로 변환 (재귀적 처리)"""
+        if not isinstance(data, dict):
+            return data
+
+        result = {}
+        for key, value in data.items():
+            # 키를 Title Case로 변환
+            title_case_key = self._to_title_case(key)
+
+            # 값이 딕셔너리인 경우 재귀적으로 처리
+            if isinstance(value, dict):
+                result[title_case_key] = self._convert_keys_to_title_case(value)
+            # 값이 리스트인 경우 리스트 내 딕셔너리들도 처리
+            elif isinstance(value, list):
+                result[title_case_key] = self._convert_list_keys_to_title_case(value)
+            else:
+                result[title_case_key] = value
+
+        return result
+
+    def _convert_list_keys_to_title_case(self, data: list) -> list:
+        """리스트 내 딕셔너리들의 키를 Title Case로 변환"""
+        if not isinstance(data, list):
+            return data
+
+        result = []
+        for item in data:
+            if isinstance(item, dict):
+                result.append(self._convert_keys_to_title_case(item))
+            elif isinstance(item, list):
+                result.append(self._convert_list_keys_to_title_case(item))
+            else:
+                result.append(item)
+        return result
+
+    def _to_title_case(self, text: str) -> str:
+        """문자열을 Title Case로 변환 (특수 문자 처리 포함)"""
+        if not isinstance(text, str):
+            return str(text)
+
+        # 이미 Title Case인 경우 그대로 반환 (예: "Project ID", "SKU Description")
+        if text and text[0].isupper() and any(c.isupper() for c in text[1:]):
+            return text
+
+        # 하이픈이나 언더스코어로 구분된 단어들을 Title Case로 변환
+        # 예: "goog-gke-node" -> "Goog Gke Node"
+        if '-' in text or '_' in text:
+            # 하이픈과 언더스코어를 공백으로 치환하고 각 단어를 Title Case로
+            words = text.replace('-', ' ').replace('_', ' ').split()
+            return ' '.join(word.capitalize() for word in words)
+
+        # 일반적인 경우 첫 글자만 대문자로
+        return text.capitalize()
+
+    def _to_snake_case(self, text: str) -> str:
+        """문자열을 snake_case로 변환 (하이픈을 언더스코어로 변환)"""
+        if not isinstance(text, str):
+            return str(text)
+
+        # 하이픈을 언더스코어로 변환
+        # 예: "goog-gke-node" -> "goog_gke_node"
+        return text.replace('-', '_')
 
     def _ensure_spaceone_response_types(self, data):
         """SpaceONE 응답 형식에 맞게 데이터 타입을 보장 (Decimal -> float 변환)"""
@@ -942,7 +1038,7 @@ class CostManager(BaseManager):
                     "currency": self._convert_to_string(
                         getattr(row, "currency", "USD")
                     ),
-                    "additional_info": {
+                    "additional_info": self._convert_keys_to_title_case({
                         "Project ID": self._convert_to_string(getattr(row, "id", "")),
                         "Project Name": self._convert_to_string(
                             getattr(row, "project_name", getattr(row, "name", ""))
@@ -962,13 +1058,13 @@ class CostManager(BaseManager):
                         "Cost After Credits": self._convert_to_numeric(
                             getattr(row, "cost_after_credits", 0.0)
                         ),
-                        "Credits Detail": self._convert_to_string(
-                            getattr(row, "credits_detail", "[]")
+                        "Credits Detail": self._convert_credits_to_json_array(
+                            getattr(row, "credits_detail", [])
                         ),
-                        "Resource Tags": self._convert_to_string(
-                            getattr(row, "resource_tags", "{}")
+                        "Resource Tags": self._convert_tags_to_json_object(
+                            getattr(row, "resource_tags", [])
                         ),
-                    },
+                    }),
                     "tags": {},
                 }
 

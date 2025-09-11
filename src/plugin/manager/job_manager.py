@@ -1,12 +1,27 @@
 import logging
 from datetime import datetime, timedelta
 
-from spaceone.core.error import (
-    ERROR_INVALID_PARAMETER,
-    ERROR_INVALID_PARAMETER_TYPE,
-    ERROR_REQUIRED_PARAMETER,
-)
-from spaceone.core.manager import BaseManager
+# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
+try:
+    from spaceone.core.error import (
+        ERROR_INVALID_PARAMETER,
+        ERROR_INVALID_PARAMETER_TYPE,
+        ERROR_REQUIRED_PARAMETER,
+    )
+    from spaceone.core.manager import BaseManager
+except ImportError:
+    # Mock for local development
+    class MockError:
+        def __call__(self, *args, **kwargs):
+            return Exception("Mock SpaceONE Error")
+
+    ERROR_INVALID_PARAMETER = MockError()
+    ERROR_INVALID_PARAMETER_TYPE = MockError()
+    ERROR_REQUIRED_PARAMETER = MockError()
+
+    class BaseManager:
+        """Mock BaseManager for local development"""
+        pass
 
 from ..conf.cost_conf import (
     BIGQUERY_TABLE_PREFIX,

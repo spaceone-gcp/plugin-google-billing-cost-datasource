@@ -1,6 +1,13 @@
 import logging
 
-from spaceone.core.manager import BaseManager
+# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
+try:
+    from spaceone.core.manager import BaseManager
+except ImportError:
+    # Mock for local development
+    class BaseManager:
+        """Mock BaseManager for local development"""
+        pass
 
 from ..connector.bigquery_connector import BigqueryConnector
 

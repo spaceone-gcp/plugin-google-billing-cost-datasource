@@ -69,9 +69,29 @@ class FieldMapper:
             # 디버깅 로깅 (첫 번째 레코드만)
             self._log_debug_info_once(source_data)
 
+            # 🚨 DEBUG: 특정 필드들의 존재 여부 확인 (단순화)
+            if not hasattr(self, "_debug_once_done"):
+                _LOGGER.error(
+                    f"[DEBUG] Sample source_data keys: {list(source_data.keys())[:20]}"
+                )
+                for key in ["adjustment_info", "project_ancestry_numbers"]:
+                    if key in source_data:
+                        _LOGGER.error(f"[DEBUG] Found {key}: {source_data[key]}")
+                # project 중첩 구조 확인
+                if "project" in source_data:
+                    project_data = source_data["project"]
+                    if (
+                        isinstance(project_data, dict)
+                        and "ancestry_numbers" in project_data
+                    ):
+                        _LOGGER.error(
+                            f"[DEBUG] Found project.ancestry_numbers: {project_data['ancestry_numbers']}"
+                        )
+                self._debug_once_done = True
+
             # 기본 필드 매핑
             cost_value = self._get_cost_by_option(source_data)
-            usage_quantity_value = self._map_field("usage_quantity", source_data, 0)
+            usage_quantity_value = source_data.get("usage_quantity", 0)
             billed_date_value = self._process_billed_date(source_data)
 
             # additional_info 필드 병합 처리
@@ -84,9 +104,9 @@ class FieldMapper:
             mapped_data = {
                 "cost": cost_value,
                 "usage_quantity": usage_quantity_value,
-                "usage_unit": self._map_field("usage_unit", source_data, ""),
+                "usage_unit": source_data.get("usage_unit", ""),
                 "provider": self.provider,
-                "region_code": self._map_field("region_code", source_data, "global"),
+                "region_code": source_data.get("region_code", "global"),
                 "product": mapped_fields["product"],
                 "usage_type": mapped_fields["usage_type"],
                 "resource": mapped_fields["resource"],
@@ -95,11 +115,38 @@ class FieldMapper:
                 "additional_info": final_additional_info,
             }
 
-            # 최종 후처리
-            finalized_data = self._finalize_mapped_data(mapped_data, source_data)
-
             # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - Decimal을 float로 변환
-            return self._ensure_spaceone_response_types(finalized_data)
+            result = self._ensure_spaceone_response_types(mapped_data)
+
+            # 🚨 CRITICAL: Project Ancestry Numbers 후처리 (배열 형식으로 변환)
+            if "additional_info" in result and isinstance(
+                result["additional_info"], dict
+            ):
+                if "Project Ancestry Numbers" in result["additional_info"]:
+                    ancestry_value = result["additional_info"][
+                        "Project Ancestry Numbers"
+                    ]
+                    if (
+                        isinstance(ancestry_value, str)
+                        and ancestry_value.startswith("/")
+                        and ancestry_value.endswith("/")
+                    ):
+                        # "/219641957767/" -> ["219641957767"]
+                        import json
+
+                        parts = [
+                            part.strip()
+                            for part in ancestry_value.split("/")
+                            if part.strip()
+                        ]
+                        result["additional_info"]["Project Ancestry Numbers"] = (
+                            json.dumps(parts)
+                        )
+                        _LOGGER.error(
+                            f"[DEBUG] Post-processed Project Ancestry Numbers: {result['additional_info']['Project Ancestry Numbers']}"
+                        )
+
+            return result
 
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
@@ -162,7 +209,7 @@ class FieldMapper:
             precision = 12
 
         # 지정된 정밀도로 반올림
-        quantize_exp = Decimal('0.1') ** precision
+        quantize_exp = Decimal("0.1") ** precision
         rounded_decimal = decimal_value.quantize(quantize_exp, rounding=ROUND_HALF_UP)
 
         # float로 변환
@@ -215,20 +262,156 @@ class FieldMapper:
 
         return billed_date_value
 
+    def _get_nested_value(self, data: dict, path: str, default=""):
+        """중첩된 딕셔너리에서 점 표기법으로 값 추출"""
+        try:
+            if not path:
+                return default
+
+            # 점으로 구분된 경로를 분할
+            keys = path.split(".")
+            current = data
+
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    return default
+
+            return current if current is not None else default
+        except Exception:
+            return default
+
     def _merge_additional_info(self, source_data: dict) -> dict:
         """additional_info 필드 병합 처리"""
-        mapped_additional_info = self._map_field("additional_info", source_data, {})
-        existing_additional_info = source_data.get("additional_info", {})
+        # 기본 additional_info 매핑 수행
+        try:
+            # 기존 additional_info 가져오기
+            existing_additional_info = source_data.get("additional_info", {})
+            if not isinstance(existing_additional_info, dict):
+                existing_additional_info = {}
 
-        # 기존 additional_info와 매핑된 additional_info 병합
-        # 매핑된 값이 우선순위를 가짐
-        final_additional_info = {}
-        if isinstance(existing_additional_info, dict):
+            # 매핑 규칙에서 additional_info 생성
+            mapping_rules = self._get_default_mapping(self.provider).get(
+                "additional_info", {}
+            )
+            mapped_additional_info = {}
+
+            for key, rule in mapping_rules.items():
+                try:
+                    if isinstance(rule, str):
+                        # 단순 문자열 매핑
+                        value = self._get_nested_value(source_data, rule, "")
+                        if value is not None and value != "":
+                            mapped_additional_info[key] = str(value)
+                    elif isinstance(rule, dict):
+                        # 복잡한 매핑 규칙
+                        field_path = rule.get("field", "")
+                        fallback_path = rule.get("fallback", "")
+                        transform = rule.get("transform", "")
+
+                        value = ""
+                        if field_path:
+                            value = self._get_nested_value(source_data, field_path, "")
+                        if not value and fallback_path:
+                            value = self._get_nested_value(
+                                source_data, fallback_path, ""
+                            )
+
+                        if value is not None and value != "":
+                            # transform 적용
+                            if transform:
+                                transformed_value = self._apply_transform(
+                                    value, transform
+                                )
+                                # transform 결과가 dict나 list인 경우 그대로 저장, 아니면 문자열로 변환
+                                if isinstance(transformed_value, (dict, list)):
+                                    mapped_additional_info[key] = transformed_value
+                                else:
+                                    mapped_additional_info[key] = str(transformed_value)
+                            else:
+                                mapped_additional_info[key] = str(value)
+                except Exception as e:
+                    _LOGGER.warning(
+                        f"[FieldMapper] Failed to map additional_info field {key}: {e}"
+                    )
+                    continue
+
+            # 기존과 매핑된 정보 병합
+            final_additional_info = {}
             final_additional_info.update(existing_additional_info)
-        if isinstance(mapped_additional_info, dict):
             final_additional_info.update(mapped_additional_info)
 
-        return final_additional_info
+            # dict 타입 보장
+            if not isinstance(final_additional_info, dict):
+                _LOGGER.warning(
+                    f"[FieldMapper] additional_info is not dict: {type(final_additional_info)}"
+                )
+                return {}
+
+            # 모든 키를 Title Case로 변환
+            title_case_additional_info = self._convert_keys_to_title_case(final_additional_info)
+
+            return title_case_additional_info
+
+        except Exception as e:
+            _LOGGER.error(f"[FieldMapper] Error in _merge_additional_info: {e}")
+            return {}
+
+    def _merge_additional_info_temp_fix(self, source_data: dict) -> dict:
+        """임시 수정: additional_info를 빈 dict로 반환"""
+        return {}
+
+    def _map_additional_info_with_title_case(self, source_data: dict) -> dict:
+        """additional_info 매핑 시 Title Case 키 유지"""
+        additional_info_config = self.compiled_mappings.get("additional_info")
+        if not additional_info_config:
+            return {}
+
+        result = {}
+
+        # additional_info 매핑 규칙에서 직접 처리
+        mapping_rules = self._get_default_mapping(self.provider).get(
+            "additional_info", {}
+        )
+
+        for title_case_key, mapping_rule in mapping_rules.items():
+            try:
+                if isinstance(mapping_rule, str):
+                    # 단순 문자열 매핑: "Project ID": "Project ID" 형태
+                    if mapping_rule == title_case_key:
+                        # Title Case 키 유지
+                        value = self._get_nested_value(source_data, mapping_rule, "")
+                        if value is not None and value != "":
+                            result[title_case_key] = value
+                    else:
+                        # snake_case -> Title Case 변환
+                        value = self._get_nested_value(source_data, mapping_rule, "")
+                        if value is not None and value != "":
+                            result[title_case_key] = value
+
+                elif isinstance(mapping_rule, dict):
+                    # 복잡한 매핑 규칙
+                    output_key = mapping_rule.get("output_key", title_case_key)
+                    field_path = mapping_rule.get("field")
+                    fallback_path = mapping_rule.get("fallback")
+
+                    value = ""
+                    if field_path:
+                        value = self._get_nested_value(source_data, field_path, "")
+                    if not value and fallback_path:
+                        value = self._get_nested_value(source_data, fallback_path, "")
+
+                    if value is not None and value != "":
+                        result[output_key] = value
+
+            except Exception as e:
+                _LOGGER.warning(
+                    f"[FieldMapper] Failed to map additional_info field {title_case_key}: {e}"
+                )
+                continue
+
+        return result
 
     def _map_core_fields(self, source_data: dict) -> dict:
         """핵심 필드들 매핑"""
@@ -350,17 +533,12 @@ class FieldMapper:
     def _create_spaceone_billing_data(
         self, source_data: dict, mapped_data: dict, listed_price
     ) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
-        # 기본 비용 정보 (숫자 타입으로 처리)
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost, listed_price만 포함)"""
+        # 요청된 두 개 필드만 포함
         data_structure = {
-            "listed_price": self._convert_to_numeric(listed_price),
             "cost": self._convert_to_numeric(mapped_data.get("cost", 0)),
+            "listed_price": self._convert_to_numeric(listed_price),
         }
-
-        # 추가 정보 수집
-        self._add_billing_cost_info(data_structure, source_data)
-        self._add_usage_and_price_info(data_structure, source_data)
-        self._add_identifier_info(data_structure, source_data)
 
         # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - data 필드도 Decimal을 float로 변환
         return self._ensure_spaceone_response_types(data_structure)
@@ -641,9 +819,13 @@ class FieldMapper:
         """tags 필드 특별 처리 - Google Cloud labels 배열을 딕셔너리로 변환"""
         tags_value = self._map_field("tags", source_data, {})
 
-        # 이미 딕셔너리인 경우 그대로 반환
+        # 이미 딕셔너리인 경우 키를 snake_case로 변환하여 반환
         if isinstance(tags_value, dict):
-            return tags_value
+            result_dict = {}
+            for key, val in tags_value.items():
+                snake_case_key = self._to_snake_case(key)
+                result_dict[snake_case_key] = val
+            return result_dict
 
         # Google Cloud labels 배열 형태 처리
         if isinstance(tags_value, list):
@@ -657,12 +839,18 @@ class FieldMapper:
         return {}
 
     def _process_labels_array(self, labels_array: list) -> dict:
-        """Google Cloud labels 배열을 딕셔너리로 변환"""
+        """Google Cloud labels 배열을 딕셔너리로 변환 (null 값을 빈 문자열로 처리, 키를 snake_case로 변환)"""
         try:
             result_dict = {}
             for item in labels_array:
                 if isinstance(item, dict) and "key" in item and "value" in item:
-                    result_dict[item["key"]] = item["value"]
+                    # 키를 snake_case로 변환
+                    snake_case_key = self._to_snake_case(item["key"])
+                    # null 값을 빈 문자열로 변환
+                    value = item["value"]
+                    if value is None:
+                        value = ""
+                    result_dict[snake_case_key] = value
             return result_dict
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Failed to process labels array: {e}")
@@ -1143,6 +1331,10 @@ class FieldMapper:
                 return self._format_date(value)
             elif transform == "json_parse":
                 return self._apply_json_parse_transform(value)
+            elif transform == "json_parse_array":
+                return self._apply_json_parse_array_transform(value)
+            elif transform == "array_parse":
+                return self._apply_array_parse_transform(value)
             else:
                 _LOGGER.warning(f"[FieldMapper] Unknown transform: {transform}")
                 return value
@@ -1152,11 +1344,19 @@ class FieldMapper:
             return value
 
     def _apply_json_parse_transform(self, value: Any) -> dict:
-        """JSON 파싱 변환 적용"""
+        """JSON 파싱 변환 적용 - Google Cloud labels 배열 지원 (null 값을 빈 문자열로 처리)"""
         import json
 
         if not value:
             return {}
+
+        # 이미 딕셔너리인 경우 null 값을 빈 문자열로 변환하여 반환
+        if isinstance(value, dict):
+            return self._convert_dict_nulls_to_empty_strings(value)
+
+        # Google Cloud labels 배열인 경우 직접 처리
+        if isinstance(value, list):
+            return self._process_labels_array(value)
 
         # 문자열로 변환
         json_str = str(value).strip()
@@ -1165,17 +1365,87 @@ class FieldMapper:
         if not json_str or json_str.lower() in ("none", "null", ""):
             return {}
 
-        # 이미 딕셔너리인 경우 그대로 반환
-        if isinstance(value, dict):
-            return value
+        # JSON 파싱 시도
+        try:
+            parsed = json.loads(json_str)
+
+            # 파싱된 결과가 딕셔너리인 경우 null 값을 빈 문자열로 변환하여 반환
+            if isinstance(parsed, dict):
+                return self._convert_dict_nulls_to_empty_strings(parsed)
+
+            # 파싱된 결과가 Google Cloud labels 배열인 경우 처리
+            elif isinstance(parsed, list):
+                return self._process_labels_array(parsed)
+
+            # 기타 타입인 경우 빈 딕셔너리 반환
+            else:
+                return {}
+        except (json.JSONDecodeError, ValueError):
+            return self._parse_json_fallback(json_str)
+
+    def _apply_json_parse_array_transform(self, value: Any) -> list:
+        """JSON 배열 파싱 변환 적용 - Credits Detail 등을 위한 배열 반환 (null 값을 빈 문자열로 처리)"""
+        import json
+
+        if not value:
+            return []
+
+        # 이미 리스트인 경우 null 값을 빈 문자열로 변환하여 반환
+        if isinstance(value, list):
+            return self._convert_list_nulls_to_empty_strings(value)
+
+        # 문자열로 변환
+        json_str = str(value).strip()
+
+        # 빈 문자열이거나 None인 경우
+        if not json_str or json_str.lower() in ("none", "null", ""):
+            return []
 
         # JSON 파싱 시도
         try:
             parsed = json.loads(json_str)
-            # 파싱된 결과가 딕셔너리가 아닌 경우 빈 딕셔너리 반환
-            return parsed if isinstance(parsed, dict) else {}
+            # 파싱된 결과가 배열인 경우 null 값을 빈 문자열로 변환하여 반환
+            if isinstance(parsed, list):
+                return self._convert_list_nulls_to_empty_strings(parsed)
+            # 파싱된 결과가 단일 객체인 경우 배열로 감싸서 반환
+            else:
+                if parsed is None:
+                    return [""]
+                return [parsed]
         except (json.JSONDecodeError, ValueError):
-            return self._parse_json_fallback(json_str)
+            # 파싱 실패 시 빈 배열 반환
+            return []
+
+    def _apply_array_parse_transform(self, value: Any) -> list:
+        """배열 파싱 변환 적용"""
+        if not value:
+            return []
+
+        # 이미 리스트인 경우 그대로 반환
+        if isinstance(value, list):
+            return value
+
+        # 문자열 처리
+        str_value = str(value).strip()
+        if not str_value or str_value.lower() in ("none", "null", ""):
+            return []
+
+        try:
+            # 슬래시로 구분된 문자열에서 빈 문자열 제거 (예: "/219641957767/" -> ["219641957767"])
+            if str_value.startswith("/") and str_value.endswith("/"):
+                array_items = [
+                    item.strip() for item in str_value.split("/") if item.strip()
+                ]
+                return array_items
+
+            # JSON 배열 파싱 시도
+            import json
+
+            parsed = json.loads(str_value)
+            return parsed if isinstance(parsed, list) else [str(parsed)]
+        except (json.JSONDecodeError, ValueError):
+            # 파싱 실패 시 단일 항목 배열로 반환
+            return [str_value]
 
     def _parse_json_fallback(self, json_str: str) -> dict:
         """JSON 파싱 실패 시 대안 처리"""
@@ -1192,6 +1462,104 @@ class FieldMapper:
             except Exception:
                 return {}
         return {}
+
+    def _convert_dict_nulls_to_empty_strings(self, data: dict) -> dict:
+        """딕셔너리 내의 null 값을 빈 문자열로 변환"""
+        if not isinstance(data, dict):
+            return data
+
+        result = {}
+        for key, value in data.items():
+            if value is None:
+                result[key] = ""
+            elif isinstance(value, dict):
+                result[key] = self._convert_dict_nulls_to_empty_strings(value)
+            elif isinstance(value, list):
+                result[key] = self._convert_list_nulls_to_empty_strings(value)
+            else:
+                result[key] = value
+        return result
+
+    def _convert_list_nulls_to_empty_strings(self, data: list) -> list:
+        """리스트 내의 null 값을 빈 문자열로 변환"""
+        if not isinstance(data, list):
+            return data
+
+        result = []
+        for item in data:
+            if item is None:
+                result.append("")
+            elif isinstance(item, dict):
+                result.append(self._convert_dict_nulls_to_empty_strings(item))
+            elif isinstance(item, list):
+                result.append(self._convert_list_nulls_to_empty_strings(item))
+            else:
+                result.append(item)
+        return result
+
+    def _convert_keys_to_title_case(self, data: dict) -> dict:
+        """딕셔너리의 모든 키를 Title Case로 변환 (재귀적 처리)"""
+        if not isinstance(data, dict):
+            return data
+
+        result = {}
+        for key, value in data.items():
+            # 키를 Title Case로 변환
+            title_case_key = self._to_title_case(key)
+
+            # 값이 딕셔너리인 경우 재귀적으로 처리
+            if isinstance(value, dict):
+                result[title_case_key] = self._convert_keys_to_title_case(value)
+            # 값이 리스트인 경우 리스트 내 딕셔너리들도 처리
+            elif isinstance(value, list):
+                result[title_case_key] = self._convert_list_keys_to_title_case(value)
+            else:
+                result[title_case_key] = value
+
+        return result
+
+    def _convert_list_keys_to_title_case(self, data: list) -> list:
+        """리스트 내 딕셔너리들의 키를 Title Case로 변환"""
+        if not isinstance(data, list):
+            return data
+
+        result = []
+        for item in data:
+            if isinstance(item, dict):
+                result.append(self._convert_keys_to_title_case(item))
+            elif isinstance(item, list):
+                result.append(self._convert_list_keys_to_title_case(item))
+            else:
+                result.append(item)
+        return result
+
+    def _to_title_case(self, text: str) -> str:
+        """문자열을 Title Case로 변환 (특수 문자 처리 포함)"""
+        if not isinstance(text, str):
+            return str(text)
+
+        # 이미 Title Case인 경우 그대로 반환 (예: "Project ID", "SKU Description")
+        if text and text[0].isupper() and any(c.isupper() for c in text[1:]):
+            return text
+
+        # 하이픈이나 언더스코어로 구분된 단어들을 Title Case로 변환
+        # 예: "goog-gke-node" -> "Goog Gke Node"
+        if '-' in text or '_' in text:
+            # 하이픈과 언더스코어를 공백으로 치환하고 각 단어를 Title Case로
+            words = text.replace('-', ' ').replace('_', ' ').split()
+            return ' '.join(word.capitalize() for word in words)
+
+        # 일반적인 경우 첫 글자만 대문자로
+        return text.capitalize()
+
+    def _to_snake_case(self, text: str) -> str:
+        """문자열을 snake_case로 변환 (하이픈을 언더스코어로 변환)"""
+        if not isinstance(text, str):
+            return str(text)
+
+        # 하이픈을 언더스코어로 변환
+        # 예: "goog-gke-node" -> "goog_gke_node"
+        return text.replace('-', '_')
 
     def _evaluate_expression(self, expression: str, data: dict) -> Any:
         """간단한 표현식 평가 (보안상 제한적으로 구현)"""
@@ -1400,61 +1768,76 @@ class FieldMapper:
                 },
                 "tags": {"field": "labels", "transform": "json_parse"},
                 "additional_info": {
-                    # 💰 비용 관련 필드들 (BigQuery 스타일)
-                    "Cost At List": "cost_at_list",
-                    "Cost After Credits": "cost_after_credits",
-                    "Cost At Effective Price Default": "cost_at_effective_price_default",
-                    "Cost At List Consumption Model": "cost_at_list_consumption_model",
-                    "Credits Amount": "credits_amount",  # AmortizedCost용
-                    "Credits Detail": {"field": "credits", "transform": "json_parse"},
-                    "Currency Conversion Rate": "currency_conversion_rate",
-                    # 🏢 계정 및 청구 정보
-                    "Billing Account ID": "billing_account_id",
+                    # 💰 비용 관련 필드들 (BigQuery 스타일) - Title Case 유지
+                    "Cost At List": "Cost At List",
+                    "Cost After Credits": "Cost After Credits",
+                    "Cost At Effective Price Default": "Cost At Effective Price Default",
+                    "Cost At List Consumption Model": "Cost At List Consumption Model",
+                    "Credits Amount": "Credits Amount",  # AmortizedCost용
+                    "Credits Detail": {
+                        "field": "credits",
+                        "transform": "json_parse_array",
+                        "output_key": "Credits Detail",
+                    },
+                    "Currency Conversion Rate": "Currency Conversion Rate",
+                    # 🏢 계정 및 청구 정보 - Title Case 유지
+                    "Billing Account ID": "Billing Account ID",
                     "Invoice Month": {
                         "field": "invoice.month",
                         "fallback": "invoice_month",
+                        "output_key": "Invoice Month",
                     },
                     "Invoice Publisher Type": {
                         "field": "invoice.publisher_type",
                         "fallback": "invoice_publisher_type",
+                        "output_key": "Invoice Publisher Type",
                     },
-                    "Cost Type": "cost_type",
-                    "Transaction Type": "transaction_type",
-                    "Seller Name": "seller_name",
-                    # 🏗️ 프로젝트 정보 (BigQuery 중첩 구조)
+                    "Cost Type": "Cost Type",
+                    "Transaction Type": "Transaction Type",
+                    "Seller Name": "Seller Name",
+                    # 🏗️ 프로젝트 정보 (BigQuery 중첩 구조) - Title Case 유지
                     "Project ID": {
                         "field": "project.id",
                         "fallback": "project_id",
+                        "output_key": "Project ID",
                     },
                     "Project Name": {
                         "field": "project.name",
                         "fallback": "project_name",
+                        "output_key": "Project Name",
                     },
                     "Project Number": {
                         "field": "project.number",
                         "fallback": "project_number",
+                        "output_key": "Project Number",
                     },
                     "Project Ancestry Numbers": {
                         "field": "project.ancestry_numbers",
                         "fallback": "project_ancestry_numbers",
+                        "transform": "array_parse",
+                        "output_key": "Project Ancestry Numbers",
                     },
-                    # 🔧 서비스 정보 (BigQuery 중첩 구조)
+                    # 🔧 서비스 정보 (BigQuery 중첩 구조) - Title Case 유지
                     "Service ID": {
                         "field": "service.id",
                         "fallback": "service_id",
+                        "output_key": "Service ID",
                     },
                     "Service Description": {
                         "field": "service.description",
                         "fallback": "service_description",
+                        "output_key": "Service Description",
                     },
-                    # 📦 SKU 정보 (BigQuery 중첩 구조)
+                    # 📦 SKU 정보 (BigQuery 중첩 구조) - Title Case 유지
                     "SKU ID": {
                         "field": "sku.id",
                         "fallback": "sku_id",
+                        "output_key": "SKU ID",
                     },
                     "SKU Description": {
                         "field": "sku.description",
                         "fallback": "sku_description",
+                        "output_key": "SKU Description",
                     },
                     # 🌍 위치 정보 (BigQuery 중첩 구조)
                     "Location": {
