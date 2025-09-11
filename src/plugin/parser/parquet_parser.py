@@ -56,56 +56,10 @@ class ParquetParser(BaseParser):
             for batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=columns, use_pandas_metadata=True
             ):
-                try:
-                    # PyArrow Table을 Pandas DataFrame으로 변환
-                    df = batch.to_pandas()
-
-                    batch_records = []
-                    for _, row in df.iterrows():
-                        try:
-                            # Series를 dict로 변환
-                            row_dict = row.to_dict()
-
-                            # NaN 값을 None으로 변환
-                            row_dict = self._clean_nan_values(row_dict)
-
-                            mapped_record = field_mapper.map_record(row_dict)
-
-                            # 🚨 CRITICAL: 매핑 후 data 필드 확인 및 강제 제거
-                            if processed_count < 3:
-                                if "data" in mapped_record:
-                                    del mapped_record["data"]
-
-                            # 🚨 FINAL EMERGENCY: SpaceONE 프레임워크 호환성을 위해 data 필드 보장
-                            if "data" not in mapped_record or not isinstance(
-                                mapped_record["data"], dict
-                            ):
-                                mapped_record["data"] = {}
-                            batch_records.append(mapped_record)
-                            processed_count += 1
-
-                        except Exception as e:
-                            _LOGGER.warning(
-                                f"[ParquetParser] Failed to process row {processed_count + 1}: {e}"
-                            )
-                            continue
-
-                    # 배치 결과 yield
-                    if batch_records:
-                        # 페이징 단위 처리 로깅
-                        self._log_batch_processing(
-                            len(batch_records), processed_count, "parquet_stream"
-                        )
-                        # 동적 청크 크기 조정
-                        self._adjust_chunk_size_dynamically(
-                            len(batch_records), batch_records
-                        )
-                        yield self._create_batch_result(batch_records)
-                        self._log_parsing_progress(processed_count, "parquet_stream")
-
-                except Exception as e:
-                    _LOGGER.error(f"[ParquetParser] Failed to process batch: {e}")
-                    continue
+                batch_result = self._process_parquet_batch(batch, field_mapper, processed_count)
+                if batch_result:
+                    processed_count += len(batch_result["results"])
+                    yield batch_result
 
         except Exception as e:
             _LOGGER.error(f"[ParquetParser] Failed to parse Parquet stream: {e}")
@@ -113,65 +67,261 @@ class ParquetParser(BaseParser):
                 file_path="parquet_stream", reason=str(e)
             ) from e
 
+    def _process_parquet_batch(self, batch, field_mapper, processed_count):
+        """Parquet 배치를 처리하여 매핑된 레코드 반환"""
+        try:
+            # PyArrow Table을 Pandas DataFrame으로 변환
+            df = batch.to_pandas()
+
+            batch_records = []
+            current_count = processed_count
+
+            for _, row in df.iterrows():
+                try:
+                    # Series를 dict로 변환
+                    row_dict = row.to_dict()
+
+                    # NaN 값을 None으로 변환
+                    row_dict = self._clean_nan_values(row_dict)
+
+                    mapped_record = field_mapper.map_record(row_dict)
+
+                    # 🚨 CRITICAL: 매핑 후 data 필드 확인 및 강제 제거
+                    if current_count < 3:
+                        if "data" in mapped_record:
+                            del mapped_record["data"]
+
+                    # 🚨 FINAL EMERGENCY: SpaceONE 프레임워크 호환성을 위해 data 필드 보장
+                    if "data" not in mapped_record or not isinstance(
+                        mapped_record["data"], dict
+                    ):
+                        mapped_record["data"] = {}
+                    batch_records.append(mapped_record)
+                    current_count += 1
+
+                except Exception as e:
+                    _LOGGER.warning(
+                        f"[ParquetParser] Failed to process row {current_count + 1}: {e}"
+                    )
+                    continue
+
+            # 배치 결과 생성
+            if batch_records:
+                # 페이징 단위 처리 로깅
+                self._log_batch_processing(
+                    len(batch_records), current_count, "parquet_stream"
+                )
+                # 동적 청크 크기 조정
+                self._adjust_chunk_size_dynamically(
+                    len(batch_records), batch_records
+                )
+                self._log_parsing_progress(current_count, "parquet_stream")
+                return self._create_batch_result(batch_records)
+
+            return None
+
+        except Exception as e:
+            _LOGGER.error(f"[ParquetParser] Failed to process batch: {e}")
+            return None
+
     def _clean_nan_values(self, row_dict: dict) -> dict:
-        """NaN 값을 적절한 기본값으로 변환"""
+        """NaN 값을 적절한 기본값으로 변환 (BigQuery 커넥터와 동일한 로직 적용)"""
+
         import pandas as pd
 
         cleaned_dict = {}
+
+        # SpaceONE 빌링 필수 필드들의 데이터 타입 정의
+        cost_fields = ['cost', 'cost_at_list', 'cost_after_credits', 'usage_amount',
+                      'usage_amount_in_pricing_units', 'currency_conversion_rate']
+        date_fields = ['usage_start_time', 'usage_end_time', 'export_time']
+        string_fields = ['billing_account_id', 'project_id', 'project_name', 'service_description',
+                        'sku_description', 'location_region', 'location_zone', 'currency', 'invoice_month']
+        nested_fields = ['project', 'service', 'sku', 'location', 'usage', 'labels', 'credits', 'invoice', 'price']
+
+        field_types = {
+            'cost_fields': cost_fields,
+            'date_fields': date_fields,
+            'string_fields': string_fields,
+            'nested_fields': nested_fields
+        }
+
         for key, value in row_dict.items():
-            try:
-                # numpy 배열인 경우 처리
-                if hasattr(value, "__array__") and hasattr(value, "size"):
-                    if value.size == 0:  # 빈 배열
-                        cleaned_dict[key] = ""
-                        continue
-                    elif value.size == 1:  # 단일 값 배열
-                        value = value.item()  # 스칼라 값으로 변환
-                    else:  # 다중 값 배열
-                        cleaned_dict[key] = str(
-                            value.tolist()
-                        )  # 리스트로 변환 후 문자열화
-                        continue
-
-                # pandas의 isna 함수로 NaN 값 체크
-                if pd.isna(value):
-                    # 타입에 따라 적절한 기본값 설정
-                    if isinstance(value, (int, float)) or key.lower() in [
-                        "cost",
-                        "usage_quantity",
-                        "amount",
-                    ]:
-                        cleaned_dict[key] = 0
-                    else:
-                        cleaned_dict[key] = ""
-                else:
-                    # 딕셔너리나 리스트 같은 복합 타입은 그대로 유지
-                    if isinstance(value, (dict, list)):
-                        cleaned_dict[key] = value
-                    else:
-                        cleaned_dict[key] = value
-
-            except Exception:
-                # 예외 발생 시 기본값으로 처리
-                pass
-                # 중첩 구조 필드들은 빈 문자열로 변환하지 않음
-                if key in [
-                    "project",
-                    "service",
-                    "sku",
-                    "location",
-                    "usage",
-                    "labels",
-                    "credits",
-                    "invoice",
-                ]:
-                    cleaned_dict[key] = value  # 원본 값 유지
-                elif key.lower() in ["cost", "usage_quantity", "amount"]:
-                    cleaned_dict[key] = 0
-                else:
-                    cleaned_dict[key] = ""
+            cleaned_dict[key] = self._process_field_value(key, value, field_types, pd)
 
         return cleaned_dict
+
+    def _process_field_value(self, key, value, field_types, pd):
+        """단일 필드 값을 처리"""
+        try:
+            # numpy 배열인 경우 처리
+            array_result = self._handle_numpy_array(key, value, field_types)
+            if array_result is not None:
+                return array_result
+
+            # pandas의 isna 함수로 NaN 값 체크
+            if pd.isna(value):
+                return self._get_nan_default_value(key, field_types)
+            else:
+                return self._convert_by_field_type(key, value, field_types)
+
+        except Exception:
+            return self._get_exception_fallback_value(key, value, field_types)
+
+    def _handle_numpy_array(self, key, value, field_types):
+        """numpy 배열 처리"""
+        if not (hasattr(value, "__array__") and hasattr(value, "size")):
+            return None
+
+        if value.size == 0:  # 빈 배열
+            return [] if key in field_types['nested_fields'] else ""
+        elif value.size == 1:  # 단일 값 배열
+            return value.item()  # 스칼라 값으로 변환
+        else:  # 다중 값 배열
+            return value.tolist()  # 리스트로 변환
+
+    def _get_nan_default_value(self, key, field_types):
+        """NaN 값에 대한 기본값 반환"""
+        if key in field_types['cost_fields'] or any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate']):
+            return 0.0
+        elif key in field_types['nested_fields']:
+            return {} if key in ['project', 'service', 'sku', 'location', 'usage', 'invoice', 'price'] else []
+        else:
+            return ""
+
+    def _convert_by_field_type(self, key, value, field_types):
+        """필드 타입에 따라 값 변환"""
+        # 비용 관련 필드를 숫자로 변환
+        if key in field_types['cost_fields'] or any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate']):
+            return self._convert_to_numeric_safe(value)
+
+        # 날짜/시간 필드를 문자열로 변환
+        elif key in field_types['date_fields'] or any(field in key.lower() for field in ['time', 'date']):
+            return self._convert_to_datetime_string(value, key)
+
+        # 문자열 필드 처리
+        elif key in field_types['string_fields'] or any(field in key.lower() for field in ['id', 'name', 'description', 'type']):
+            return self._convert_to_string_safe(value)
+
+        # 중첩 구조 필드 처리
+        elif key in field_types['nested_fields']:
+            return self._normalize_nested_structure_parquet(value)
+
+        # 기타 필드
+        else:
+            return value
+
+    def _get_exception_fallback_value(self, key, value, field_types):
+        """예외 발생 시 안전한 기본값 반환"""
+        if key in field_types['cost_fields'] or key.lower() in ["cost", "usage_quantity", "amount"]:
+            return 0.0
+        elif key in field_types['nested_fields']:
+            return {} if key in ['project', 'service', 'sku', 'location', 'usage', 'invoice', 'price'] else []
+        else:
+            return str(value) if value is not None else ""
+
+    def _convert_to_numeric_safe(self, value):
+        """값을 안전하게 숫자로 변환"""
+        if value is None or value == "":
+            return 0.0
+
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+
+            if isinstance(value, str):
+                cleaned_value = value.strip()
+                if not cleaned_value or cleaned_value.lower() == 'nan':
+                    return 0.0
+                return float(cleaned_value)
+
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _convert_to_string_safe(self, value):
+        """값을 안전하게 문자열로 변환"""
+        if value is None:
+            return ""
+
+        if isinstance(value, str):
+            return value.replace('nan', '') if value == 'nan' else value
+
+        return str(value)
+
+    def _convert_to_datetime_string(self, value, field_name):
+        """날짜/시간 값을 SpaceONE 표준 문자열 형식으로 변환"""
+        if value is None or value == "":
+            return ""
+
+        try:
+            import pandas as pd
+
+            # 이미 문자열인 경우
+            if isinstance(value, str):
+                return value
+
+            # pandas Timestamp인 경우
+            if isinstance(value, pd.Timestamp):
+                if 'time' in field_name.lower():
+                    return value.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    return value.strftime('%Y-%m-%d')
+
+            # 기타 datetime 객체
+            from datetime import date, datetime
+            if isinstance(value, (datetime, date)):
+                if 'time' in field_name.lower():
+                    return value.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    return value.strftime('%Y-%m-%d')
+
+            # 기타 타입은 문자열로 변환
+            return str(value)
+
+        except Exception:
+            return str(value) if value is not None else ""
+
+    def _normalize_nested_structure_parquet(self, value):
+        """Parquet의 중첩 구조를 SpaceONE 호환 형태로 변환 (BigQuery와 동일한 로직)"""
+        import json
+
+        if value is None:
+            return {}
+
+        try:
+            # 이미 딕셔너리나 리스트인 경우
+            if isinstance(value, (dict, list)):
+                return value
+
+            # pandas의 NaN 체크
+            import pandas as pd
+            if pd.isna(value):
+                return {}
+
+            # 문자열인 경우 JSON 파싱 시도
+            if isinstance(value, str):
+                if value.strip() == '' or value.lower() == 'nan':
+                    return {}
+                try:
+                    parsed = json.loads(value)
+                    return parsed if isinstance(parsed, (dict, list)) else {}
+                except (json.JSONDecodeError, ValueError):
+                    return value
+
+            # 기타 타입은 문자열로 변환 후 재시도
+            str_value = str(value)
+            if str_value.lower() in ['nan', 'none', '']:
+                return {}
+
+            try:
+                parsed = json.loads(str_value)
+                return parsed if isinstance(parsed, (dict, list)) else {}
+            except (json.JSONDecodeError, ValueError):
+                return str_value
+
+        except Exception:
+            return {} if value is None else str(value)
 
     def get_parquet_schema(self, stream: IO) -> dict:
         """Parquet 파일의 스키마 정보 반환"""

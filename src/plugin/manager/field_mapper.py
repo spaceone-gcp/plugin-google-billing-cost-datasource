@@ -96,11 +96,77 @@ class FieldMapper:
             }
 
             # 최종 후처리
-            return self._finalize_mapped_data(mapped_data, source_data)
+            finalized_data = self._finalize_mapped_data(mapped_data, source_data)
+
+            # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - Decimal을 float로 변환
+            return self._ensure_spaceone_response_types(finalized_data)
 
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
             raise ERROR_INVALID_ARGUMENT(key=f"field_mapper_error: {str(e)}") from e
+
+    def _ensure_spaceone_response_types(self, data: dict) -> dict:
+        """SpaceONE 응답 형식에 맞게 데이터 타입을 보장 (Decimal -> float 변환)
+
+        Args:
+            data: 매핑된 데이터
+
+        Returns:
+            SpaceONE 호환 타입으로 변환된 데이터
+        """
+
+        def convert_value(value):
+            """개별 값을 SpaceONE 호환 타입으로 변환"""
+            if isinstance(value, Decimal):
+                # Decimal -> float (적절한 정밀도로 반올림 후 변환)
+                return self._decimal_to_clean_float(value)
+            elif isinstance(value, dict):
+                # 중첩 딕셔너리 재귀 처리
+                return {k: convert_value(v) for k, v in value.items()}
+            elif isinstance(value, (list, tuple)):
+                # 리스트/튜플 재귀 처리
+                return [convert_value(item) for item in value]
+            else:
+                return value
+
+        # 전체 데이터 변환
+        converted_data = {}
+        for key, value in data.items():
+            converted_data[key] = convert_value(value)
+
+        return converted_data
+
+    def _decimal_to_clean_float(self, decimal_value):
+        """Decimal을 적절한 정밀도로 반올림하여 깨끗한 float로 변환"""
+        from decimal import ROUND_HALF_UP, Decimal
+
+        if not isinstance(decimal_value, Decimal):
+            return float(decimal_value)
+
+        # 값의 크기에 따라 적절한 정밀도 결정
+        abs_value = abs(decimal_value)
+
+        if abs_value == 0:
+            return 0.0
+        elif abs_value >= 1000:
+            # 큰 값: 소수점 2자리까지
+            precision = 2
+        elif abs_value >= 1:
+            # 중간 값: 소수점 6자리까지
+            precision = 6
+        elif abs_value >= 0.001:
+            # 작은 값: 소수점 9자리까지
+            precision = 9
+        else:
+            # 매우 작은 값: 소수점 12자리까지
+            precision = 12
+
+        # 지정된 정밀도로 반올림
+        quantize_exp = Decimal('0.1') ** precision
+        rounded_decimal = decimal_value.quantize(quantize_exp, rounding=ROUND_HALF_UP)
+
+        # float로 변환
+        return float(rounded_decimal)
 
     def _log_debug_info_once(self, source_data: dict):
         """디버깅 정보를 첫 번째 레코드에서만 로깅"""
@@ -296,29 +362,43 @@ class FieldMapper:
         self._add_usage_and_price_info(data_structure, source_data)
         self._add_identifier_info(data_structure, source_data)
 
-        return data_structure
+        # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - data 필드도 Decimal을 float로 변환
+        return self._ensure_spaceone_response_types(data_structure)
 
     def _convert_to_numeric(self, value):
-        """값을 적절한 숫자 타입으로 변환"""
+        """값을 적절한 숫자 타입으로 변환 (부동소수점 정밀도 개선 포함)"""
         if value is None or value == "":
             return 0.0
 
         try:
-            # 이미 숫자인 경우 그대로 반환
+            from decimal import Decimal
+
+            # 이미 숫자인 경우 Decimal을 통해 정밀도 개선
             if isinstance(value, (int, float)):
-                return float(value)
+                if isinstance(value, int):
+                    return float(value)  # int는 그대로
+                else:
+                    # float는 Decimal을 통해 정밀도 개선
+                    decimal_value = Decimal(str(value))
+                    return self._decimal_to_clean_float(decimal_value)
+
+            # Decimal인 경우 정밀도 개선 적용
+            if isinstance(value, Decimal):
+                return self._decimal_to_clean_float(value)
 
             # 문자열인 경우 숫자로 변환
             if isinstance(value, str):
                 cleaned_value = value.strip()
                 if not cleaned_value:
                     return 0.0
-                return float(cleaned_value)
+                decimal_value = Decimal(cleaned_value)
+                return self._decimal_to_clean_float(decimal_value)
 
             # 기타 타입은 float로 변환 시도
-            return float(value)
+            decimal_value = Decimal(str(value))
+            return self._decimal_to_clean_float(decimal_value)
 
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, Exception):
             return 0.0
 
     def _add_billing_cost_info(self, data_structure: dict, source_data: dict):

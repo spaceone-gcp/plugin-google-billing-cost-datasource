@@ -174,9 +174,47 @@ class CostManager(BaseManager):
         self._validate_table_exists()
 
         query = self._create_google_sql(start)
-        response_stream = self.bigquery_connector.read_df_from_bigquery(query)
-        for _, row in response_stream.iterrows():
-            yield self._make_cost_data(row)
+
+        # BigQuery 쿼리문 로깅 추가
+        _LOGGER.info("[BigQuery] 실행할 쿼리문:")
+        _LOGGER.info(f"[BigQuery] Query: {query}")
+        _LOGGER.info(
+            f"[BigQuery] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
+        )
+        _LOGGER.info(f"[BigQuery] 대상 프로젝트: {self.target_project_id}")
+        _LOGGER.info(f"[BigQuery] 조회 시작일: {start}")
+
+        # 쿼리 실행 시간 측정 시작
+        import time
+
+        query_start_time = time.time()
+
+        try:
+            response_stream = self.bigquery_connector.read_df_from_bigquery(query)
+            query_execution_time = time.time() - query_start_time
+
+            # 결과 데이터 건수 확인을 위한 카운터
+            row_count = 0
+
+            _LOGGER.info(
+                f"[BigQuery] 쿼리 실행 완료 (소요시간: {query_execution_time:.2f}초)"
+            )
+            _LOGGER.info(f"[BigQuery] 반환된 DataFrame 크기: {len(response_stream)} 행")
+
+            for _, row in response_stream.iterrows():
+                row_count += 1
+                yield self._make_cost_data(row)
+
+            _LOGGER.info(f"[BigQuery] 처리 완료 - 총 {row_count}건의 데이터 처리됨")
+
+        except Exception as e:
+            query_execution_time = time.time() - query_start_time
+            _LOGGER.error(
+                f"[BigQuery] 쿼리 실행 실패 (소요시간: {query_execution_time:.2f}초)"
+            )
+            _LOGGER.error(f"[BigQuery] 오류 내용: {str(e)}")
+            _LOGGER.error(f"[BigQuery] 실패한 쿼리: {query}")
+            raise
 
         # BigQuery 데이터의 경우 빈 results 반환
         yield {"results": []}
@@ -400,9 +438,7 @@ class CostManager(BaseManager):
             date_patterns = self._generate_date_range_patterns(project_id, start_period)
 
             for pattern in date_patterns:
-                pattern_files = self.gcs_connector.list_gcs_files(
-                    bucket_name, pattern
-                )
+                pattern_files = self.gcs_connector.list_gcs_files(bucket_name, pattern)
                 all_files.extend(pattern_files)
 
             # 중복 제거 (파일명 기준)
@@ -632,29 +668,228 @@ class CostManager(BaseManager):
 
         return data_structure
 
-
     def _convert_to_numeric(self, value):
-        """값을 적절한 숫자 타입으로 변환"""
+        """값을 적절한 숫자 타입으로 변환 (부동소수점 정밀도 개선 포함)"""
         if value is None or value == "":
             return 0.0
 
         try:
-            # 이미 숫자인 경우 그대로 반환
+            from decimal import Decimal
+
+            # 이미 숫자인 경우 Decimal을 통해 정밀도 개선
             if isinstance(value, (int, float)):
-                return float(value)
+                if isinstance(value, int):
+                    return float(value)  # int는 그대로
+                else:
+                    # float는 Decimal을 통해 정밀도 개선
+                    decimal_value = Decimal(str(value))
+                    return self._decimal_to_clean_float(decimal_value)
+
+            # Decimal인 경우 정밀도 개선 적용
+            if isinstance(value, Decimal):
+                return self._decimal_to_clean_float(value)
 
             # 문자열인 경우 숫자로 변환
             if isinstance(value, str):
                 cleaned_value = value.strip()
                 if not cleaned_value:
                     return 0.0
-                return float(cleaned_value)
+                decimal_value = Decimal(cleaned_value)
+                return self._decimal_to_clean_float(decimal_value)
 
             # 기타 타입은 float로 변환 시도
-            return float(value)
+            decimal_value = Decimal(str(value))
+            return self._decimal_to_clean_float(decimal_value)
 
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, Exception):
             return 0.0
+
+    def _convert_to_string(self, value):
+        """값을 문자열 타입으로 안전하게 변환 (GCS 파서와 동일한 로직)"""
+        if value is None:
+            return ""
+
+        try:
+            # pandas의 NaN 값 체크
+            import pandas as pd
+
+            if pd.isna(value):
+                return ""
+        except (TypeError, ValueError):
+            pass
+
+        # 이미 문자열이면 그대로 반환
+        if isinstance(value, str):
+            return value.replace("nan", "") if value == "nan" else value
+
+        # 기타 타입은 문자열로 변환
+        return str(value)
+
+    def _convert_bigquery_row_to_dict(self, row):
+        """BigQuery DataFrame row를 딕셔너리로 변환 (GCS 파서와 호환, 부동소수점 정밀도 개선 포함)"""
+        row_dict = {}
+
+        # Series.to_dict() 메서드 사용 (더 안전)
+        try:
+            if hasattr(row, "to_dict"):
+                series_dict = row.to_dict()
+                row_dict.update(series_dict)
+        except Exception:
+            pass
+
+        # pandas Series의 모든 속성을 딕셔너리로 변환
+        for attr in dir(row):
+            if not attr.startswith("_"):
+                try:
+                    value = getattr(row, attr)
+                    # 메서드가 아닌 데이터 속성만 추가
+                    if not callable(value):
+                        row_dict[attr] = value
+                except Exception:
+                    continue
+
+        # 숫자 필드들에 대해 정밀도 개선 적용
+        numeric_fields = [
+            "cost", "cost_at_list", "cost_after_credits", "credits_amount",
+            "usage_quantity", "usage_amount_in_pricing_units",
+            "currency_conversion_rate"
+        ]
+
+        for field in numeric_fields:
+            if field in row_dict and isinstance(row_dict[field], (int, float)):
+                row_dict[field] = self._convert_to_numeric(row_dict[field])
+
+        return row_dict
+
+    def _create_spaceone_billing_data_from_bigquery(
+        self, row_dict: dict, listed_price
+    ) -> dict:
+        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
+        # 기본 비용 정보 (숫자 타입으로 처리)
+        data_structure = {
+            "listed_price": self._convert_to_numeric(listed_price),
+            "cost": self._convert_to_numeric(row_dict.get("cost", 0)),
+        }
+
+        # 추가 비용 정보 (BigQuery 특화)
+        cost_after_credits = row_dict.get("cost_after_credits")
+        if cost_after_credits is not None and cost_after_credits != "":
+            data_structure["cost_after_credits"] = self._convert_to_numeric(
+                cost_after_credits
+            )
+
+        # 환율 정보
+        currency_conversion_rate = row_dict.get("currency_conversion_rate")
+        if (
+            currency_conversion_rate is not None
+            and currency_conversion_rate != ""
+            and currency_conversion_rate != 1
+        ):
+            data_structure["currency_conversion_rate"] = self._convert_to_numeric(
+                currency_conversion_rate
+            )
+
+        # BigQuery 특화 추가 정보
+        cost_at_list = row_dict.get("cost_at_list")
+        if cost_at_list is not None and cost_at_list != "":
+            data_structure["cost_at_list"] = self._convert_to_numeric(cost_at_list)
+
+        # 사용량 및 가격 정보
+        usage_amount = row_dict.get("usage_amount_in_pricing_units") or row_dict.get(
+            "usage_quantity"
+        )
+        if usage_amount is not None and usage_amount != "":
+            data_structure["usage_amount_in_pricing_units"] = self._convert_to_numeric(
+                usage_amount
+            )
+
+        pricing_unit = row_dict.get("pricing_unit")
+        if pricing_unit is not None and pricing_unit != "":
+            data_structure["pricing_unit"] = self._convert_to_string(pricing_unit)
+
+        # 식별자 정보
+        billing_account_id = row_dict.get("billing_account_id")
+        if billing_account_id is not None and billing_account_id != "":
+            data_structure["billing_account_id"] = self._convert_to_string(
+                billing_account_id
+            )
+
+        project_id = row_dict.get("project_id") or row_dict.get("id")
+        if project_id is not None and project_id != "":
+            data_structure["project_id"] = self._convert_to_string(project_id)
+
+        service_description = row_dict.get("service_description") or row_dict.get(
+            "description"
+        )
+        if service_description is not None and service_description != "":
+            data_structure["service_description"] = self._convert_to_string(
+                service_description
+            )
+
+        sku_description = row_dict.get("sku_description")
+        if sku_description is not None and sku_description != "":
+            data_structure["sku_description"] = self._convert_to_string(sku_description)
+
+        return self._ensure_spaceone_response_types(data_structure)
+
+    def _ensure_spaceone_response_types(self, data):
+        """SpaceONE 응답 형식에 맞게 데이터 타입을 보장 (Decimal -> float 변환)"""
+        from decimal import Decimal
+
+        def convert_value(value):
+            """개별 값을 SpaceONE 호환 타입으로 변환"""
+            if isinstance(value, Decimal):
+                # Decimal -> float (적절한 정밀도로 반올림 후 변환)
+                return self._decimal_to_clean_float(value)
+            elif isinstance(value, dict):
+                # 중첩 딕셔너리 재귀 처리
+                return {k: convert_value(v) for k, v in value.items()}
+            elif isinstance(value, (list, tuple)):
+                # 리스트/튜플 재귀 처리
+                return [convert_value(item) for item in value]
+            else:
+                return value
+
+        # 데이터가 딕셔너리인 경우
+        if isinstance(data, dict):
+            return {k: convert_value(v) for k, v in data.items()}
+        # 데이터가 리스트인 경우
+        elif isinstance(data, (list, tuple)):
+            return [convert_value(item) for item in data]
+        else:
+            return convert_value(data)
+
+    def _decimal_to_clean_float(self, decimal_value):
+        """Decimal을 적절한 정밀도로 반올림하여 깨끗한 float로 변환"""
+        from decimal import ROUND_HALF_UP, Decimal
+
+        if not isinstance(decimal_value, Decimal):
+            return float(decimal_value)
+
+        # 값의 크기에 따라 적절한 정밀도 결정
+        abs_value = abs(decimal_value)
+
+        if abs_value == 0:
+            return 0.0
+        elif abs_value >= 1000:
+            # 큰 값: 소수점 2자리까지
+            precision = 2
+        elif abs_value >= 1:
+            # 중간 값: 소수점 6자리까지
+            precision = 6
+        elif abs_value >= 0.001:
+            # 작은 값: 소수점 9자리까지
+            precision = 9
+        else:
+            # 매우 작은 값: 소수점 12자리까지
+            precision = 12
+
+        # 지정된 정밀도로 반올림
+        quantize_exp = Decimal('0.1') ** precision
+        rounded_decimal = decimal_value.quantize(quantize_exp, rounding=ROUND_HALF_UP)
+
+        # float로 변환
+        return float(rounded_decimal)
 
     def _make_cost_data(self, row) -> dict:
         """Source Data Model (DataFrame)
@@ -677,41 +912,72 @@ class CostManager(BaseManager):
 
         try:
             if getattr(row, "product", "") not in EXCLUSIVE_PRODUCT:
+                # BigQuery 데이터를 GCS 파서와 동일한 형태로 변환
+                row_dict = self._convert_bigquery_row_to_dict(row)
+
                 # select_cost 옵션에 따라 적절한 비용 필드 선택
                 selected_cost = self._get_cost_field_by_option(row)
 
                 data = {
-                    "cost": selected_cost,
-                    "usage_quantity": getattr(row, "usage_quantity", 0.0),
+                    "cost": self._convert_to_numeric(selected_cost),
+                    "usage_quantity": self._convert_to_numeric(
+                        getattr(row, "usage_quantity", 0.0)
+                    ),
                     "provider": "google_cloud",
-                    "product": getattr(row, "description", "Unknown"),
-                    "region_code": getattr(row, "region_code", ""),
-                    "usage_type": getattr(row, "sku_description", ""),
-                    "usage_unit": getattr(row, "pricing_unit", ""),
+                    "product": self._convert_to_string(
+                        getattr(row, "description", "Unknown")
+                    ),
+                    "region_code": self._convert_to_string(
+                        getattr(row, "region_code", "")
+                    ),
+                    "usage_type": self._convert_to_string(
+                        getattr(row, "sku_description", "")
+                    ),
+                    "usage_unit": self._convert_to_string(
+                        getattr(row, "pricing_unit", "")
+                    ),
                     "billed_date": self._change_datetime_to_string(
                         getattr(row, "billed_at", "")
                     ),
-                    "currency": getattr(row, "currency", "USD"),
+                    "currency": self._convert_to_string(
+                        getattr(row, "currency", "USD")
+                    ),
                     "additional_info": {
-                        "Project ID": getattr(row, "id", ""),
-                        "Project Name": getattr(
-                            row, "project_name", getattr(row, "name", "")
+                        "Project ID": self._convert_to_string(getattr(row, "id", "")),
+                        "Project Name": self._convert_to_string(
+                            getattr(row, "project_name", getattr(row, "name", ""))
                         ),
-                        "Billing Account ID": getattr(row, "billing_account_id", ""),
-                        "Cost Type": getattr(row, "cost_type", ""),
-                        "Invoice Month": getattr(row, "month", ""),
-                        "Cost At List": getattr(row, "cost_at_list", 0.0),
-                        "Cost After Credits": getattr(row, "cost_after_credits", 0.0),
-                        "Credits Detail": getattr(row, "credits_detail", "[]"),
-                        "Resource Tags": getattr(row, "resource_tags", "{}"),
+                        "Billing Account ID": self._convert_to_string(
+                            getattr(row, "billing_account_id", "")
+                        ),
+                        "Cost Type": self._convert_to_string(
+                            getattr(row, "cost_type", "")
+                        ),
+                        "Invoice Month": self._convert_to_string(
+                            getattr(row, "month", "")
+                        ),
+                        "Cost At List": self._convert_to_numeric(
+                            getattr(row, "cost_at_list", 0.0)
+                        ),
+                        "Cost After Credits": self._convert_to_numeric(
+                            getattr(row, "cost_after_credits", 0.0)
+                        ),
+                        "Credits Detail": self._convert_to_string(
+                            getattr(row, "credits_detail", "[]")
+                        ),
+                        "Resource Tags": self._convert_to_string(
+                            getattr(row, "resource_tags", "{}")
+                        ),
                     },
                     "tags": {},
                 }
 
                 # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수 - data 필드 추가
                 # BigQuery 소스도 GCS와 동일한 풍부한 data 구조 제공
-                listed_price = getattr(row, "cost_at_list", selected_cost)
-                data["data"] = self._create_spaceone_billing_data(data, listed_price)
+                listed_price = self._convert_to_numeric(getattr(row, "cost_at_list", selected_cost))
+                data["data"] = self._create_spaceone_billing_data_from_bigquery(
+                    row_dict, listed_price
+                )
 
                 costs_data.append(data)
 
@@ -719,7 +985,9 @@ class CostManager(BaseManager):
             _LOGGER.error(f"[_make_cost_data] make data error: {e}", exc_info=True)
             raise e
 
-        return {"results": costs_data}
+        # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - 최종 응답에서 Decimal을 float로 변환
+        final_results = self._ensure_spaceone_response_types({"results": costs_data})
+        return final_results
 
     def _get_cost_field_by_option(self, row):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
@@ -733,7 +1001,7 @@ class CostManager(BaseManager):
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric_option == "AmortizedCost":
             cost_value = getattr(row, "credits_amount", 0)
-            return cost_value
+            return self._convert_to_numeric(cost_value)
 
         # 기존 select_cost 로직
         select_cost = self.select_cost_option or "cost"
@@ -741,19 +1009,19 @@ class CostManager(BaseManager):
         if select_cost == "list_price":
             # 정가 (크레딧 적용 전 원가)
             cost_value = getattr(row, "cost_at_list", 0)
-            return cost_value
+            return self._convert_to_numeric(cost_value)
         elif select_cost == "after_credits":
             # 크레딧 적용 후 비용
             cost_value = getattr(row, "cost_after_credits", 0)
-            return cost_value
+            return self._convert_to_numeric(cost_value)
         elif select_cost == "net_cost":
             # 순 비용 (기본 cost와 동일)
             cost_value = getattr(row, "cost", 0)
-            return cost_value
+            return self._convert_to_numeric(cost_value)
         else:
             # 기본값: cost (크레딧을 포함한 최종 비용)
             cost_value = getattr(row, "cost", 0)
-            return cost_value
+            return self._convert_to_numeric(cost_value)
 
     @staticmethod
     def _check_bigquery_task_options(task_options):
@@ -867,14 +1135,21 @@ class CostManager(BaseManager):
             self.is_detailed_usage = False
 
     def _create_google_sql(self, start):
+        """BigQuery용 SQL 쿼리를 생성합니다."""
+        _LOGGER.debug(f"[SQL 생성] 쿼리 생성 시작 - 시작일: {start}")
+
         # 날짜 범위 검증 및 안전한 처리
         validated_start = self._validate_and_fix_date_range(start)
+        _LOGGER.debug(f"[SQL 생성] 검증된 시작일: {validated_start}")
 
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{validated_start}-01')
         """
         if self.target_project_id != "*":
             where_condition += f" AND project.id = '{self.target_project_id}'"
+            _LOGGER.debug(f"[SQL 생성] 특정 프로젝트 필터링: {self.target_project_id}")
+        else:
+            _LOGGER.debug("[SQL 생성] 모든 프로젝트 조회 (project_id = '*')")
 
         # 상세 사용량 데이터인 경우 리소스 정보 포함
         if hasattr(self, "is_detailed_usage") and self.is_detailed_usage:
@@ -882,11 +1157,13 @@ class CostManager(BaseManager):
               resource.name as resource_name,
               resource.global_name as resource_global_name,"""
             group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+            _LOGGER.debug("[SQL 생성] 상세 사용량 모드 - 리소스 정보 포함")
         else:
             resource_fields = """
               NULL as resource_name,
               NULL as resource_global_name,"""
             group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+            _LOGGER.debug("[SQL 생성] 표준 모드 - 리소스 정보 제외")
 
         query = f"""
             SELECT
@@ -922,6 +1199,12 @@ class CostManager(BaseManager):
             ORDER BY billed_at desc
             ;
         """
+
+        _LOGGER.debug("[SQL 생성] 쿼리 생성 완료")
+        _LOGGER.debug(
+            f"[SQL 생성] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
+        )
+
         return query
 
     def _create_linked_accounts_google_sql(self, start):
