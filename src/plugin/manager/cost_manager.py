@@ -201,9 +201,31 @@ class CostManager(BaseManager):
             )
             _LOGGER.info(f"[BigQuery] 반환된 DataFrame 크기: {len(response_stream)} 행")
 
+            # 배치 처리를 위한 리스트
+            batch_records = []
+            batch_size = 100  # 배치 크기 설정
+            
             for _, row in response_stream.iterrows():
                 row_count += 1
-                yield self._make_cost_data(row)
+                cost_data = self._make_cost_data(row)
+                # _make_cost_data가 {"results": [data]} 형식으로 반환하므로 각 결과를 배치에 추가
+                if cost_data and "results" in cost_data:
+                    batch_records.extend(cost_data["results"])
+                    
+                    # 배치 크기에 도달하면 yield
+                    if len(batch_records) >= batch_size:
+                        batch_result = {"results": batch_records}
+                        # _LOGGER.info(f"[BigQuery] Yielding batch with {len(batch_records)} records")
+                        # _LOGGER.debug(f"[BigQuery] Batch result keys: {list(batch_result.keys())}")
+                        yield batch_result
+                        batch_records = []
+            
+            # 남은 레코드 처리
+            if batch_records:
+                batch_result = {"results": batch_records}
+                _LOGGER.info(f"[BigQuery] Yielding final batch with {len(batch_records)} records")
+                _LOGGER.debug(f"[BigQuery] Final batch result keys: {list(batch_result.keys())}")
+                yield batch_result
 
             _LOGGER.info(f"[BigQuery] 처리 완료 - 총 {row_count}건의 데이터 처리됨")
 
@@ -215,9 +237,6 @@ class CostManager(BaseManager):
             _LOGGER.error(f"[BigQuery] 오류 내용: {str(e)}")
             _LOGGER.error(f"[BigQuery] 실패한 쿼리: {query}")
             raise
-
-        # BigQuery 데이터의 경우 빈 results 반환
-        yield {"results": []}
 
     def _get_data_from_gcs(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
@@ -1040,6 +1059,9 @@ class CostManager(BaseManager):
                     "usage_unit": self._convert_to_string(
                         getattr(row, "pricing_unit", "")
                     ),
+                    "resource": self._convert_to_string(
+                        getattr(row, "project_id", "")
+                    ),
                     "billed_date": self._change_datetime_to_string(
                         getattr(row, "billed_at", "")
                     ),
@@ -1089,7 +1111,8 @@ class CostManager(BaseManager):
             _LOGGER.error(f"[_make_cost_data] make data error: {e}", exc_info=True)
             raise e
 
-        # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - 최종 응답에서 Decimal을 float로 변환
+        # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - results 배열 형식 유지
+        # SpaceONE CostsResponse 스키마는 반드시 {"results": [...]} 형식을 요구함
         final_results = self._ensure_spaceone_response_types({"results": costs_data})
         return final_results
 
