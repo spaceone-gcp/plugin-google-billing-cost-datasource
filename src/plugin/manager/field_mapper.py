@@ -91,8 +91,14 @@ class FieldMapper:
 
             # 기본 필드 매핑 (null cost를 0으로 처리)
             cost_value = self._get_cost_by_option(source_data)
-            # null 값을 명시적으로 0으로 처리
-            if cost_value is None:
+            # 🚨 SUPER CRITICAL: null 값을 강제로 0으로 처리 (여러 단계 체크)
+            if cost_value is None or cost_value == "" or str(cost_value).lower() == "null":
+                cost_value = 0.0
+            # 추가 안전장치: NaN이나 inf 체크
+            try:
+                if not isinstance(cost_value, (int, float)) or cost_value != cost_value:  # NaN 체크
+                    cost_value = 0.0
+            except:
                 cost_value = 0.0
             usage_quantity_value = self._safe_get_usage_quantity(source_data)
             billed_date_value = self._process_billed_date(source_data)
@@ -103,10 +109,13 @@ class FieldMapper:
             # 주요 필드들 매핑
             mapped_fields = self._map_core_fields(source_data)
 
+            # 🚨 FINAL CHECK: 응답 생성 직전 최종 null 체크
+            final_cost = cost_value if cost_value is not None else 0.0
+            
             # 매핑된 데이터 구성
             mapped_data = {
-                "cost": cost_value,
-                "_total_value_sum": cost_value,  # SpaceONE 집계 처리용 필드 (필수)
+                "cost": final_cost,
+                "_total_value_sum": final_cost,  # SpaceONE 집계 처리용 필드 (필수)
                 "usage_quantity": usage_quantity_value,
                 "usage_unit": source_data.get("usage_unit", ""),
                 "provider": self.provider,

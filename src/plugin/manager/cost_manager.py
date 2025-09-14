@@ -689,7 +689,8 @@ class CostManager(BaseManager):
 
     def _convert_to_numeric(self, value):
         """값을 적절한 숫자 타입으로 변환 (부동소수점 정밀도 개선 포함)"""
-        if value is None or value == "":
+        # 🚨 SUPER CRITICAL: 모든 null 케이스를 0.0으로 처리
+        if value is None or value == "" or str(value).lower() in ["null", "none", "nan"]:
             return 0.0
 
         try:
@@ -879,9 +880,18 @@ class CostManager(BaseManager):
         # cost_value가 전달되면 사용, 아니면 row_dict에서 가져옴
         actual_cost = cost_value if cost_value is not None else row_dict.get("cost", 0)
         
+        # 🚨 SUPER CRITICAL: data 필드에서도 null을 0으로 강제 처리
+        final_actual_cost = self._convert_to_numeric(actual_cost)
+        if final_actual_cost is None or str(final_actual_cost).lower() == "null":
+            final_actual_cost = 0.0
+            
+        final_listed_price = self._convert_to_numeric(listed_price)
+        if final_listed_price is None or str(final_listed_price).lower() == "null":
+            final_listed_price = 0.0
+        
         data_structure = {
-            "cost": self._convert_to_numeric(actual_cost),
-            "listed_price": self._convert_to_numeric(listed_price),
+            "cost": final_actual_cost,
+            "listed_price": final_listed_price,
         }
 
         return self._ensure_spaceone_response_types(data_structure)
@@ -956,7 +966,10 @@ class CostManager(BaseManager):
 
         def convert_value(value):
             """개별 값을 SpaceONE 호환 타입으로 변환"""
-            if isinstance(value, Decimal):
+            # 🚨 SUPER CRITICAL: null 값을 0.0으로 강제 처리 (최종 안전장치)
+            if value is None or str(value).lower() in ["null", "none", "nan"]:
+                return 0.0
+            elif isinstance(value, Decimal):
                 # Decimal -> float (적절한 정밀도로 반올림 후 변환)
                 return self._decimal_to_clean_float(value)
             elif isinstance(value, dict):
@@ -970,7 +983,15 @@ class CostManager(BaseManager):
 
         # 데이터가 딕셔너리인 경우
         if isinstance(data, dict):
-            return {k: convert_value(v) for k, v in data.items()}
+            result = {k: convert_value(v) for k, v in data.items()}
+            
+            # 🚨 FINAL GUARANTEE: cost와 _total_value_sum 필드는 절대 null이 될 수 없음
+            if "cost" in result and (result["cost"] is None or str(result["cost"]).lower() == "null"):
+                result["cost"] = 0.0
+            if "_total_value_sum" in result and (result["_total_value_sum"] is None or str(result["_total_value_sum"]).lower() == "null"):
+                result["_total_value_sum"] = 0.0
+                
+            return result
         # 데이터가 리스트인 경우
         elif isinstance(data, (list, tuple)):
             return [convert_value(item) for item in data]
@@ -1046,13 +1067,22 @@ class CostManager(BaseManager):
 
                 # 🚨 CRITICAL: SpaceONE 최상위 cost 필드 설정 (null을 0으로 처리)
                 cost_value = self._convert_to_numeric(selected_cost)
-                # null 값을 명시적으로 0으로 처리
-                if cost_value is None:
+                # 🚨 SUPER CRITICAL: null 값을 강제로 0으로 처리 (여러 단계 체크)
+                if cost_value is None or cost_value == "" or str(cost_value).lower() == "null":
+                    cost_value = 0.0
+                # 추가 안전장치: NaN이나 inf 체크
+                try:
+                    if not isinstance(cost_value, (int, float)) or cost_value != cost_value:  # NaN 체크
+                        cost_value = 0.0
+                except:
                     cost_value = 0.0
                 
+                # 🚨 FINAL CHECK: 응답 생성 직전 최종 null 체크
+                final_cost = cost_value if cost_value is not None else 0.0
+                
                 data = {
-                    "cost": cost_value,  # SpaceONE 최상위 cost 필드 (필수)
-                    "_total_value_sum": cost_value,  # SpaceONE 집계 처리용 필드 (필수)
+                    "cost": final_cost,  # SpaceONE 최상위 cost 필드 (필수)
+                    "_total_value_sum": final_cost,  # SpaceONE 집계 처리용 필드 (필수)
                     "usage_quantity": self._convert_to_numeric(
                         getattr(row, "usage_quantity", 0.0)
                     ),
@@ -1124,6 +1154,70 @@ class CostManager(BaseManager):
         # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - results 배열 형식 유지
         # SpaceONE CostsResponse 스키마는 반드시 {"results": [...]} 형식을 요구함
         final_results = self._ensure_spaceone_response_types({"results": costs_data})
+        
+        # 🚨 SUPER CRITICAL: _total_value_sum 필드 최종 보장 (절대 null 허용 안함)
+        # 프로젝트별 null 값 집계 카운트 수집
+        project_null_stats = {}
+        project_total_stats = {}
+        
+        if "results" in final_results and isinstance(final_results["results"], list):
+            for item in final_results["results"]:
+                if isinstance(item, dict):
+                    # 프로젝트 ID 추출 (resource 필드 또는 additional_info에서)
+                    project_id = None
+                    if "resource" in item:
+                        project_id = item["resource"]
+                    elif "additional_info" in item and isinstance(item["additional_info"], dict):
+                        project_id = item["additional_info"].get("Project ID", "unknown")
+                    else:
+                        project_id = "unknown"
+                    
+                    # 프로젝트별 통계 초기화
+                    if project_id not in project_null_stats:
+                        project_null_stats[project_id] = 0
+                        project_total_stats[project_id] = 0
+                    
+                    # 총 레코드 수 증가
+                    project_total_stats[project_id] += 1
+                    
+                    # cost 필드가 있으면 _total_value_sum도 반드시 같은 값으로 설정
+                    if "cost" in item:
+                        cost_val = item["cost"]
+                        if cost_val is None or cost_val == 0.0:
+                            project_null_stats[project_id] += 1
+                            cost_val = 0.0
+                        item["_total_value_sum"] = cost_val
+                    # cost 필드가 없으면 _total_value_sum을 0.0으로 설정
+                    elif "_total_value_sum" not in item or item.get("_total_value_sum") is None:
+                        project_null_stats[project_id] += 1
+                        item["_total_value_sum"] = 0.0
+        
+        # 🔍 프로젝트별 null 값 집계 결과 로깅
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("📊 [프로젝트별 NULL 값 집계 결과]")
+        _LOGGER.info("=" * 80)
+        
+        total_records = sum(project_total_stats.values())
+        total_null_records = sum(project_null_stats.values())
+        
+        for project_id in sorted(project_total_stats.keys()):
+            total_count = project_total_stats[project_id]
+            null_count = project_null_stats[project_id]
+            null_percentage = (null_count / total_count * 100) if total_count > 0 else 0
+            
+            _LOGGER.info(f"🏗️  프로젝트: {project_id}")
+            _LOGGER.info(f"   📈 총 레코드: {total_count:,}")
+            _LOGGER.info(f"   🚫 NULL/0 값: {null_count:,}")
+            _LOGGER.info(f"   📊 NULL 비율: {null_percentage:.2f}%")
+            _LOGGER.info("-" * 60)
+        
+        _LOGGER.info(f"🌍 전체 집계:")
+        _LOGGER.info(f"   📈 총 레코드: {total_records:,}")
+        _LOGGER.info(f"   🚫 총 NULL/0 값: {total_null_records:,}")
+        overall_null_percentage = (total_null_records / total_records * 100) if total_records > 0 else 0
+        _LOGGER.info(f"   📊 전체 NULL 비율: {overall_null_percentage:.2f}%")
+        _LOGGER.info("=" * 80)
+        
         return final_results
 
     def _get_cost_field_by_option(self, row):
@@ -1133,32 +1227,34 @@ class CostManager(BaseManager):
             row: BigQuery 또는 파일에서 읽은 데이터 행
 
         Returns:
-            선택된 비용 값 (원본 타입 유지)
+            선택된 비용 값 (절대 null 반환 안함, 최소 0.0)
         """
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric_option == "AmortizedCost":
             cost_value = getattr(row, "credits_amount", 0)
-            return self._convert_to_numeric(cost_value)
-
+            result = self._convert_to_numeric(cost_value)
         # 기존 select_cost 로직
-        select_cost = self.select_cost_option or "cost"
-
-        if select_cost == "list_price":
+        elif self.select_cost_option == "list_price":
             # 정가 (크레딧 적용 전 원가)
             cost_value = getattr(row, "cost_at_list", 0)
-            return self._convert_to_numeric(cost_value)
-        elif select_cost == "after_credits":
+            result = self._convert_to_numeric(cost_value)
+        elif self.select_cost_option == "after_credits":
             # 크레딧 적용 후 비용
             cost_value = getattr(row, "cost_after_credits", 0)
-            return self._convert_to_numeric(cost_value)
-        elif select_cost == "net_cost":
+            result = self._convert_to_numeric(cost_value)
+        elif self.select_cost_option == "net_cost":
             # 순 비용 (기본 cost와 동일)
             cost_value = getattr(row, "cost", 0)
-            return self._convert_to_numeric(cost_value)
+            result = self._convert_to_numeric(cost_value)
         else:
             # 기본값: cost (크레딧을 포함한 최종 비용)
             cost_value = getattr(row, "cost", 0)
-            return self._convert_to_numeric(cost_value)
+            result = self._convert_to_numeric(cost_value)
+            
+        # 🚨 FINAL SAFETY: 이 메서드는 절대 null을 반환하지 않음
+        if result is None or str(result).lower() in ["null", "none", "nan"]:
+            return 0.0
+        return result
 
     @staticmethod
     def _check_bigquery_task_options(task_options):
