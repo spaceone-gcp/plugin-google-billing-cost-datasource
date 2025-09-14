@@ -145,6 +145,9 @@ class ParquetParser(BaseParser):
         timestamp_fields = ['usage_start_time', 'usage_end_time', 'export_time']
         string_fields = ['billing_account_id', 'currency', 'transaction_type', 'seller_name', 'cost_type']
 
+        # 명시적으로 문자열로 처리해야 하는 필드들 (cost가 포함되어도 float가 아님)
+        explicit_string_fields = ['cost_type', 'transaction_type', 'seller_name']
+
         # REPEATED 필드들 (배열로 처리)
         repeated_fields = ['labels', 'system_labels', 'tags', 'credits']
 
@@ -159,6 +162,7 @@ class ParquetParser(BaseParser):
             'credits_float_fields': credits_float_fields,
             'timestamp_fields': timestamp_fields,
             'string_fields': string_fields,
+            'explicit_string_fields': explicit_string_fields,
             'repeated_fields': repeated_fields,
             'record_fields': record_fields
         }
@@ -201,7 +205,7 @@ class ParquetParser(BaseParser):
         """NaN 값에 대한 기본값 반환 - 새로운 스키마 기준"""
         if (key in field_types['float_fields'] or key in field_types['numeric_fields'] or
             key in field_types['usage_float_fields'] or key in field_types['credits_float_fields'] or
-            any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate'])):
+            (any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate']) and key not in field_types['explicit_string_fields'])):
             return 0.0
         elif key in field_types['repeated_fields']:
             return []
@@ -212,10 +216,14 @@ class ParquetParser(BaseParser):
 
     def _convert_by_field_type(self, key, value, field_types):
         """필드 타입에 따라 값 변환 - 새로운 스키마 기준"""
-        # FLOAT 타입 필드 처리
-        if (key in field_types['float_fields'] or key in field_types['usage_float_fields'] or
+        # 명시적 문자열 필드 우선 처리
+        if key in field_types['explicit_string_fields']:
+            return self._convert_to_string_safe(value)
+
+        # FLOAT 타입 필드 처리 (명시적 문자열 필드 제외)
+        elif (key in field_types['float_fields'] or key in field_types['usage_float_fields'] or
             key in field_types['credits_float_fields'] or
-            any(field in key.lower() for field in ['cost', 'rate'])):
+            (any(field in key.lower() for field in ['cost', 'rate']) and key not in field_types['explicit_string_fields'])):
             return self._convert_to_float_safe(value)
 
         # NUMERIC 타입 필드 처리 (높은 정밀도)
@@ -442,7 +450,13 @@ class ParquetParser(BaseParser):
             elif isinstance(value, str):
                 if value.strip().lower() in ('', 'nan', 'none', 'null'):
                     return 0.0
-                return float(value.strip())
+                # 숫자가 아닌 문자열인 경우 0.0 반환 (예: 'regular', 'usage' 등)
+                stripped_value = value.strip()
+                try:
+                    return float(stripped_value)
+                except ValueError:
+                    _LOGGER.debug(f"[ParquetParser] Non-numeric string in FLOAT field: '{value}', using 0.0")
+                    return 0.0
             else:
                 return float(value)
         except (ValueError, TypeError):
