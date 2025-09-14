@@ -1044,11 +1044,15 @@ class CostManager(BaseManager):
                 # select_cost 옵션에 따라 적절한 비용 필드 선택
                 selected_cost = self._get_cost_field_by_option(row)
 
-                # 🚨 CRITICAL: SpaceONE 최상위 cost 필드 설정
+                # 🚨 CRITICAL: SpaceONE 최상위 cost 필드 설정 (null을 0으로 처리)
                 cost_value = self._convert_to_numeric(selected_cost)
+                # null 값을 명시적으로 0으로 처리
+                if cost_value is None:
+                    cost_value = 0.0
                 
                 data = {
                     "cost": cost_value,  # SpaceONE 최상위 cost 필드 (필수)
+                    "_total_value_sum": cost_value,  # SpaceONE 집계 처리용 필드 (필수)
                     "usage_quantity": self._convert_to_numeric(
                         getattr(row, "usage_quantity", 0.0)
                     ),

@@ -89,8 +89,11 @@ class FieldMapper:
                         )
                 self._debug_once_done = True
 
-            # 기본 필드 매핑
+            # 기본 필드 매핑 (null cost를 0으로 처리)
             cost_value = self._get_cost_by_option(source_data)
+            # null 값을 명시적으로 0으로 처리
+            if cost_value is None:
+                cost_value = 0.0
             usage_quantity_value = self._safe_get_usage_quantity(source_data)
             billed_date_value = self._process_billed_date(source_data)
 
@@ -103,6 +106,7 @@ class FieldMapper:
             # 매핑된 데이터 구성
             mapped_data = {
                 "cost": cost_value,
+                "_total_value_sum": cost_value,  # SpaceONE 집계 처리용 필드 (필수)
                 "usage_quantity": usage_quantity_value,
                 "usage_unit": source_data.get("usage_unit", ""),
                 "provider": self.provider,
