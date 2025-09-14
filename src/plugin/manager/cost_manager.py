@@ -872,12 +872,15 @@ class CostManager(BaseManager):
         return row_dict
 
     def _create_spaceone_billing_data_from_bigquery(
-        self, row_dict: dict, listed_price
+        self, row_dict: dict, listed_price, cost_value=None
     ) -> dict:
         """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost, listed_price만 포함)"""
         # 요청된 두 개 필드만 포함
+        # cost_value가 전달되면 사용, 아니면 row_dict에서 가져옴
+        actual_cost = cost_value if cost_value is not None else row_dict.get("cost", 0)
+        
         data_structure = {
-            "cost": self._convert_to_numeric(row_dict.get("cost", 0)),
+            "cost": self._convert_to_numeric(actual_cost),
             "listed_price": self._convert_to_numeric(listed_price),
         }
 
@@ -1041,8 +1044,11 @@ class CostManager(BaseManager):
                 # select_cost 옵션에 따라 적절한 비용 필드 선택
                 selected_cost = self._get_cost_field_by_option(row)
 
+                # 🚨 CRITICAL: SpaceONE 최상위 cost 필드 설정
+                cost_value = self._convert_to_numeric(selected_cost)
+                
                 data = {
-                    "cost": self._convert_to_numeric(selected_cost),
+                    "cost": cost_value,  # SpaceONE 최상위 cost 필드 (필수)
                     "usage_quantity": self._convert_to_numeric(
                         getattr(row, "usage_quantity", 0.0)
                     ),
@@ -1102,7 +1108,7 @@ class CostManager(BaseManager):
                 # BigQuery 소스도 GCS와 동일한 풍부한 data 구조 제공
                 listed_price = self._convert_to_numeric(getattr(row, "cost_at_list", selected_cost))
                 data["data"] = self._create_spaceone_billing_data_from_bigquery(
-                    row_dict, listed_price
+                    row_dict, listed_price, cost_value  # cost_value 전달
                 )
 
                 costs_data.append(data)
