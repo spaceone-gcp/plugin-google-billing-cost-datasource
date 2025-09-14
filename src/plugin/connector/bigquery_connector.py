@@ -95,55 +95,75 @@ class BigqueryConnector(BaseConnector):
             raise
 
     def _standardize_dataframe_types(self, df):
-        """DataFrame의 데이터 타입을 GCS 파서와 일치하도록 표준화"""
+        """DataFrame의 데이터 타입을 새로운 스키마 구조에 맞게 표준화"""
 
         import pandas as pd
 
         standardized_df = df.copy()
 
-        # SpaceONE 빌링 필수 필드들의 데이터 타입 표준화
-        cost_fields = ['cost', 'cost_at_list', 'cost_after_credits', 'usage_amount',
-                      'usage_amount_in_pricing_units', 'currency_conversion_rate']
+        # 새로운 스키마 기준 필드 분류
+        float_fields = ['cost', 'currency_conversion_rate', 'cost_at_list',
+                       'cost_at_effective_price_default', 'cost_at_list_consumption_model']
 
-        date_fields = ['usage_start_time', 'usage_end_time', 'export_time']
-        string_fields = ['billing_account_id', 'project_id', 'project_name', 'service_description',
-                        'sku_description', 'location_region', 'location_zone', 'currency', 'invoice_month']
+        numeric_fields = ['effective_price', 'tier_start_amount', 'pricing_unit_quantity',
+                         'list_price', 'effective_price_default', 'list_price_consumption_model']
+
+        timestamp_fields = ['usage_start_time', 'usage_end_time', 'export_time']
+        string_fields = ['billing_account_id', 'currency', 'transaction_type', 'seller_name', 'cost_type']
+
+        # 명시적으로 문자열로 처리해야 하는 필드들 (cost가 포함되어도 float가 아님)
+        explicit_string_fields = ['cost_type', 'transaction_type', 'seller_name']
+
+        # REPEATED 필드들 (배열로 처리)
+        repeated_fields = ['labels', 'system_labels', 'tags', 'credits']
+
+        # 중첩 구조 필드들 (RECORD 타입)
+        record_fields = ['service', 'sku', 'project', 'location', 'price', 'usage',
+                        'invoice', 'adjustment_info', 'consumption_model']
 
         for col in standardized_df.columns:
             try:
-                # 비용 및 사용량 관련 필드를 정밀도 개선된 float 타입으로 변환
-                if any(field in col.lower() for field in ['cost', 'amount', 'price', 'rate', 'usage_quantity']):
-                    standardized_df[col] = pd.to_numeric(standardized_df[col], errors='coerce').fillna(0.0)
-                    # 부동소수점 정밀도 개선 적용
-                    standardized_df[col] = standardized_df[col].apply(self._clean_float_precision)
+                # 명시적 문자열 필드 우선 처리
+                if col in explicit_string_fields:
+                    standardized_df[col] = standardized_df[col].astype(str).fillna('')
+                    standardized_df[col] = standardized_df[col].replace('nan', '')
 
-                # 날짜/시간 필드를 문자열로 변환 (SpaceONE 표준 형식)
-                elif any(field in col.lower() for field in ['time', 'date']):
-                    if col in date_fields or 'time' in col.lower():
-                        standardized_df[col] = pd.to_datetime(standardized_df[col], errors='coerce')
-                        # TIMESTAMP를 ISO 형식 문자열로 변환
-                        standardized_df[col] = standardized_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                        standardized_df[col] = standardized_df[col].fillna('')
-                    else:
-                        # billed_date 같은 날짜만 있는 필드는 YYYY-MM-DD 형식으로
-                        standardized_df[col] = pd.to_datetime(standardized_df[col], errors='coerce')
-                        standardized_df[col] = standardized_df[col].dt.strftime('%Y-%m-%d')
-                        standardized_df[col] = standardized_df[col].fillna('')
+                # FLOAT 타입 필드 처리 (명시적 문자열 필드 제외)
+                elif col in float_fields or (any(field in col.lower() for field in ['cost', 'rate']) and col not in explicit_string_fields):
+                    standardized_df[col] = standardized_df[col].apply(
+                        lambda x, column=col: self._process_float_field(x, column)
+                    )
 
-                # 문자열 필드 처리
+                # NUMERIC 타입 필드 처리 (price 하위 필드들)
+                elif col in numeric_fields or (col.startswith('price_') and any(field in col for field in numeric_fields)):
+                    standardized_df[col] = standardized_df[col].apply(
+                        lambda x, column=col: self._process_numeric_field(x, column)
+                    )
+
+                # TIMESTAMP 필드 처리
+                elif col in timestamp_fields or any(field in col.lower() for field in ['time']):
+                    standardized_df[col] = pd.to_datetime(standardized_df[col], errors='coerce')
+                    # TIMESTAMP를 ISO 형식 문자열로 변환
+                    standardized_df[col] = standardized_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                    standardized_df[col] = standardized_df[col].fillna('')
+
+                # STRING 필드 처리
                 elif col in string_fields or any(field in col.lower() for field in ['id', 'name', 'description', 'type']):
                     standardized_df[col] = standardized_df[col].astype(str).fillna('')
                     # 'nan' 문자열을 빈 문자열로 변환
                     standardized_df[col] = standardized_df[col].replace('nan', '')
 
-                # 중첩 구조 필드들 (ARRAY<RECORD>, RECORD 타입 처리)
-                elif col in ['project', 'service', 'sku', 'location', 'usage', 'labels', 'credits', 'invoice', 'price']:
-                    # BigQuery의 중첩 구조를 SpaceONE 호환 형태로 변환
+                # REPEATED 필드들 (배열 구조로 처리)
+                elif col in repeated_fields:
+                    standardized_df[col] = standardized_df[col].apply(self._process_repeated_field)
+
+                # RECORD 타입 필드들 (중첩 구조 처리)
+                elif col in record_fields:
                     standardized_df[col] = standardized_df[col].apply(self._normalize_nested_structure)
 
-                # NaN 값들을 적절한 기본값으로 변환 (GCS 파서의 _clean_nan_values와 동일한 로직)
-                standardized_df[col] = standardized_df[col].where(pd.notnull(standardized_df[col]),
-                                                               0 if col in cost_fields else '')
+                # 기타 필드들의 NaN 값 처리
+                else:
+                    standardized_df[col] = standardized_df[col].where(pd.notnull(standardized_df[col]), '')
 
             except Exception as e:
                 _LOGGER.warning(f"[BigqueryConnector] Failed to standardize column {col}: {e}")
@@ -194,7 +214,7 @@ class BigqueryConnector(BaseConnector):
             return float(value) if value is not None else 0.0
 
     def _normalize_nested_structure(self, value):
-        """BigQuery의 중첩 구조(ARRAY<RECORD>, RECORD)를 SpaceONE 호환 형태로 변환"""
+        """BigQuery의 중첩 구조(ARRAY<RECORD>, RECORD)를 SpaceONE 호환 형태로 변환 - 새로운 스키마 지원"""
         import json
 
         if value is None:
@@ -203,7 +223,7 @@ class BigqueryConnector(BaseConnector):
         try:
             # 이미 딕셔너리나 리스트인 경우
             if isinstance(value, (dict, list)):
-                return value
+                return self._clean_nested_structure(value)
 
             # pandas의 NaN 체크
             import pandas as pd
@@ -216,7 +236,7 @@ class BigqueryConnector(BaseConnector):
                     return {}
                 try:
                     parsed = json.loads(value)
-                    return parsed if isinstance(parsed, (dict, list)) else {}
+                    return self._clean_nested_structure(parsed) if isinstance(parsed, (dict, list)) else {}
                 except (json.JSONDecodeError, ValueError):
                     # JSON이 아닌 문자열인 경우 그대로 반환
                     return value
@@ -228,10 +248,150 @@ class BigqueryConnector(BaseConnector):
 
             try:
                 parsed = json.loads(str_value)
-                return parsed if isinstance(parsed, (dict, list)) else {}
+                return self._clean_nested_structure(parsed) if isinstance(parsed, (dict, list)) else {}
             except (json.JSONDecodeError, ValueError):
                 return str_value
 
         except Exception as e:
             _LOGGER.warning(f"[BigqueryConnector] Failed to normalize nested structure: {e}")
             return {} if value is None else str(value)
+
+    def _clean_nested_structure(self, data):
+        """중첩 구조의 null 값과 NaN 값을 정리"""
+        if isinstance(data, dict):
+            cleaned = {}
+            for key, value in data.items():
+                if value is not None:
+                    try:
+                        import pandas as pd
+                        if not pd.isna(value):
+                            if isinstance(value, (dict, list)):
+                                cleaned[key] = self._clean_nested_structure(value)
+                            else:
+                                cleaned[key] = value
+                    except (TypeError, ValueError, ImportError):
+                        if isinstance(value, (dict, list)):
+                            cleaned[key] = self._clean_nested_structure(value)
+                        else:
+                            cleaned[key] = value
+            return cleaned
+        elif isinstance(data, list):
+            cleaned = []
+            for item in data:
+                if item is not None:
+                    try:
+                        import pandas as pd
+                        if not pd.isna(item):
+                            if isinstance(item, (dict, list)):
+                                cleaned.append(self._clean_nested_structure(item))
+                            else:
+                                cleaned.append(item)
+                    except (TypeError, ValueError, ImportError):
+                        if isinstance(item, (dict, list)):
+                            cleaned.append(self._clean_nested_structure(item))
+                        else:
+                            cleaned.append(item)
+            return cleaned
+        else:
+            return data
+
+    def _process_numeric_field(self, value, field_name: str):
+        """NUMERIC 타입 필드 처리 (높은 정밀도 유지)"""
+        if value is None:
+            return 0
+
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return 0
+        except (TypeError, ValueError, ImportError):
+            pass
+
+        try:
+            # Decimal을 사용하여 정밀도 유지
+            from decimal import Decimal
+            if isinstance(value, (int, float)):
+                return float(Decimal(str(value)))
+            elif isinstance(value, str):
+                if value.strip().lower() in ('', 'nan', 'none', 'null'):
+                    return 0
+                return float(Decimal(value.strip()))
+            else:
+                return float(Decimal(str(value)))
+        except (ValueError, TypeError) as e:
+            _LOGGER.warning(f"[BigqueryConnector] Failed to process NUMERIC field {field_name}: {e}")
+            return 0
+
+    def _process_float_field(self, value, field_name: str):
+        """FLOAT 타입 필드 처리"""
+        if value is None:
+            return 0.0
+
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return 0.0
+        except (TypeError, ValueError, ImportError):
+            pass
+
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            elif isinstance(value, str):
+                if value.strip().lower() in ('', 'nan', 'none', 'null'):
+                    return 0.0
+                # 숫자가 아닌 문자열인 경우 0.0 반환 (예: 'regular', 'usage' 등)
+                stripped_value = value.strip()
+                # 먼저 float 변환을 시도해보고, 실패하면 0.0 반환
+                try:
+                    return float(stripped_value)
+                except ValueError:
+                    _LOGGER.debug(f"[BigqueryConnector] Non-numeric string in FLOAT field {field_name}: '{value}', using 0.0")
+                    return 0.0
+            else:
+                return float(value)
+        except (ValueError, TypeError) as e:
+            _LOGGER.warning(f"[BigqueryConnector] Failed to process FLOAT field {field_name}: {e}")
+            return 0.0
+
+    def _process_repeated_field(self, value):
+        """REPEATED 필드를 배열로 처리"""
+        if value is None:
+            return []
+
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError, ImportError):
+            pass
+
+        # 이미 리스트인 경우
+        if isinstance(value, list):
+            return self._clean_nested_structure(value)
+
+        # 문자열인 경우 JSON 파싱 시도
+        if isinstance(value, str):
+            str_value = value.strip()
+            if not str_value or str_value.lower() in ("none", "null", "", "nan"):
+                return []
+
+            try:
+                import json
+                parsed = json.loads(str_value)
+                if isinstance(parsed, list):
+                    return self._clean_nested_structure(parsed)
+                elif isinstance(parsed, dict):
+                    return [parsed]  # 단일 객체를 배열로 감쌈
+                else:
+                    return [str(parsed)]
+            except (json.JSONDecodeError, ValueError):
+                # JSON이 아닌 경우 단일 항목으로 처리
+                return [str_value]
+
+        # 딕셔너리인 경우 단일 항목 배열로 변환
+        if isinstance(value, dict):
+            return [value]
+
+        # 기타 타입은 문자열로 변환 후 단일 항목 배열
+        return [str(value)]

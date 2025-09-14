@@ -91,7 +91,7 @@ class FieldMapper:
 
             # 기본 필드 매핑
             cost_value = self._get_cost_by_option(source_data)
-            usage_quantity_value = source_data.get("usage_quantity", 0)
+            usage_quantity_value = self._safe_get_usage_quantity(source_data)
             billed_date_value = self._process_billed_date(source_data)
 
             # additional_info 필드 병합 처리
@@ -117,6 +117,9 @@ class FieldMapper:
 
             # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - Decimal을 float로 변환
             result = self._ensure_spaceone_response_types(mapped_data)
+            
+            # 🚨 CRITICAL: 필수 필드 보장 (usage_quantity가 누락되지 않도록)
+            result = self._ensure_required_fields(result)
 
             # 🚨 CRITICAL: Project Ancestry Numbers 후처리 (배열 형식으로 변환)
             if "additional_info" in result and isinstance(
@@ -182,6 +185,37 @@ class FieldMapper:
             converted_data[key] = convert_value(value)
 
         return converted_data
+
+    def _ensure_required_fields(self, data: dict) -> dict:
+        """SpaceONE 필수 필드가 누락되지 않도록 보장
+        
+        Args:
+            data: 변환된 데이터
+            
+        Returns:
+            필수 필드가 보장된 데이터
+        """
+        # SpaceONE Cost 응답의 필수 필드들
+        required_fields = {
+            "cost": 0,
+            "usage_quantity": 0,
+            "usage_unit": "",
+            "provider": self.provider,
+            "region_code": "global",
+            "product": "",
+            "usage_type": "",
+            "billed_date": "",
+            "tags": {},
+            "additional_info": {}
+        }
+        
+        # 누락된 필드를 기본값으로 채움
+        for field, default_value in required_fields.items():
+            if field not in data or data[field] is None:
+                data[field] = default_value
+                _LOGGER.debug(f"[FieldMapper] Added missing required field '{field}' with default value: {default_value}")
+        
+        return data
 
     def _decimal_to_clean_float(self, decimal_value):
         """Decimal을 적절한 정밀도로 반올림하여 깨끗한 float로 변환"""
@@ -773,6 +807,28 @@ class FieldMapper:
             return {}  # 에러 발생 시에도 빈 딕셔너리로 설정
         else:
             return str(value)  # 실패 시 문자열로 변환
+
+    def _safe_get_usage_quantity(self, source_data: dict):
+        """usage_quantity 필드를 안전하게 추출하고 기본값 처리
+        
+        Args:
+            source_data: 원본 데이터
+            
+        Returns:
+            usage_quantity 값 (없으면 0)
+        """
+        usage_quantity = source_data.get("usage_quantity")
+        
+        # None, 빈 문자열, NaN 등의 경우 0으로 처리
+        if usage_quantity is None or usage_quantity == "" or str(usage_quantity).lower() == "nan":
+            return 0
+            
+        # 숫자 타입으로 변환 시도
+        try:
+            return float(usage_quantity) if usage_quantity != 0 else 0
+        except (ValueError, TypeError):
+            _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}, using 0")
+            return 0
 
     def _get_cost_by_option(self, source_data: dict):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
@@ -1417,7 +1473,7 @@ class FieldMapper:
             return []
 
     def _apply_array_parse_transform(self, value: Any) -> list:
-        """배열 파싱 변환 적용"""
+        """배열 파싱 변환 적용 - 새로운 스키마 구조 지원"""
         if not value:
             return []
 
@@ -1425,9 +1481,17 @@ class FieldMapper:
         if isinstance(value, list):
             return value
 
+        # pandas NaN 체크
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError, ImportError):
+            pass
+
         # 문자열 처리
         str_value = str(value).strip()
-        if not str_value or str_value.lower() in ("none", "null", ""):
+        if not str_value or str_value.lower() in ("none", "null", "", "nan"):
             return []
 
         try:
@@ -2052,3 +2116,101 @@ class FieldMapper:
         self.daily_count_tracker.clear()
         self.total_processed_count = 0
         _LOGGER.info("[FieldMapper] 일별 카운트 추적기가 초기화되었습니다")
+
+    def _process_repeated_field(self, value: Any, field_name: str) -> list:
+        """REPEATED 모드 필드를 배열로 처리"""
+        if not value:
+            return []
+
+        # pandas NaN 체크
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError, ImportError):
+            pass
+
+        # 이미 리스트인 경우
+        if isinstance(value, list):
+            return self._clean_repeated_array(value)
+
+        # 문자열인 경우 JSON 파싱 시도
+        if isinstance(value, str):
+            str_value = value.strip()
+            if not str_value or str_value.lower() in ("none", "null", "", "nan"):
+                return []
+
+            try:
+                import json
+                parsed = json.loads(str_value)
+                if isinstance(parsed, list):
+                    return self._clean_repeated_array(parsed)
+                elif isinstance(parsed, dict):
+                    return [parsed]  # 단일 객체를 배열로 감쌈
+                else:
+                    return [str(parsed)]
+            except (json.JSONDecodeError, ValueError):
+                # JSON이 아닌 경우 단일 항목으로 처리
+                return [str_value]
+
+        # 딕셔너리인 경우 단일 항목 배열로 변환
+        if isinstance(value, dict):
+            return [value]
+
+        # 기타 타입은 문자열로 변환 후 단일 항목 배열
+        return [str(value)]
+
+    def _clean_repeated_array(self, array: list) -> list:
+        """REPEATED 배열의 각 항목을 정리"""
+        cleaned = []
+        for item in array:
+            if item is None:
+                continue
+            
+            # pandas NaN 체크
+            try:
+                import pandas as pd
+                if pd.isna(item):
+                    continue
+            except (TypeError, ValueError, ImportError):
+                pass
+
+            # 빈 문자열이나 null 값 제거
+            if isinstance(item, str) and item.strip().lower() in ("", "none", "null", "nan"):
+                continue
+
+            cleaned.append(item)
+        
+        return cleaned
+
+    def _process_project_labels(self, project_data: dict) -> list:
+        """project.labels REPEATED 필드 처리"""
+        if not isinstance(project_data, dict):
+            return []
+        
+        labels_data = project_data.get("labels")
+        return self._process_repeated_field(labels_data, "project.labels")
+
+    def _process_project_ancestors(self, project_data: dict) -> list:
+        """project.ancestors REPEATED 필드 처리"""
+        if not isinstance(project_data, dict):
+            return []
+        
+        ancestors_data = project_data.get("ancestors")
+        return self._process_repeated_field(ancestors_data, "project.ancestors")
+
+    def _process_labels_array(self, labels_data: Any) -> list:
+        """labels REPEATED 필드 처리"""
+        return self._process_repeated_field(labels_data, "labels")
+
+    def _process_system_labels_array(self, system_labels_data: Any) -> list:
+        """system_labels REPEATED 필드 처리"""
+        return self._process_repeated_field(system_labels_data, "system_labels")
+
+    def _process_tags_array(self, tags_data: Any) -> list:
+        """tags REPEATED 필드 처리"""
+        return self._process_repeated_field(tags_data, "tags")
+
+    def _process_credits_array(self, credits_data: Any) -> list:
+        """credits REPEATED 필드 처리"""
+        return self._process_repeated_field(credits_data, "credits")

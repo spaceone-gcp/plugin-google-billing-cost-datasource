@@ -1008,6 +1008,14 @@ class CostManager(BaseManager):
 
         try:
             if getattr(row, "product", "") not in EXCLUSIVE_PRODUCT:
+                # 디버깅: 첫 번째 행의 필드들 확인
+                if not hasattr(self, "_debug_fields_logged"):
+                    _LOGGER.info(f"[DEBUG] Available row fields: {[attr for attr in dir(row) if not attr.startswith('_')]}")
+                    _LOGGER.info(f"[DEBUG] service_description: {getattr(row, 'service_description', 'NOT_FOUND')}")
+                    _LOGGER.info(f"[DEBUG] project_id: {getattr(row, 'project_id', 'NOT_FOUND')}")
+                    _LOGGER.info(f"[DEBUG] sku_description: {getattr(row, 'sku_description', 'NOT_FOUND')}")
+                    self._debug_fields_logged = True
+
                 # BigQuery 데이터를 GCS 파서와 동일한 형태로 변환
                 row_dict = self._convert_bigquery_row_to_dict(row)
 
@@ -1021,7 +1029,7 @@ class CostManager(BaseManager):
                     ),
                     "provider": "google_cloud",
                     "product": self._convert_to_string(
-                        getattr(row, "description", "Unknown")
+                        getattr(row, "service_description", "Unknown")
                     ),
                     "region_code": self._convert_to_string(
                         getattr(row, "region_code", "")
@@ -1039,9 +1047,9 @@ class CostManager(BaseManager):
                         getattr(row, "currency", "USD")
                     ),
                     "additional_info": self._convert_keys_to_title_case({
-                        "Project ID": self._convert_to_string(getattr(row, "id", "")),
+                        "Project ID": self._convert_to_string(getattr(row, "project_id", "")),
                         "Project Name": self._convert_to_string(
-                            getattr(row, "project_name", getattr(row, "name", ""))
+                            getattr(row, "project_name", "")
                         ),
                         "Billing Account ID": self._convert_to_string(
                             getattr(row, "billing_account_id", "")
@@ -1050,7 +1058,7 @@ class CostManager(BaseManager):
                             getattr(row, "cost_type", "")
                         ),
                         "Invoice Month": self._convert_to_string(
-                            getattr(row, "month", "")
+                            getattr(row, "invoice_month", "")
                         ),
                         "Cost At List": self._convert_to_numeric(
                             getattr(row, "cost_at_list", 0.0)
@@ -1252,43 +1260,86 @@ class CostManager(BaseManager):
             resource_fields = """
               resource.name as resource_name,
               resource.global_name as resource_global_name,"""
-            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (SUM이 없는 필드들)
+            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING, 23-26: REPEATED JSON, 27-28: 리소스
+            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26"
             _LOGGER.debug("[SQL 생성] 상세 사용량 모드 - 리소스 정보 포함")
         else:
             resource_fields = """
               NULL as resource_name,
               NULL as resource_global_name,"""
-            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (SUM이 없는 필드들)
+            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING, 23-26: REPEATED JSON
+            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26"
             _LOGGER.debug("[SQL 생성] 표준 모드 - 리소스 정보 제외")
 
         query = f"""
             SELECT
+              -- 기본 식별 필드들
               timestamp_trunc(usage_start_time, DAY) as billed_at,
               billing_account_id,
-              service.description,
-              sku.description as sku_description,
-              project.id,
-              project.name as project_name,
-              IFNULL((location.region), 'global') as region_code,
-              usage.pricing_unit,
-              invoice.month,
-              cost_type,
-              currency,
-              TO_JSON_STRING(labels) as labels,
-              TO_JSON_STRING(IFNULL(tags, [])) as resource_tags,
-              TO_JSON_STRING(credits) as credits_detail,{resource_fields}
 
-              SUM(cost) as cost_after_credits,
+              -- 서비스 및 SKU 정보 (RECORD 타입에서 추출)
+              service.id as service_id,
+              service.description as service_description,
+              sku.id as sku_id,
+              sku.description as sku_description,
+
+              -- 프로젝트 정보 (RECORD 타입에서 추출)
+              project.id as project_id,
+              project.name as project_name,
+              project.number as project_number,
+              project.ancestry_numbers,
+
+              -- 위치 정보 (RECORD 타입에서 추출)
+              IFNULL(location.location, 'global') as location_name,
+              IFNULL(location.country, '') as location_country,
+              IFNULL(location.region, 'global') as region_code,
+              IFNULL(location.zone, '') as location_zone,
+
+              -- 사용량 정보 (RECORD 타입에서 추출)
+              IFNULL(usage.unit, '') as usage_unit,
+              IFNULL(usage.pricing_unit, '') as pricing_unit,
+
+              -- 인보이스 정보 (RECORD 타입에서 추출)
+              IFNULL(invoice.month, '') as invoice_month,
+              IFNULL(invoice.publisher_type, '') as publisher_type,
+
+              -- 기타 STRING 필드들
+              currency,
+              IFNULL(transaction_type, '') as transaction_type,
+              IFNULL(seller_name, '') as seller_name,
+              IFNULL(cost_type, '') as cost_type,
+
+              -- REPEATED 필드들을 JSON 문자열로 변환 (기존 호환성)
+              TO_JSON_STRING(IFNULL(labels, [])) as labels,
+              TO_JSON_STRING(IFNULL(system_labels, [])) as system_labels_json,
+              TO_JSON_STRING(IFNULL(tags, [])) as resource_tags,
+              TO_JSON_STRING(IFNULL(credits, [])) as credits_detail,{resource_fields}
+
+              -- FLOAT 타입 필드들 (집계)
+              SUM(cost) as cost,
+              SUM(IFNULL(currency_conversion_rate, 1.0)) as currency_conversion_rate,
               SUM(IFNULL(cost_at_list, cost)) as cost_at_list,
-              SUM(cost)
-                + SUM(IFNULL((SELECT SUM(c.amount)
-                              FROM UNNEST(credits) c), 0))
-                AS cost,
+              SUM(IFNULL(cost_at_effective_price_default, cost)) as cost_at_effective_price_default,
+              SUM(IFNULL(cost_at_list_consumption_model, cost)) as cost_at_list_consumption_model,
+
+              -- 사용량 집계 (usage RECORD에서 FLOAT 필드들)
+              SUM(IFNULL(usage.amount, 0)) as usage_amount,
+              SUM(IFNULL(usage.amount_in_pricing_units, 0)) as usage_quantity,
+
+              -- 크레딧 정보 집계 (credits REPEATED에서 FLOAT 필드들)
+              SUM(IFNULL((SELECT SUM(CAST(c.amount AS FLOAT64))
+                          FROM UNNEST(credits) c), 0)) as credits_total_amount,
+
+              -- 계산된 비용 필드들
+              SUM(cost) as cost_after_credits,
+              SUM(cost) + SUM(IFNULL((SELECT SUM(CAST(c.amount AS FLOAT64))
+                                      FROM UNNEST(credits) c), 0)) as cost_with_credits,
+
               -- AmortizedCost를 위한 credits_amount 계산 (크레딧 총액의 절대값)
-              ABS(SUM(IFNULL((SELECT SUM(c.amount)
-                              FROM UNNEST(credits) c), 0)))
-                AS credits_amount,
-              SUM(usage.amount_in_pricing_units) as usage_quantity,
+              ABS(SUM(IFNULL((SELECT SUM(CAST(c.amount AS FLOAT64))
+                              FROM UNNEST(credits) c), 0))) as credits_amount
             FROM `{self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}`
             {where_condition}
             GROUP BY {group_by_fields}
@@ -1322,7 +1373,19 @@ class CostManager(BaseManager):
 
     @staticmethod
     def _change_datetime_to_string(date_time):
-        return str(date_time.strftime("%Y-%m-%d"))
+        """datetime 객체나 문자열을 YYYY-MM-DD 형식으로 변환"""
+        if isinstance(date_time, str):
+            # 이미 문자열인 경우 날짜 부분만 추출
+            if len(date_time) >= 10:
+                return date_time[:10]  # YYYY-MM-DD 부분만 반환
+            return date_time
+
+        # datetime 객체인 경우
+        try:
+            return str(date_time.strftime("%Y-%m-%d"))
+        except AttributeError:
+            # 기타 타입인 경우 문자열로 변환
+            return str(date_time)
 
     @staticmethod
     def _get_start_month():

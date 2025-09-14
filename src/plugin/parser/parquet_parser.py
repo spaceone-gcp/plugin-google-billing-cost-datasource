@@ -132,18 +132,35 @@ class ParquetParser(BaseParser):
         cleaned_dict = {}
 
         # SpaceONE 빌링 필수 필드들의 데이터 타입 정의
-        cost_fields = ['cost', 'cost_at_list', 'cost_after_credits', 'usage_amount',
-                      'usage_amount_in_pricing_units', 'currency_conversion_rate']
-        date_fields = ['usage_start_time', 'usage_end_time', 'export_time']
-        string_fields = ['billing_account_id', 'project_id', 'project_name', 'service_description',
-                        'sku_description', 'location_region', 'location_zone', 'currency', 'invoice_month']
-        nested_fields = ['project', 'service', 'sku', 'location', 'usage', 'labels', 'credits', 'invoice', 'price']
+        # 새로운 스키마 기준 필드 분류
+        float_fields = ['cost', 'currency_conversion_rate', 'cost_at_list',
+                       'cost_at_effective_price_default', 'cost_at_list_consumption_model']
+
+        numeric_fields = ['effective_price', 'tier_start_amount', 'pricing_unit_quantity',
+                         'list_price', 'effective_price_default', 'list_price_consumption_model']
+
+        usage_float_fields = ['amount', 'amount_in_pricing_units']  # usage 하위 필드
+        credits_float_fields = ['amount']  # credits 배열 내의 amount 필드
+
+        timestamp_fields = ['usage_start_time', 'usage_end_time', 'export_time']
+        string_fields = ['billing_account_id', 'currency', 'transaction_type', 'seller_name', 'cost_type']
+
+        # REPEATED 필드들 (배열로 처리)
+        repeated_fields = ['labels', 'system_labels', 'tags', 'credits']
+
+        # 중첩 구조 필드들 (RECORD 타입)
+        record_fields = ['service', 'sku', 'project', 'location', 'price', 'usage',
+                        'invoice', 'adjustment_info', 'consumption_model']
 
         field_types = {
-            'cost_fields': cost_fields,
-            'date_fields': date_fields,
+            'float_fields': float_fields,
+            'numeric_fields': numeric_fields,
+            'usage_float_fields': usage_float_fields,
+            'credits_float_fields': credits_float_fields,
+            'timestamp_fields': timestamp_fields,
             'string_fields': string_fields,
-            'nested_fields': nested_fields
+            'repeated_fields': repeated_fields,
+            'record_fields': record_fields
         }
 
         for key, value in row_dict.items():
@@ -181,30 +198,44 @@ class ParquetParser(BaseParser):
             return value.tolist()  # 리스트로 변환
 
     def _get_nan_default_value(self, key, field_types):
-        """NaN 값에 대한 기본값 반환"""
-        if key in field_types['cost_fields'] or any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate']):
+        """NaN 값에 대한 기본값 반환 - 새로운 스키마 기준"""
+        if (key in field_types['float_fields'] or key in field_types['numeric_fields'] or
+            key in field_types['usage_float_fields'] or key in field_types['credits_float_fields'] or
+            any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate'])):
             return 0.0
-        elif key in field_types['nested_fields']:
-            return {} if key in ['project', 'service', 'sku', 'location', 'usage', 'invoice', 'price'] else []
+        elif key in field_types['repeated_fields']:
+            return []
+        elif key in field_types['record_fields']:
+            return {}
         else:
             return ""
 
     def _convert_by_field_type(self, key, value, field_types):
-        """필드 타입에 따라 값 변환"""
-        # 비용 관련 필드를 숫자로 변환
-        if key in field_types['cost_fields'] or any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate']):
+        """필드 타입에 따라 값 변환 - 새로운 스키마 기준"""
+        # FLOAT 타입 필드 처리
+        if (key in field_types['float_fields'] or key in field_types['usage_float_fields'] or
+            key in field_types['credits_float_fields'] or
+            any(field in key.lower() for field in ['cost', 'rate'])):
+            return self._convert_to_float_safe(value)
+
+        # NUMERIC 타입 필드 처리 (높은 정밀도)
+        elif key in field_types['numeric_fields'] or any(field in key.lower() for field in ['price']):
             return self._convert_to_numeric_safe(value)
 
-        # 날짜/시간 필드를 문자열로 변환
-        elif key in field_types['date_fields'] or any(field in key.lower() for field in ['time', 'date']):
+        # TIMESTAMP 필드를 문자열로 변환
+        elif key in field_types['timestamp_fields'] or any(field in key.lower() for field in ['time']):
             return self._convert_to_datetime_string(value, key)
 
-        # 문자열 필드 처리
+        # STRING 필드 처리
         elif key in field_types['string_fields'] or any(field in key.lower() for field in ['id', 'name', 'description', 'type']):
             return self._convert_to_string_safe(value)
 
-        # 중첩 구조 필드 처리
-        elif key in field_types['nested_fields']:
+        # REPEATED 필드 처리 (배열)
+        elif key in field_types['repeated_fields']:
+            return self._process_repeated_field_parquet(value)
+
+        # RECORD 타입 필드 처리 (중첩 구조)
+        elif key in field_types['record_fields']:
             return self._normalize_nested_structure_parquet(value)
 
         # 기타 필드
@@ -212,11 +243,15 @@ class ParquetParser(BaseParser):
             return value
 
     def _get_exception_fallback_value(self, key, value, field_types):
-        """예외 발생 시 안전한 기본값 반환"""
-        if key in field_types['cost_fields'] or key.lower() in ["cost", "usage_quantity", "amount"]:
+        """예외 발생 시 안전한 기본값 반환 - 새로운 스키마 기준"""
+        if (key in field_types['float_fields'] or key in field_types['numeric_fields'] or
+            key in field_types['usage_float_fields'] or key in field_types['credits_float_fields'] or
+            key.lower() in ["cost", "usage_quantity", "amount"]):
             return 0.0
-        elif key in field_types['nested_fields']:
-            return {} if key in ['project', 'service', 'sku', 'location', 'usage', 'invoice', 'price'] else []
+        elif key in field_types['repeated_fields']:
+            return []
+        elif key in field_types['record_fields']:
+            return {}
         else:
             return str(value) if value is not None else ""
 
@@ -388,3 +423,99 @@ class ParquetParser(BaseParser):
 
         except Exception:
             return {}
+
+    def _convert_to_float_safe(self, value):
+        """값을 안전하게 FLOAT 타입으로 변환"""
+        if value is None or value == "":
+            return 0.0
+
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return 0.0
+        except (TypeError, ValueError, ImportError):
+            pass
+
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            elif isinstance(value, str):
+                if value.strip().lower() in ('', 'nan', 'none', 'null'):
+                    return 0.0
+                return float(value.strip())
+            else:
+                return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _process_repeated_field_parquet(self, value):
+        """REPEATED 필드를 배열로 처리 (Parquet 전용)"""
+        if value is None:
+            return []
+
+        try:
+            import pandas as pd
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError, ImportError):
+            pass
+
+        # 이미 리스트인 경우
+        if isinstance(value, list):
+            return self._clean_repeated_array_parquet(value)
+
+        # numpy 배열인 경우
+        if hasattr(value, "__array__") and hasattr(value, "size"):
+            if value.size == 0:
+                return []
+            else:
+                return value.tolist()
+
+        # 문자열인 경우 JSON 파싱 시도
+        if isinstance(value, str):
+            str_value = value.strip()
+            if not str_value or str_value.lower() in ("none", "null", "", "nan"):
+                return []
+
+            try:
+                import json
+                parsed = json.loads(str_value)
+                if isinstance(parsed, list):
+                    return self._clean_repeated_array_parquet(parsed)
+                elif isinstance(parsed, dict):
+                    return [parsed]  # 단일 객체를 배열로 감쌈
+                else:
+                    return [str(parsed)]
+            except (json.JSONDecodeError, ValueError):
+                # JSON이 아닌 경우 단일 항목으로 처리
+                return [str_value]
+
+        # 딕셔너리인 경우 단일 항목 배열로 변환
+        if isinstance(value, dict):
+            return [value]
+
+        # 기타 타입은 문자열로 변환 후 단일 항목 배열
+        return [str(value)]
+
+    def _clean_repeated_array_parquet(self, array: list) -> list:
+        """REPEATED 배열의 각 항목을 정리 (Parquet 전용)"""
+        cleaned = []
+        for item in array:
+            if item is None:
+                continue
+
+            # pandas NaN 체크
+            try:
+                import pandas as pd
+                if pd.isna(item):
+                    continue
+            except (TypeError, ValueError, ImportError):
+                pass
+
+            # 빈 문자열이나 null 값 제거
+            if isinstance(item, str) and item.strip().lower() in ("", "none", "null", "nan"):
+                continue
+
+            cleaned.append(item)
+
+        return cleaned
