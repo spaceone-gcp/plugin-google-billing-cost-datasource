@@ -86,12 +86,12 @@ class ParquetParser(BaseParser):
 
                     mapped_record = field_mapper.map_record(row_dict)
 
-                    # 🚨 CRITICAL: 매핑 후 data 필드 확인 및 강제 제거
+                    # 매핑 후 data 필드 확인 및 강제 제거
                     if current_count < 3:
                         if "data" in mapped_record:
                             del mapped_record["data"]
 
-                    # 🚨 FINAL EMERGENCY: SpaceONE 프레임워크 호환성을 위해 data 필드 보장
+                    # SpaceONE 프레임워크 호환성을 위해 data 필드 보장
                     if "data" not in mapped_record or not isinstance(
                         mapped_record["data"], dict
                     ):

@@ -18,7 +18,15 @@ _LOGGER = logging.getLogger("spaceone")
 
 
 class FieldMapper:
-    """SpaceONE 비용 데이터 형식으로 필드 매핑을 수행하는 클래스"""
+    """SpaceONE 비용 데이터 형식으로 필드 매핑을 수행하는 클래스
+    
+    🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
+    
+    모든 매핑 결과는 SpaceONE 표준 응답 구조를 준수해야 합니다:
+    - cost: 최상위 필수 필드, 절대 누락 금지
+    - usage_quantity, provider, region_code, product, usage_type, resource: 필수
+    - billed_date, currency, tags, additional_info, data: 필수
+    """
 
     def __init__(
         self,
@@ -69,7 +77,7 @@ class FieldMapper:
             # 디버깅 로깅 (첫 번째 레코드만)
             self._log_debug_info_once(source_data)
 
-            # 🚨 DEBUG: 특정 필드들의 존재 여부 확인 (단순화)
+            # 특정 필드들의 존재 여부 확인
             if not hasattr(self, "_debug_once_done"):
                 _LOGGER.error(
                     f"[DEBUG] Sample source_data keys: {list(source_data.keys())[:20]}"
@@ -91,12 +99,18 @@ class FieldMapper:
 
             # 기본 필드 매핑 (null cost를 0으로 처리)
             cost_value = self._get_cost_by_option(source_data)
-            # 🚨 SUPER CRITICAL: null 값을 강제로 0으로 처리 (여러 단계 체크)
-            if cost_value is None or cost_value == "" or str(cost_value).lower() == "null":
+            # null 값을 강제로 0으로 처리 (여러 단계 체크)
+            if (
+                cost_value is None
+                or cost_value == ""
+                or str(cost_value).lower() == "null"
+            ):
                 cost_value = 0.0
             # 추가 안전장치: NaN이나 inf 체크
             try:
-                if not isinstance(cost_value, (int, float)) or cost_value != cost_value:  # NaN 체크
+                if (
+                    not isinstance(cost_value, (int, float)) or cost_value != cost_value
+                ):  # NaN 체크
                     cost_value = 0.0
             except:
                 cost_value = 0.0
@@ -109,13 +123,12 @@ class FieldMapper:
             # 주요 필드들 매핑
             mapped_fields = self._map_core_fields(source_data)
 
-            # 🚨 FINAL CHECK: 응답 생성 직전 최종 null 체크
+            # 응답 생성 직전 최종 null 체크
             final_cost = cost_value if cost_value is not None else 0.0
-            
+
             # 매핑된 데이터 구성
             mapped_data = {
                 "cost": final_cost,
-                "_total_value_sum": final_cost,  # SpaceONE 집계 처리용 필드 (필수)
                 "usage_quantity": usage_quantity_value,
                 "usage_unit": source_data.get("usage_unit", ""),
                 "provider": self.provider,
@@ -128,13 +141,13 @@ class FieldMapper:
                 "additional_info": final_additional_info,
             }
 
-            # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - Decimal을 float로 변환
+            # SpaceONE 응답 형식 보장 - Decimal을 float로 변환
             result = self._ensure_spaceone_response_types(mapped_data)
-            
-            # 🚨 CRITICAL: 필수 필드 보장 (usage_quantity가 누락되지 않도록)
+
+            # 필수 필드 보장 (usage_quantity가 누락되지 않도록)
             result = self._ensure_required_fields(result)
 
-            # 🚨 CRITICAL: Project Ancestry Numbers 후처리 (배열 형식으로 변환)
+            # Project Ancestry Numbers 후처리 (배열 형식으로 변환)
             if "additional_info" in result and isinstance(
                 result["additional_info"], dict
             ):
@@ -202,32 +215,40 @@ class FieldMapper:
     def _ensure_required_fields(self, data: dict) -> dict:
         """SpaceONE 필수 필드가 누락되지 않도록 보장
         
+        🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
+
         Args:
             data: 변환된 데이터
-            
+
         Returns:
             필수 필드가 보장된 데이터
         """
-        # SpaceONE Cost 응답의 필수 필드들
+        # SpaceONE 빌링 응답 표준 구조의 모든 필수 필드들
+        # 문서 가이드라인에 따른 완전한 필수 필드 목록
         required_fields = {
-            "cost": 0,
-            "usage_quantity": 0,
-            "usage_unit": "",
-            "provider": self.provider,
-            "region_code": "global",
-            "product": "",
-            "usage_type": "",
-            "billed_date": "",
-            "tags": {},
-            "additional_info": {}
+            "cost": 0.0,                    # 🚨 최상위 필수 필드, 절대 누락 금지
+            "usage_quantity": 0.0,          # 필수: 사용량 (기본값 0.0)
+            "usage_unit": "",               # 선택적: 사용량 단위
+            "provider": self.provider,      # 필수: 프로바이더
+            "region_code": "global",        # 필수: 리전 코드 (빈 문자열 허용, 기본값 "global")
+            "product": "",                  # 필수: 제품명
+            "usage_type": "",               # 필수: 사용 유형
+            "resource": "",                 # 필수: 리소스 식별자
+            "currency": "USD",              # 🆕 필수: 통화 (최상위 필드로 승격)
+            "billed_date": "",              # 필수: 청구 날짜 (YYYY-MM-DD 형식)
+            "tags": {},                     # 필수: 태그 (빈 딕셔너리 허용)
+            "additional_info": {},          # 필수: 추가 정보 (빈 딕셔너리 허용)
+            "data": {},                     # 필수: SpaceONE 프레임워크 요구사항
         }
-        
+
         # 누락된 필드를 기본값으로 채움
         for field, default_value in required_fields.items():
             if field not in data or data[field] is None:
                 data[field] = default_value
-                _LOGGER.debug(f"[FieldMapper] Added missing required field '{field}' with default value: {default_value}")
-        
+                _LOGGER.debug(
+                    f"[FieldMapper] Added missing required field '{field}' with default value: {default_value}"
+                )
+
         return data
 
     def _decimal_to_clean_float(self, decimal_value):
@@ -397,7 +418,9 @@ class FieldMapper:
                 return {}
 
             # 모든 키를 Title Case로 변환
-            title_case_additional_info = self._convert_keys_to_title_case(final_additional_info)
+            title_case_additional_info = self._convert_keys_to_title_case(
+                final_additional_info
+            )
 
             return title_case_additional_info
 
@@ -405,9 +428,6 @@ class FieldMapper:
             _LOGGER.error(f"[FieldMapper] Error in _merge_additional_info: {e}")
             return {}
 
-    def _merge_additional_info_temp_fix(self, source_data: dict) -> dict:
-        """임시 수정: additional_info를 빈 dict로 반환"""
-        return {}
 
     def _map_additional_info_with_title_case(self, source_data: dict) -> dict:
         """additional_info 매핑 시 Title Case 키 유지"""
@@ -487,7 +507,7 @@ class FieldMapper:
 
     def _finalize_mapped_data(self, mapped_data: dict, source_data: dict) -> dict:
         """매핑된 데이터 최종 후처리"""
-        # 🚨 CRITICAL: billed_date 필드 강제 보장
+        # billed_date 필드 강제 보장
         if not mapped_data.get("billed_date") or mapped_data["billed_date"] == "":
             from datetime import datetime
 
@@ -506,10 +526,23 @@ class FieldMapper:
             mapped_data["usage_quantity"]
         )
 
-        # 🚨 CRITICAL: 모든 Pandas 객체를 JSON 직렬화 가능한 타입으로 변환
+        # 모든 Pandas 객체를 JSON 직렬화 가능한 타입으로 변환
         mapped_data = self._sanitize_for_serialization(mapped_data)
 
-        # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+        # cost 필드 강제 보장 (최종 처리 전)
+        # 어떤 이유로든 cost 필드가 누락되지 않도록 이중 보장
+        if "cost" not in mapped_data:
+            mapped_data["cost"] = 0.0
+            _LOGGER.warning(
+                "[FieldMapper] CRITICAL: cost field was missing in mapped_data, forced to 0.0"
+            )
+        elif mapped_data["cost"] is None:
+            mapped_data["cost"] = 0.0
+            _LOGGER.warning(
+                "[FieldMapper] CRITICAL: cost field was None in mapped_data, forced to 0.0"
+            )
+
+        # SpaceONE 프레임워크 요구사항 준수
         # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
         listed_price = self._get_listed_price_from_source(source_data)
         mapped_data["data"] = self._create_spaceone_billing_data(
@@ -518,6 +551,12 @@ class FieldMapper:
 
         # 일별 카운트 추적
         self._track_daily_count(mapped_data.get("billed_date", "unknown"))
+
+        # 궁극적 보장 시스템 적용
+        # from ..utils.cost_field_guardian import guarantee_cost_fields  # 삭제된 모듈
+        from ..utils.decimal_json_encoder import ensure_no_scientific_notation
+
+        mapped_data = ensure_no_scientific_notation(mapped_data)
 
         return mapped_data
 
@@ -580,14 +619,16 @@ class FieldMapper:
     def _create_spaceone_billing_data(
         self, source_data: dict, mapped_data: dict, listed_price
     ) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost, listed_price만 포함)"""
-        # 요청된 두 개 필드만 포함
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 listed_price 포함)"""
+        # cost 값을 mapped_data에서 가져오기
+        cost_value = mapped_data.get("cost", 0.0)
+
         data_structure = {
-            "cost": self._convert_to_numeric(mapped_data.get("cost", 0)),
+            "cost": self._convert_to_numeric(cost_value),
             "listed_price": self._convert_to_numeric(listed_price),
         }
 
-        # 🚨 CRITICAL: SpaceONE 응답 형식 보장 - data 필드도 Decimal을 float로 변환
+        # SpaceONE 응답 형식 보장 - data 필드도 Decimal을 float로 변환
         return self._ensure_spaceone_response_types(data_structure)
 
     def _convert_to_numeric(self, value):
@@ -723,15 +764,23 @@ class FieldMapper:
         for key, value in data.items():
             sanitized_data[key] = self._sanitize_single_field(key, value, convert_value)
 
+        # cost 필드 최종 보장 (sanitization 후에도)
+        if "cost" not in sanitized_data:
+            sanitized_data["cost"] = 0.0
+            _LOGGER.error("[FieldMapper] ULTIMATE CRITICAL: cost field was removed during sanitization, restored to 0.0")
+        elif sanitized_data["cost"] is None:
+            sanitized_data["cost"] = 0.0
+            _LOGGER.error("[FieldMapper] ULTIMATE CRITICAL: cost field became None during sanitization, restored to 0.0")
+
         return sanitized_data
 
     def _convert_single_value(self, value, pd, np, datetime, date, decimal_type):
         """개별 값을 직렬화 가능한 타입으로 변환"""
-        # 🚨 CRITICAL: None 체크를 먼저 수행
+        # None 체크를 먼저 수행 (하지만 cost 필드는 예외)
         if value is None:
             return None
 
-        # 🚨 CRITICAL: Pandas NA 체크는 안전하게 수행
+        # Pandas NA 체크는 안전하게 수행 (하지만 cost 필드는 예외)
         if self._is_pandas_na(value, pd):
             return None
 
@@ -785,7 +834,22 @@ class FieldMapper:
         try:
             sanitized_value = convert_value_func(value)
 
-            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+            # SpaceONE 필수 필드 절대 보장
+            if key == "cost":
+                # cost 필드는 절대 None이 될 수 없음
+                if sanitized_value is None:
+                    sanitized_value = 0.0
+                    _LOGGER.warning("[FieldMapper] CRITICAL: cost field was None, forced to 0.0")
+                # cost 필드는 반드시 숫자여야 함
+                if not isinstance(sanitized_value, (int, float)):
+                    try:
+                        sanitized_value = float(sanitized_value)
+                    except (ValueError, TypeError):
+                        sanitized_value = 0.0
+                        _LOGGER.warning(f"[FieldMapper] CRITICAL: Invalid cost value {value}, forced to 0.0")
+                return sanitized_value
+
+            # SpaceONE 프레임워크 요구사항 준수
             # data 필드는 SpaceONE에서 필수로 요구하므로 빈 딕셔너리로 설정
             if key == "data":
                 return self._handle_data_field(sanitized_value)
@@ -812,7 +876,7 @@ class FieldMapper:
             f"[FieldMapper] Failed to sanitize field {key}: {error}, keeping original value"
         )
         if key == "data":
-            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+            # SpaceONE 프레임워크 요구사항 준수
             # data 필드는 SpaceONE에서 필수로 요구하므로 빈 딕셔너리로 설정
             _LOGGER.debug(
                 "[FieldMapper] Force-set data field to empty dict due to sanitization error"
@@ -823,24 +887,30 @@ class FieldMapper:
 
     def _safe_get_usage_quantity(self, source_data: dict):
         """usage_quantity 필드를 안전하게 추출하고 기본값 처리
-        
+
         Args:
             source_data: 원본 데이터
-            
+
         Returns:
             usage_quantity 값 (없으면 0)
         """
         usage_quantity = source_data.get("usage_quantity")
-        
+
         # None, 빈 문자열, NaN 등의 경우 0으로 처리
-        if usage_quantity is None or usage_quantity == "" or str(usage_quantity).lower() == "nan":
+        if (
+            usage_quantity is None
+            or usage_quantity == ""
+            or str(usage_quantity).lower() == "nan"
+        ):
             return 0
-            
+
         # 숫자 타입으로 변환 시도
         try:
             return float(usage_quantity) if usage_quantity != 0 else 0
         except (ValueError, TypeError):
-            _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}, using 0")
+            _LOGGER.warning(
+                f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}, using 0"
+            )
             return 0
 
     def _get_cost_by_option(self, source_data: dict):
@@ -855,7 +925,6 @@ class FieldMapper:
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric == "AmortizedCost":
             cost_value = self._map_field("credits_amount", source_data, 0)
-            # _LOGGER.debug(f"[FieldMapper] Using AmortizedCost (credits_amount): {cost_value}")
             return cost_value
 
         # 기존 select_cost 로직
@@ -866,22 +935,18 @@ class FieldMapper:
                 or self._map_field("list_price", source_data, 0)
                 or self._map_field("list_price_total", source_data, 0)
             )
-            # _LOGGER.debug(f"[FieldMapper] Using list_price: {cost_value}")
             return cost_value
         elif self.select_cost == "after_credits":
             # 크레딧 적용 후 비용
             cost_value = self._map_field("cost_after_credits", source_data, 0)
-            # _LOGGER.debug(f"[FieldMapper] Using after_credits: {cost_value}")
             return cost_value
         elif self.select_cost == "net_cost":
             # 순 비용 (기본 cost와 동일)
             cost_value = self._map_field("cost", source_data, 0)
-            # _LOGGER.debug(f"[FieldMapper] Using net_cost: {cost_value}")
             return cost_value
         else:
             # 기본값: cost
             cost_value = self._map_field("cost", source_data, 0)
-            # _LOGGER.debug(f"[FieldMapper] Using default cost: {cost_value}")
             return cost_value
 
     def _map_tags_field(self, source_data: dict) -> dict:
@@ -1497,6 +1562,7 @@ class FieldMapper:
         # pandas NaN 체크
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return []
         except (TypeError, ValueError, ImportError):
@@ -1621,10 +1687,10 @@ class FieldMapper:
 
         # 하이픈이나 언더스코어로 구분된 단어들을 Title Case로 변환
         # 예: "goog-gke-node" -> "Goog Gke Node"
-        if '-' in text or '_' in text:
+        if "-" in text or "_" in text:
             # 하이픈과 언더스코어를 공백으로 치환하고 각 단어를 Title Case로
-            words = text.replace('-', ' ').replace('_', ' ').split()
-            return ' '.join(word.capitalize() for word in words)
+            words = text.replace("-", " ").replace("_", " ").split()
+            return " ".join(word.capitalize() for word in words)
 
         # 일반적인 경우 첫 글자만 대문자로
         return text.capitalize()
@@ -1636,7 +1702,7 @@ class FieldMapper:
 
         # 하이픈을 언더스코어로 변환
         # 예: "goog-gke-node" -> "goog_gke_node"
-        return text.replace('-', '_')
+        return text.replace("-", "_")
 
     def _evaluate_expression(self, expression: str, data: dict) -> Any:
         """간단한 표현식 평가 (보안상 제한적으로 구현)"""
@@ -1754,7 +1820,6 @@ class FieldMapper:
         if hasattr(value, "to_pydatetime"):
             result = value.to_pydatetime().strftime("%Y-%m-%d")
             if self._debug_format_date_count <= 10:
-                # _LOGGER.info(f"[FieldMapper] DEBUG: pandas.Timestamp {repr(value)} -> {repr(result)}")
                 pass
             return result
         elif isinstance(value, datetime):
@@ -1894,7 +1959,7 @@ class FieldMapper:
                         "transform": "array_parse",
                         "output_key": "Project Ancestry Numbers",
                     },
-                    # 🔧 서비스 정보 (BigQuery 중첩 구조) - Title Case 유지
+                    # 서비스 정보 (BigQuery 중첩 구조) - Title Case 유지
                     "Service ID": {
                         "field": "service.id",
                         "fallback": "service_id",
@@ -2079,13 +2144,11 @@ class FieldMapper:
             return
 
         # log_type = "중간" if is_intermediate else "상세"
-        # _LOGGER.info(f"[FieldMapper] === {log_type} 일별 카운트 요약 (총 {self.total_processed_count:,}개 처리) ===")
 
         # 날짜순으로 정렬하여 로깅 (주석 처리됨)
         # sorted_dates = sorted(self.daily_count_tracker.items())
         # for date, count in sorted_dates:
         #     percentage = (count / self.total_processed_count) * 100 if self.total_processed_count > 0 else 0
-        #     _LOGGER.info(f"[FieldMapper]   📅 {date}: {count:,}개 ({percentage:.1f}%)")
 
     def log_final_daily_count_summary(self):
         """최종 일별 카운트 요약 로깅 (외부에서 호출 가능)"""
@@ -2138,6 +2201,7 @@ class FieldMapper:
         # pandas NaN 체크
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return []
         except (TypeError, ValueError, ImportError):
@@ -2155,6 +2219,7 @@ class FieldMapper:
 
             try:
                 import json
+
                 parsed = json.loads(str_value)
                 if isinstance(parsed, list):
                     return self._clean_repeated_array(parsed)
@@ -2179,28 +2244,34 @@ class FieldMapper:
         for item in array:
             if item is None:
                 continue
-            
+
             # pandas NaN 체크
             try:
                 import pandas as pd
+
                 if pd.isna(item):
                     continue
             except (TypeError, ValueError, ImportError):
                 pass
 
             # 빈 문자열이나 null 값 제거
-            if isinstance(item, str) and item.strip().lower() in ("", "none", "null", "nan"):
+            if isinstance(item, str) and item.strip().lower() in (
+                "",
+                "none",
+                "null",
+                "nan",
+            ):
                 continue
 
             cleaned.append(item)
-        
+
         return cleaned
 
     def _process_project_labels(self, project_data: dict) -> list:
         """project.labels REPEATED 필드 처리"""
         if not isinstance(project_data, dict):
             return []
-        
+
         labels_data = project_data.get("labels")
         return self._process_repeated_field(labels_data, "project.labels")
 
@@ -2208,7 +2279,7 @@ class FieldMapper:
         """project.ancestors REPEATED 필드 처리"""
         if not isinstance(project_data, dict):
             return []
-        
+
         ancestors_data = project_data.get("ancestors")
         return self._process_repeated_field(ancestors_data, "project.ancestors")
 

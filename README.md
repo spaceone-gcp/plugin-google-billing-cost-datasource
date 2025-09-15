@@ -39,17 +39,15 @@ SpaceONE plugin for collecting Google Cloud Billing data with support for both B
 📖 **Complete documentation is available in Korean**: [`docs/ko/README.md`](./docs/ko/README.md)
 
 ### Quick Links
-- **[🏗️ Cloud Billing 데이터를 BigQuery로 내보내기](./docs/ko/user-guide/Cloud%20Billing%20데이터를%20BigQuery로%20내보내기.md)** - BigQuery export overview and guide ⭐ **NEW**
-- **[⚙️ BigQuery로 Cloud Billing 데이터 내보내기 설정](./docs/ko/user-guide/BigQuery로%20Cloud%20Billing%20데이터%20내보내기%20설정.md)** - Step-by-step setup guide ⭐ **NEW**
-- **[📊 BigQuery의 Cloud Billing 데이터 테이블 이해하기](./docs/ko/user-guide/BigQuery의%20Cloud%20Billing%20데이터%20테이블%20이해하기.md)** - Table structure overview ⭐ **NEW**
-- **[💰 가격 책정 데이터 내보내기의 구조](./docs/ko/user-guide/가격%20책정%20데이터%20내보내기의%20구조.md)** - Pricing data schema ⭐ **NEW**
-- **[🔍 Cloud Billing 데이터 내보내기의 쿼리 예시](./docs/ko/user-guide/Cloud%20Billing%20데이터%20내보내기의%20쿼리%20예시.md)** - Practical query examples ⭐ **NEW**
-- **[Billing Export Setup Guide](./docs/ko/user-guide/billing-export-setup.md)** - How to set up Google Cloud Billing Export
-- **[Integration Guide](./docs/ko/user-guide/integration-guide.md)** - Plugin configuration and usage
-- **[Data Analysis Guide](./docs/ko/user-guide/data-analysis-guide.md)** - Understanding billing data structure
-- **[Pricing Data Export Guide](./docs/ko/user-guide/pricing-data-export-guide.md)** - Price analysis and comparison ⭐ **NEW**
-- **[Credits & Discounts Analysis](./docs/ko/user-guide/credits-and-discounts-analysis.md)** - Advanced cost optimization analysis
-- **[Security Best Practices](./docs/ko/development/security-best-practices.md)** - Security configuration guide ⭐ **NEW**
+- **[📚 문서_관리_가이드](./docs/ko/문서_관리_가이드.md)** - Comprehensive documentation system ⭐ **NEW**
+- **[🔧 BigQuery_설정_가이드](./docs/ko/user-guide/BigQuery_설정_가이드.md)** - Complete BigQuery billing data setup ⭐ **NEW**
+- **[🚀 SpaceONE_호환성_가이드](./docs/ko/development/SpaceONE_호환성_가이드.md)** - Platform compatibility guide ⭐ **NEW**
+- **[통합_가이드](./docs/ko/user-guide/통합_가이드.md)** - Plugin configuration and usage
+- **[데이터_분석_가이드](./docs/ko/user-guide/데이터_분석_가이드.md)** - Understanding billing data structure
+- **[빌링_내보내기_설정_가이드](./docs/ko/user-guide/빌링_내보내기_설정_가이드.md)** - How to set up Google Cloud Billing Export
+- **[가격_데이터_내보내기_가이드](./docs/ko/user-guide/가격_데이터_내보내기_가이드.md)** - Price analysis and comparison
+- **[크레딧_및_할인_분석_가이드](./docs/ko/user-guide/크레딧_및_할인_분석_가이드.md)** - Advanced cost optimization analysis
+- **[보안_강화_사항](./docs/ko/보안_강화_사항.md)** - Security policies and improvements
 
 ## Quick Start
 

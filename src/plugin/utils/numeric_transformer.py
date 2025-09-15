@@ -54,10 +54,15 @@ class NumericTransformer:
             return 0
 
     def to_float(self, value: Any) -> float:
-        """값을 실수로 변환"""
+        """값을 실수로 변환 (소수점 표기법 보장)"""
         try:
             decimal_value = self.to_decimal(value)
-            return float(decimal_value)
+            float_value = float(decimal_value)
+
+            # 소수점 표기법으로 강제 변환
+            from .decimal_json_encoder import format_number_as_decimal
+
+            return format_number_as_decimal(float_value)
         except Exception as e:
             _LOGGER.warning(
                 f"[NumericTransformer] Failed to convert to float: {value}, error: {e}"

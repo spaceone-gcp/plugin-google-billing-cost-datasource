@@ -18,12 +18,12 @@ GCS_CONFIG = {
         "snappy",
         "zstd",
     ],  # zst, sz 제거 (Parquet 파일과 혼동 방지)
-    "default_chunk_size": 1000,  # gRPC 메시지 크기 제한을 고려하여 감소
-    "max_chunk_size": 2000,  # 최대 청크 크기 제한
+    "default_chunk_size": 500,  # gRPC 메시지 크기 제한을 고려하여 더욱 감소
+    "max_chunk_size": 1000,  # 최대 청크 크기 제한 - 안전성 확보
     "max_file_size": 1024 * 1024 * 1024,  # 1GB
     "download_timeout": 300,  # 5분
     "max_files_per_batch": 10,  # 배치당 최대 파일 수
-    "grpc_message_size_limit": 4 * 1024 * 1024,  # 4MB (gRPC 기본 제한)
+    "grpc_message_size_limit": 3 * 1024 * 1024,  # 3MB (안전 마진 확보)
     "connection_timeout": 10,  # 연결 타임아웃
 }
 

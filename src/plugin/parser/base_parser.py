@@ -41,7 +41,7 @@ class BaseParser(ABC):
 
     def _create_batch_result(self, records: list) -> dict:
         """배치 결과 생성 - billed_date 필드 검증 및 직렬화 포함"""
-        # 🚨 CRITICAL: 모든 레코드에 billed_date 필드가 있는지 검증
+        # 모든 레코드에 billed_date 필드가 있는지 검증
         validated_records = []
         for record in records:
             if not record.get("billed_date"):
@@ -49,10 +49,10 @@ class BaseParser(ABC):
 
                 record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
 
-            # 🚨 CRITICAL: 모든 Pandas/Numpy 객체를 직렬화 가능한 타입으로 변환
+            # 모든 Pandas/Numpy 객체를 직렬화 가능한 타입으로 변환
             sanitized_record = self._sanitize_record_for_serialization(record)
 
-            # 🚨 CRITICAL: SpaceONE 프레임워크 요구사항 준수
+            # SpaceONE 프레임워크 요구사항 준수
             # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
             listed_price = self._get_listed_price_from_record(record)
             sanitized_record["data"] = self._create_spaceone_billing_data(
@@ -61,19 +61,47 @@ class BaseParser(ABC):
 
             validated_records.append(sanitized_record)
 
-        # 🚨 FINAL CRITICAL: SpaceONE 프레임워크 요구사항 최종 확인
+        # SpaceONE 프레임워크 요구사항 최종 확인
         # data 필드에 listed_price와 cost 정보가 포함되었는지 최종 확인
         final_results = []
         for record in validated_records:
+            # cost 필드 절대 보장
+            if "cost" not in record:
+                record["cost"] = 0.0
+            elif record["cost"] is None:
+                record["cost"] = 0.0
+
             # data 필드가 올바르게 설정되었는지 확인하고 보장
             if "data" not in record or not isinstance(record["data"], dict):
                 listed_price = self._get_listed_price_from_record(record)
                 record["data"] = self._create_spaceone_billing_data(
                     record, listed_price
                 )
+
+            # data 필드에도 cost가 있는지 확인
+            if isinstance(record.get("data"), dict):
+                if "cost" not in record["data"]:
+                    record["data"]["cost"] = record.get("cost", 0.0)
+
             final_results.append(record)
 
-        return {"results": final_results}
+        # 궁극적 보장 시스템 적용 - cost 필드 최종 검증
+        response = {"results": final_results}
+        
+        # 🚨 CRITICAL: 모든 레코드에 cost 필드가 최상위에 있는지 최종 확인
+        for record in response["results"]:
+            if isinstance(record, dict):
+                if "cost" not in record:
+                    record["cost"] = 0.0
+                    _LOGGER.error("[BaseParser] CRITICAL: cost field missing, added 0.0")
+                # cost 필드를 딕셔너리의 첫 번째 위치로 이동
+                cost_value = record.pop("cost")
+                record_copy = record.copy()
+                record.clear()
+                record["cost"] = cost_value  # 첫 번째 위치에 cost 필드 배치
+                record.update(record_copy)
+
+        return response
 
     def _get_listed_price_from_record(self, record: dict):
         """레코드에서 listed_price(정가) 정보를 추출
@@ -187,10 +215,10 @@ class BaseParser(ABC):
 
         def convert_value(value):
             """개별 값을 직렬화 가능한 타입으로 변환"""
-            # 🚨 CRITICAL: None 체크를 먼저 수행
+            # None 체크를 먼저 수행
             if value is None:
                 return None
-            # 🚨 CRITICAL: Pandas NA 체크는 안전하게 수행
+            # Pandas NA 체크는 안전하게 수행
             try:
                 if pd.isna(value):
                     return None
@@ -255,20 +283,24 @@ class BaseParser(ABC):
             return len(records) * 1000  # 레코드당 1KB로 추정
 
     def _adjust_chunk_size_dynamically(self, current_batch_size: int, records: list):
-        """동적 청크 크기 조정"""
+        """동적 청크 크기 조정 - 더욱 보수적인 접근"""
         estimated_size = self._estimate_message_size(records)
 
-        if estimated_size > self.grpc_message_limit * 0.8:  # 80% 임계값
+        if estimated_size > self.grpc_message_limit * 0.6:  # 60% 임계값으로 더욱 보수적 접근
             # 청크 크기를 줄여야 함
-            new_chunk_size = max(100, int(self.chunk_size * 0.7))
+            new_chunk_size = max(50, int(self.chunk_size * 0.5))  # 더 적극적으로 감소
             if new_chunk_size != self.chunk_size:
                 self.chunk_size = new_chunk_size
+                _LOGGER.warning(
+                    f"[BaseParser] Chunk size reduced to {new_chunk_size} "
+                    f"(estimated message size: {estimated_size:,} bytes)"
+                )
         elif (
-            estimated_size < self.grpc_message_limit * 0.3
+            estimated_size < self.grpc_message_limit * 0.2  # 20%로 더욱 보수적
             and self.chunk_size < self.max_chunk_size
         ):
-            # 청크 크기를 늘릴 수 있음
-            new_chunk_size = min(self.max_chunk_size, int(self.chunk_size * 1.2))
+            # 청크 크기를 늘릴 수 있음 (천천히)
+            new_chunk_size = min(self.max_chunk_size, int(self.chunk_size * 1.1))  # 10%씩만 증가
             if new_chunk_size != self.chunk_size:
                 self.chunk_size = new_chunk_size
 

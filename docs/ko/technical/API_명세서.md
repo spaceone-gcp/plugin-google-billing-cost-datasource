@@ -2,6 +2,111 @@
 
 Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. 주요 커넥터들의 API와 새로운 기능들을 포함합니다.
 
+## 🚨 SpaceONE JSON 응답 형식 제약사항
+
+### 과학적 표기법 사용 금지 **[CRITICAL]**
+
+모든 API 응답에서 **과학적 표기법은 절대 사용할 수 없습니다**. SpaceONE 플랫폼은 JSON 응답에서 과학적 표기법을 지원하지 않습니다.
+
+#### ❌ 금지된 표기법
+```json
+{
+  "cost": 1.23e-6,        // 과학적 표기법 금지
+  "usage_quantity": 4.56E+3,  // 대문자 E도 금지
+  "listed_price": 7.89e-12    // 매우 작은 값도 금지
+}
+```
+
+#### ✅ 허용된 표기법
+```json
+{
+  "cost": 0.00000123,         // 🚨 CRITICAL: 최상위 필드, 절대 누락 금지
+  "usage_quantity": 4560.0,   // 정수도 소수점 포함 권장
+  "data": {
+    "cost": 0.00000123,       // data 필드 내의 cost (별도)
+    "listed_price": 0.0       // 매우 작은 값은 0.0으로 처리
+  }
+}
+```
+
+#### SpaceONE 빌링 응답 필수 구조 요구사항
+
+**🚨 CRITICAL: 최상위 `cost` 필드는 SpaceONE 빌링 응답의 필수 항목입니다.**
+
+모든 빌링 응답에서 다음 구조를 **반드시** 준수해야 합니다:
+
+```json
+{
+  "results": [
+    {
+      "cost": 123.45,                    // 🚨 CRITICAL: 최상위 필수 필드, 절대 누락 금지
+      "usage_quantity": 1000.0,          // 필수: 사용량
+      "provider": "google_cloud",        // 필수: 프로바이더
+      "region_code": "us-central1",      // 필수: 리전 코드
+      "product": "BigQuery",             // 필수: 제품명
+      "usage_type": "Active Storage",    // 필수: 사용 유형
+      "resource": "project-123",         // 필수: 리소스 식별자
+      "currency": "KRW",                 // 🆕 필수: 통화 (최상위 필드)
+      "billed_date": "2025-09-10",       // 필수: 청구 날짜 (YYYY-MM-DD)
+      "tags": {},                        // 필수: 태그 (빈 객체 허용)
+      "additional_info": {},             // 필수: 추가 정보 (빈 객체 허용)
+      "data": {                          // 필수: SpaceONE 프레임워크 요구사항
+        "cost": 123.45,                  // data 필드 내의 cost (별도)
+        "listed_price": 123.45,
+        "currency_conversion_rate": 1354.59
+      }
+    }
+  ]
+}
+```
+
+### 실제 BigQuery 응답 예시 (완전한 구조 - 확장됨)
+
+다음은 실제 Google Cloud BigQuery에서 생성되는 완전한 SpaceONE 응답 예시입니다 (추가 필드 포함):
+
+```json
+{
+  "results": [
+    {
+      "cost": 0.0,                       // 🚨 CRITICAL: 최상위 필수 필드
+      "usage_unit": "hour",
+      "usage_quantity": 0.0,
+      "provider": "google_cloud",
+      "region_code": "global",
+      "product": "Compute Engine",
+      "usage_type": "Licensing Fee for Google Cloud Dataproc (GPU cost)",
+      "resource": "mkkang-project",
+      "currency": "USD",
+      "tags": {},
+      "additional_info": {
+        "Billing Account ID": "01FD8E-B4DDC1-EAB69F",
+        "Cost After Credits": 0,
+        "Cost At List": 0,
+        "Cost Type": "regular",
+        "Credits Detail": [],
+        "Invoice Month": "202509",
+        "Project ID": "mkkang-project",
+        "Project Name": "mkkang-project",
+        "Resource Tags": {}
+      },
+      "data": {
+        "cost": "0.0",
+        "listed_price": "0.0"
+      },
+      "billed_date": "2025-09-15"
+    }
+  ]
+}
+```
+
+#### 구현 요구사항
+- [ ] **최상위 `cost` 필드 절대 보장** (data.cost와 별개의 필수 필드)
+- [ ] **필수 필드 누락 방지**: cost, usage_quantity, provider, region_code, product, usage_type, resource, billed_date, currency, tags, additional_info, data
+- [ ] 모든 숫자 필드에 `decimal_json_encoder` 적용
+- [ ] 응답 전 과학적 표기법 패턴 검증
+- [ ] `1e-15` 미만 값은 `0.0`으로 처리
+- [ ] JSON 직렬화 전 완전한 과학적 표기법 제거
+
 ## BigQuery Connector API
 
 ### 세션 생성 (향상된 인증 처리)

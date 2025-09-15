@@ -407,7 +407,6 @@ class JobManager(BaseManager):
         )
 
         # 디버깅을 위한 추가 출력 (기존 코드 유지)
-        print(f"[DEBUG] _get_http_file_tasks called with start={start}")
 
         try:
             # HTTP 파일 커넥터 세션 생성 - 재시도 로직 추가

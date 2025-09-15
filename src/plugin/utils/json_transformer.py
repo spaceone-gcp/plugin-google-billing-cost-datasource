@@ -55,9 +55,44 @@ class JsonTransformer:
             return {}
 
     def stringify(self, value: Any) -> str:
-        """값을 JSON 문자열로 변환"""
+        """값을 JSON 문자열로 변환 (소수점 표기법 전용)"""
         try:
-            return json.dumps(value, ensure_ascii=False)
+            # JSON 직렬화 전 cost 필드 최종 보장
+            if isinstance(value, dict) and "results" in value:
+                value = self._ensure_cost_fields_in_response(value)
+
+            # 소수점 표기법만 사용
+            from .decimal_json_encoder import dumps_decimal
+
+            return dumps_decimal(value)
         except (TypeError, ValueError) as e:
             _LOGGER.warning(f"[JsonTransformer] Failed to stringify: {e}")
             return str(value)
+
+    def _ensure_cost_fields_in_response(self, response: dict) -> dict:
+        """응답의 모든 레코드에 cost 필드가 있는지 최종 보장"""
+        if not isinstance(response.get("results"), list):
+            return response
+
+        fixed_count = 0
+        for record in response["results"]:
+            if isinstance(record, dict):
+                # 최상위 cost 필드 보장
+                if "cost" not in record:
+                    record["cost"] = 0.0
+                    fixed_count += 1
+                elif record["cost"] is None:
+                    record["cost"] = 0.0
+                    fixed_count += 1
+
+                # data.cost 필드 보장
+                if isinstance(record.get("data"), dict):
+                    if "cost" not in record["data"]:
+                        record["data"]["cost"] = record.get("cost", 0.0)
+
+        if fixed_count > 0:
+            print(
+                f"[JsonTransformer] ULTIMATE: Fixed {fixed_count} records with missing cost fields"
+            )
+
+        return response

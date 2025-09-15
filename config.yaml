@@ -3,8 +3,8 @@ GLOBAL:
   DEBUG: true
   # 순차 처리를 위한 최소 설정
   GRPC_MAX_WORKERS: 1                        # 순차 처리: 워커 1개만 사용
-  GRPC_MAX_RECEIVE_MESSAGE_LENGTH: 16777216  # 16MB (기본값으로 복원)
-  GRPC_MAX_SEND_MESSAGE_LENGTH: 16777216     # 16MB (기본값으로 복원)
+  GRPC_MAX_RECEIVE_MESSAGE_LENGTH: 67108864  # 64MB (대용량 데이터 처리)
+  GRPC_MAX_SEND_MESSAGE_LENGTH: 67108864     # 64MB (대용량 데이터 처리)
 
 DATABASES: {}
 
@@ -14,7 +14,22 @@ CONNECTORS: {}
 
 HANDLERS: {}
 
-LOG: {}
+LOG:
+  loggers:
+    spaceone:
+      level: DEBUG
+    root:
+      level: DEBUG
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: DEBUG
+      formatter: default
+      stream: ext://sys.stdout
+  formatters:
+    default:
+      format: "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
 
 SERVICE:
   spaceone.cost_analysis.plugin.data_source.service.data_source_service:
