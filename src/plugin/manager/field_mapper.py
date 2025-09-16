@@ -100,20 +100,20 @@ class FieldMapper:
             # 기본 필드 매핑 (null cost를 0으로 처리)
             cost_value = self._get_cost_by_option(source_data)
             # null 값을 강제로 0으로 처리 (여러 단계 체크)
+            # cost 값 원본 보존 (0으로 강제 변환 제거)
             if (
                 cost_value is None
                 or cost_value == ""
                 or str(cost_value).lower() == "null"
             ):
-                cost_value = 0.0
-            # 추가 안전장치: NaN이나 inf 체크
+                _LOGGER.debug(f"[FieldMapper] Cost value is None/empty/null, preserving as None")
+                cost_value = None
+            # NaN이나 inf 체크 (원본 보존)
             try:
-                if (
-                    not isinstance(cost_value, (int, float)) or cost_value != cost_value
-                ):  # NaN 체크
-                    cost_value = 0.0
+                if isinstance(cost_value, float) and (cost_value != cost_value):  # NaN 체크
+                    _LOGGER.warning(f"[FieldMapper] Cost value is NaN, preserving as NaN")
             except:
-                cost_value = 0.0
+                _LOGGER.warning(f"[FieldMapper] Cost value check failed, preserving original: {cost_value}")
             usage_quantity_value = self._safe_get_usage_quantity(source_data)
             billed_date_value = self._process_billed_date(source_data)
 
@@ -177,8 +177,8 @@ class FieldMapper:
 
             # 🚨 CRITICAL: 최종 결과 검증 및 디버깅
             if "cost" not in result:
-                _LOGGER.error(f"[FieldMapper] CRITICAL: map_record result missing cost field! Keys: {list(result.keys())}")
-                result["cost"] = 0.0
+                _LOGGER.warning(f"[FieldMapper] Cost field missing from result! Keys: {list(result.keys())}")
+                result["cost"] = None  # None으로 보존
             else:
                 _LOGGER.debug(f"[FieldMapper] map_record result has cost: {result['cost']}")
 
@@ -269,7 +269,7 @@ class FieldMapper:
         abs_value = abs(decimal_value)
 
         if abs_value == 0:
-            return 0.0
+            return decimal_value  # 원본 0 값 보존 (0.0, 0.00 등 정확한 형태 유지)
         elif abs_value >= 1000:
             # 큰 값: 소수점 2자리까지
             precision = 2
@@ -536,17 +536,15 @@ class FieldMapper:
         # 모든 Pandas 객체를 JSON 직렬화 가능한 타입으로 변환
         mapped_data = self._sanitize_for_serialization(mapped_data)
 
-        # cost 필드 강제 보장 (최종 처리 전)
-        # 어떤 이유로든 cost 필드가 누락되지 않도록 이중 보장
+        # cost 필드 검증 (0으로 강제 처리 제거)
         if "cost" not in mapped_data:
-            mapped_data["cost"] = 0.0
             _LOGGER.warning(
-                "[FieldMapper] CRITICAL: cost field was missing in mapped_data, forced to 0.0"
+                "[FieldMapper] Cost field was missing in mapped_data, preserving as None"
             )
+            mapped_data["cost"] = None
         elif mapped_data["cost"] is None:
-            mapped_data["cost"] = 0.0
-            _LOGGER.warning(
-                "[FieldMapper] CRITICAL: cost field was None in mapped_data, forced to 0.0"
+            _LOGGER.info(
+                "[FieldMapper] Cost field is None in mapped_data, preserving None value"
             )
 
         # SpaceONE 프레임워크 요구사항 준수
@@ -771,13 +769,12 @@ class FieldMapper:
         for key, value in data.items():
             sanitized_data[key] = self._sanitize_single_field(key, value, convert_value)
 
-        # cost 필드 최종 보장 (sanitization 후에도)
+        # cost 필드 검증 (원본 값 보존)
         if "cost" not in sanitized_data:
-            sanitized_data["cost"] = 0.0
-            _LOGGER.error("[FieldMapper] ULTIMATE CRITICAL: cost field was removed during sanitization, restored to 0.0")
+            sanitized_data["cost"] = None
+            _LOGGER.warning("[FieldMapper] Cost field was removed during sanitization, set to None")
         elif sanitized_data["cost"] is None:
-            sanitized_data["cost"] = 0.0
-            _LOGGER.error("[FieldMapper] ULTIMATE CRITICAL: cost field became None during sanitization, restored to 0.0")
+            _LOGGER.debug("[FieldMapper] Cost field is None after sanitization, preserving None value")
 
         return sanitized_data
 
@@ -843,17 +840,15 @@ class FieldMapper:
 
             # SpaceONE 필수 필드 절대 보장
             if key == "cost":
-                # cost 필드는 절대 None이 될 수 없음
+                # cost 필드 원본 값 보존
                 if sanitized_value is None:
-                    sanitized_value = 0.0
-                    _LOGGER.warning("[FieldMapper] CRITICAL: cost field was None, forced to 0.0")
-                # cost 필드는 반드시 숫자여야 함
-                if not isinstance(sanitized_value, (int, float)):
+                    _LOGGER.debug("[FieldMapper] Cost field is None, preserving None value")
+                # 숫자 변환 시도 (실패해도 원본 보존)
+                elif not isinstance(sanitized_value, (int, float)):
                     try:
                         sanitized_value = float(sanitized_value)
                     except (ValueError, TypeError):
-                        sanitized_value = 0.0
-                        _LOGGER.warning(f"[FieldMapper] CRITICAL: Invalid cost value {value}, forced to 0.0")
+                        _LOGGER.warning(f"[FieldMapper] Cost value conversion failed, preserving original: {value}")
                 return sanitized_value
 
             # SpaceONE 프레임워크 요구사항 준수
@@ -911,9 +906,9 @@ class FieldMapper:
         ):
             return 0
 
-        # 숫자 타입으로 변환 시도
+        # 숫자 타입으로 변환 시도 (0 값도 원본 보존)
         try:
-            return float(usage_quantity) if usage_quantity != 0 else 0
+            return float(usage_quantity)  # 0 값도 원본 그대로 변환
         except (ValueError, TypeError):
             _LOGGER.warning(
                 f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}, using 0"

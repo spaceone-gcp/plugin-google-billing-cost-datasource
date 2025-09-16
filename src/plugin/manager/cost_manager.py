@@ -214,35 +214,37 @@ class CostManager(BaseManager):
                     for record in cost_data["results"]:
                         if isinstance(record, dict) and "cost" not in record:
                             # 1차: data 필드에서 cost 복구 시도 (과학적 표기법 지원)
-                            cost_value = 0.0
+                            cost_value = None  # 원본 None 보존
                             recovery_source = "none"
                             
                             if "data" in record and isinstance(record["data"], dict):
                                 data_cost = record["data"].get("cost")
                                 if data_cost is not None:
                                     try:
-                                        cost_value = float(data_cost)  # 과학적 표기법 자동 변환
+                                        # 🚨 ULTRA PURE DATA: 과학적 표기법도 원본 그대로 보존
+                                        cost_value = data_cost  # 모든 값을 원본 그대로 보존
                                         recovery_source = "data.cost"
                                         _LOGGER.info(f"[BigQuery] Cost recovered from data.cost: {cost_value} (scientific: {data_cost})")
                                     except (ValueError, TypeError):
                                         pass
                             
                             # 2차: additional_info에서 cost 복구 시도
-                            if cost_value == 0.0 and "additional_info" in record and isinstance(record["additional_info"], dict):
+                            if cost_value is None and "additional_info" in record and isinstance(record["additional_info"], dict):
                                 ai = record["additional_info"]
                                 # 여러 cost 필드 시도
                                 for field_name in ["Cost at Effective Price Default", "Cost at List Consumption Model", "Cost with Credits", "Cost After Credits"]:
                                     if field_name in ai and ai[field_name] != 0:
                                         try:
-                                            cost_value = float(ai[field_name])
+                                            # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
+                                            cost_value = ai[field_name]  # 모든 값을 원본 그대로 보존
                                             recovery_source = f"additional_info.{field_name}"
                                             _LOGGER.info(f"[BigQuery] Cost recovered from {field_name}: {cost_value}")
                                             break
                                         except (ValueError, TypeError):
                                             continue
                             
-                            # 최상위 cost 필드 추가 (첫 번째 위치)
-                            new_record = {"cost": cost_value}
+                            # 최상위 cost 필드 추가 (첫 번째 위치) - None도 보존
+                            new_record = {"cost": cost_value if cost_value is not None else None}
                             new_record.update(record)
                             record.clear()
                             record.update(new_record)
@@ -254,6 +256,13 @@ class CostManager(BaseManager):
                     # 배치 크기에 도달하면 yield
                     if len(batch_records) >= batch_size:
                         batch_result = {"results": batch_records}
+                        
+                        # 🔍 BigQuery 배치 응답 레코드 로깅 (모든 레코드)
+                        if batch_records:
+                            _LOGGER.info(f"[BigQuery-Response] 배치 응답 레코드 수: {len(batch_records)}")
+                            for i, record in enumerate(batch_records):  # 모든 레코드 로깅
+                                _LOGGER.info(f"[BigQuery-Response] 레코드 {i+1}: {record}")
+                        
                         yield batch_result
                         batch_records = []
 
@@ -266,6 +275,12 @@ class CostManager(BaseManager):
                 _LOGGER.debug(
                     f"[BigQuery] Final batch result keys: {list(batch_result.keys())}"
                 )
+                
+                # 🔍 BigQuery 최종 배치 응답 레코드 로깅 (모든 레코드)
+                _LOGGER.info(f"[BigQuery-FinalResponse] 최종 배치 응답 레코드 수: {len(batch_records)}")
+                for i, record in enumerate(batch_records):  # 모든 레코드 로깅
+                    _LOGGER.info(f"[BigQuery-FinalResponse] 레코드 {i+1}: {record}")
+                
                 yield batch_result
 
             _LOGGER.info(f"[BigQuery] 처리 완료 - 총 {row_count}건의 데이터 처리됨")
@@ -379,6 +394,12 @@ class CostManager(BaseManager):
                                 f"Processed batch of {batch_size:,} records "
                                 f"(File total: {file_processed_count:,})"
                             )
+                            
+                            # 🔍 GCS 배치 응답 레코드 로깅 (모든 레코드)
+                            _LOGGER.info(f"[GCS-Response] File {file_index} 배치 응답 레코드 수: {batch_size}")
+                            for i, record in enumerate(batch_result["results"]):  # 모든 레코드 로깅
+                                _LOGGER.info(f"[GCS-Response] 레코드 {i+1}: {record}")
+                        
                         yield batch_result
 
                     _LOGGER.info(
@@ -620,6 +641,14 @@ class CostManager(BaseManager):
                         converted_result = self._convert_to_bigquery_structure(
                             batch_result
                         )
+                        
+                        # 🔍 HTTP 배치 응답 레코드 로깅 (모든 레코드)
+                        if converted_result and "results" in converted_result:
+                            response_size = len(converted_result["results"])
+                            _LOGGER.info(f"[HTTP-Response] 배치 응답 레코드 수: {response_size}")
+                            for i, record in enumerate(converted_result["results"]):  # 모든 레코드 로깅
+                                _LOGGER.info(f"[HTTP-Response] 레코드 {i+1}: {record}")
+                        
                         yield converted_result
 
                 _LOGGER.info(
@@ -660,13 +689,12 @@ class CostManager(BaseManager):
         if "results" in gcs_result and isinstance(gcs_result["results"], list):
             for record in gcs_result["results"]:
                 if isinstance(record, dict):
-                    # 최상위 cost 필드 보장 (변환 전)
+                    # cost 필드 검증 (원본 값 보존)
                     if "cost" not in record:
-                        record["cost"] = 0.0
-                        _LOGGER.error("[CostManager] cost field missing before BigQuery conversion, added 0.0")
+                        record["cost"] = None
+                        _LOGGER.warning("[CostManager] cost field missing before BigQuery conversion, set to None")
                     elif record["cost"] is None:
-                        record["cost"] = 0.0
-                        _LOGGER.error("[CostManager] cost field was None before BigQuery conversion, set to 0.0")
+                        _LOGGER.debug("[CostManager] cost field is None before BigQuery conversion, preserving None")
                     
                     # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
                     listed_price = self._get_listed_price_from_record(record)
@@ -676,8 +704,8 @@ class CostManager(BaseManager):
                     
                     # 모든 SpaceONE 필수 필드 보장 (변환 후)
                     spaceone_required_fields = {
-                        "cost": 0.0,
-                        "usage_quantity": 0.0,
+                        "cost": None,  # 🚨 ULTRA PURE: 기본값 None
+                        "usage_quantity": None,  # 🚨 ULTRA PURE: 기본값 None
                         "provider": "google_cloud",
                         "region_code": "global",
                         "product": "",
@@ -723,9 +751,8 @@ class CostManager(BaseManager):
             if list_price is not None and list_price != "" and list_price != 0:
                 # 문자열인 경우 숫자로 변환 시도
                 try:
-                    return (
-                        float(list_price) if isinstance(list_price, str) else list_price
-                    )
+                    # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
+                    return list_price  # 모든 값을 원본 그대로 보존
                 except (ValueError, TypeError):
                     pass
 
@@ -737,11 +764,8 @@ class CostManager(BaseManager):
                 and list_price_consumption != 0
             ):
                 try:
-                    return (
-                        float(list_price_consumption)
-                        if isinstance(list_price_consumption, str)
-                        else list_price_consumption
-                    )
+                    # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
+                    return list_price_consumption  # 모든 값을 원본 그대로 보존
                 except (ValueError, TypeError):
                     pass
 
@@ -756,7 +780,7 @@ class CostManager(BaseManager):
     def _create_spaceone_billing_data(self, record: dict, listed_price) -> dict:
         """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 listed_price 포함)"""
         # cost 값을 record에서 가져오기
-        cost_value = record.get("cost", 0.0)
+        cost_value = record.get("cost", None)  # 🚨 ULTRA PURE: 기본값 None
 
         data_structure = {
             "cost": self._convert_to_numeric(cost_value),
@@ -766,48 +790,20 @@ class CostManager(BaseManager):
         return data_structure
 
     def _convert_to_numeric(self, value):
-        """값을 적절한 숫자 타입으로 변환 (부동소수점 정밀도 개선 포함)"""
-        # 모든 null 케이스를 0.0으로 처리
-        if (
-            value is None
-            or value == ""
-            or str(value).lower() in ["null", "none", "nan"]
-        ):
-            return 0.0
+        """🚨 ULTRA PURE DATA: 값을 절대적으로 원본 그대로 보존 (변환 없음)"""
+        # 🚨 ULTRA PURE: null 케이스도 원본 그대로 보존
+        if value is None:
+            return None  # None을 0.0으로 강제 변환하지 않음
+        
+        if value == "":
+            return ""  # 빈 문자열도 그대로 보존
+            
+        if str(value).lower() in ["null", "none", "nan"]:
+            return value  # 문자열 "null", "none", "nan"도 그대로 보존
 
-        try:
-            from decimal import Decimal
-
-            # 이미 숫자인 경우 Decimal을 통해 정밀도 개선
-            if isinstance(value, (int, float)):
-                if isinstance(value, int):
-                    return float(value)  # int는 그대로
-                else:
-                    # float는 Decimal을 통해 정밀도 개선
-                    decimal_value = Decimal(str(value))
-                    float_value = self._decimal_to_clean_float(decimal_value)
-
-                    # 스트리밍 방식 소수점 표기법 강제 변환
-                    return self._format_float_streaming_style(float_value)
-
-            # Decimal인 경우 정밀도 개선 적용
-            if isinstance(value, Decimal):
-                return self._decimal_to_clean_float(value)
-
-            # 문자열인 경우 숫자로 변환
-            if isinstance(value, str):
-                cleaned_value = value.strip()
-                if not cleaned_value:
-                    return 0.0
-                decimal_value = Decimal(cleaned_value)
-                return self._decimal_to_clean_float(decimal_value)
-
-            # 기타 타입은 float로 변환 시도
-            decimal_value = Decimal(str(value))
-            return self._decimal_to_clean_float(decimal_value)
-
-        except (ValueError, TypeError, Exception):
-            return 0.0
+        # 🚨 ULTRA PURE: 모든 값을 절대적으로 원본 그대로 반환
+        # 어떠한 변환, 정밀도 개선, 타입 변경도 하지 않음
+        return value
 
     def _convert_to_string(self, value):
         """값을 문자열 타입으로 안전하게 변환 (GCS 파서와 동일한 로직)"""
@@ -877,16 +873,18 @@ class CostManager(BaseManager):
     ) -> dict:
         """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 listed_price 포함)"""
         # cost_value가 전달되면 사용, 아니면 row_dict에서 가져옴
-        actual_cost = cost_value if cost_value is not None else row_dict.get("cost", 0)
+        actual_cost = cost_value if cost_value is not None else row_dict.get("cost", None)  # 🚨 ULTRA PURE: 기본값 None
 
-        # data 필드에서도 null을 0으로 강제 처리
+        # 🚨 ULTRA PURE: data 필드에서도 null을 원본 그대로 보존
         final_actual_cost = self._convert_to_numeric(actual_cost)
         if final_actual_cost is None or str(final_actual_cost).lower() == "null":
-            final_actual_cost = 0.0
+            _LOGGER.debug("[CostManager] Actual cost is None/null, preserving as None")
+            final_actual_cost = None
 
         final_listed_price = self._convert_to_numeric(listed_price)
         if final_listed_price is None or str(final_listed_price).lower() == "null":
-            final_listed_price = 0.0
+            _LOGGER.debug("[CostManager] Listed price is None/null, preserving as None")
+            final_listed_price = None
 
         # data 필드에 cost와 listed_price 모두 포함
         data_structure = {
@@ -966,43 +964,36 @@ class CostManager(BaseManager):
 
         def convert_value(value):
             """개별 값을 SpaceONE 호환 타입으로 변환"""
-            # null 값을 0.0으로 강제 처리 (최종 안전장치)
-            if value is None or str(value).lower() in ["null", "none", "nan"]:
-                return 0.0
+            # 🚨 ULTRA PURE: null 값도 원본 그대로 보존 (0.0으로 강제 변환 제거)
+            if value is None:
+                return None  # None은 None 그대로
+            elif isinstance(value, str) and str(value).lower() in ["null", "none", "nan"]:
+                return value  # 문자열도 그대로
             elif isinstance(value, Decimal):
-                # Decimal -> float (적절한 정밀도로 반올림 후 변환)
-                return self._decimal_to_clean_float(value)
+                # 🚨 ULTRA PURE: Decimal도 그대로 보존 (float 변환 제거)
+                return value  # Decimal 그대로 보존
             elif isinstance(value, dict):
                 # 중첩 딕셔너리 재귀 처리
                 nested_result = {}
                 for k, v in value.items():
                     converted_v = convert_value(v)
-                    # 중첩 딕셔너리에서도 cost 필드 보장
+                    # 중첩 딕셔너리에서 cost 필드 원본 보존
                     if k == "cost" and converted_v is None:
-                        converted_v = 0.0
-                        _LOGGER.warning("[CostManager] cost field in nested dict was None, forced to 0.0")
+                        _LOGGER.debug("[CostManager] cost field in nested dict is None, preserving None value")
                     nested_result[k] = converted_v
                 
                 # 중첩 딕셔너리에서 cost 필드 존재 보장
                 if "cost" not in nested_result and any(key in nested_result for key in ["usage_quantity", "provider", "product"]):
                     # SpaceONE 레코드로 보이는 경우에만 cost 필드 추가
-                    nested_result["cost"] = 0.0
-                    _LOGGER.error("[CostManager] cost field missing in nested record, added 0.0")
+                    nested_result["cost"] = None
+                    _LOGGER.warning("[CostManager] cost field missing in nested record, added None")
                 
+                # 모든 값을 원본 그대로 보존 (극소값도 보존)
                 for k, v in nested_result.items():
                     if isinstance(v, float):
-                        if abs(v) < 1e-15:
-                            nested_result[k] = 0.0
-                        elif abs(v) < 1e-12:
-                            nested_result[k] = round(v, 15)
-                        elif abs(v) < 1e-9:
-                            nested_result[k] = round(v, 12)
-                        elif abs(v) < 1e-6:
-                            nested_result[k] = round(v, 9)
-                        elif abs(v) < 1e-3:
-                            nested_result[k] = round(v, 6)
-                        else:
-                            nested_result[k] = round(v, 6)
+                        # 극소값도 포함하여 모든 값을 원본 그대로 보존
+                        _LOGGER.debug(f"[CostManager] Preserving original float value for {k}: {v}")
+                        # 반올림 제거하여 원본 정확도 유지
                 
                 return nested_result
             elif isinstance(value, (list, tuple)):
@@ -1016,40 +1007,32 @@ class CostManager(BaseManager):
             result = {}
             for k, v in data.items():
                 converted_value = convert_value(v)
-                # cost 필드는 절대 None이 될 수 없음
+                # cost 필드 원본 값 보존
                 if k == "cost" and converted_value is None:
-                    converted_value = 0.0
-                    _LOGGER.warning("[CostManager] cost field was None after conversion, forced to 0.0")
+                    _LOGGER.debug("[CostManager] cost field is None after conversion, preserving None value")
                 result[k] = converted_value
 
-            # cost 필드 존재 보장
+            # cost 필드 존재 확인
             if "cost" not in result:
-                result["cost"] = 0.0
-                _LOGGER.error("[CostManager] cost field was missing after type conversion, added 0.0")
+                result["cost"] = None
+                _LOGGER.warning("[CostManager] cost field was missing after type conversion, added None")
             
+            # 모든 값을 원본 그대로 보존 (극소값도 보존)
             for k, v in result.items():
                 if isinstance(v, float):
-                    if abs(v) < 1e-15:
-                        result[k] = 0.0
-                    elif abs(v) < 1e-12:
-                        result[k] = round(v, 15)
-                    elif abs(v) < 1e-9:
-                        result[k] = round(v, 12)
-                    elif abs(v) < 1e-6:
-                        result[k] = round(v, 9)
-                    elif abs(v) < 1e-3:
-                        result[k] = round(v, 6)
-                    else:
-                        result[k] = round(v, 6)
+                    # 극소값도 포함하여 모든 값을 원본 그대로 보존
+                    _LOGGER.debug(f"[CostManager] Preserving original float value for {k}: {v}")
+                    # 반올림 제거하여 원본 정확도 유지
 
-            # cost 필드는 절대 null이 될 수 없음
+            # cost 필드 값 확인 (원본 보존)
             if "cost" in result and (
                 result["cost"] is None or str(result["cost"]).lower() == "null"
             ):
-                result["cost"] = 0.0
+                _LOGGER.debug("[CostManager] Cost field is None/null, preserving as None")
             elif "cost" not in result:
-                # cost 필드가 아예 없는 경우도 처리
-                result["cost"] = 0.0
+                # cost 필드가 아예 없는 경우 None으로 설정
+                result["cost"] = None
+                _LOGGER.warning("[CostManager] Cost field missing, set to None")
 
             return result
         # 데이터가 리스트인 경우
@@ -1059,107 +1042,57 @@ class CostManager(BaseManager):
             return convert_value(data)
 
     def _clean_number(self, value):
-        """숫자를 깔끔하게 정리"""
+        """🚨 PURE DATA: 숫자 원본 데이터 보존 (반올림/조작 제거)"""
         if not isinstance(value, (int, float)):
-            try:
-                value = float(value)
-            except (ValueError, TypeError):
-                return 0.0
+            # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존 (과학적 표기법도 포함)
+            return value  # 모든 값을 절대적으로 원본 그대로 보존
         
-        # 매우 작은 값은 0.0으로 처리
-        if abs(value) < 1e-10:
-            return 0.0
-        
-        if abs(value) < 1e-4:  # 0.0001 미만인 경우
-            return 0.0
-        else:
-            # 일반적인 반올림
-            return round(value, 6)
+        # 🚨 PURE DATA: 모든 값을 원본 그대로 보존 (극소값도 보존)
+        # 더 이상 0.0으로 강제 변환하거나 반올림하지 않음
+        return value  # 원본 그대로 반환
 
     def _decimal_to_clean_float(self, decimal_value):
-        """Decimal을 적절한 정밀도로 반올림하여 깨끗한 float로 변환 (스트리밍 방식 적용)"""
-        from decimal import ROUND_HALF_UP, Decimal
-
-        if not isinstance(decimal_value, Decimal):
-            float_value = float(decimal_value)
-            # 스트리밍 방식 소수점 표기법 적용
-            return self._format_float_streaming_style(float_value)
-
-        # 값의 크기에 따라 적절한 정밀도 결정
-        abs_value = abs(decimal_value)
-
-        if abs_value == 0:
-            return 0.0
-        elif abs_value >= 1000:
-            # 큰 값: 소수점 2자리까지
-            precision = 2
-        elif abs_value >= 1:
-            # 중간 값: 소수점 6자리까지
-            precision = 6
-        elif abs_value >= 0.001:
-            # 작은 값: 소수점 9자리까지
-            precision = 9
-        else:
-            # 매우 작은 값: 소수점 12자리까지
-            precision = 12
-
-        # 지정된 정밀도로 반올림
-        quantize_exp = Decimal("0.1") ** precision
-        rounded_decimal = decimal_value.quantize(quantize_exp, rounding=ROUND_HALF_UP)
-
-        # float로 변환 후 스트리밍 방식 적용
-        float_value = float(rounded_decimal)
-        return self._format_float_streaming_style(float_value)
+        """🚨 ULTRA PURE DATA: 모든 값을 절대적으로 원본 그대로 보존 (변환 없음)"""
+        # 🚨 ULTRA PURE: Decimal도 포함하여 모든 값을 원본 그대로 반환
+        # 더 이상 float로 변환하지 않음
+        return decimal_value
 
     def _format_float_streaming_style(self, value: float) -> float:
-        """개선된 숫자 정리 (decimal_json_encoder 활용)"""
+        """🚨 PURE DATA: 숫자 원본 보존 (정리/변환 제거)"""
         try:
-            from ..utils.decimal_json_encoder import format_number_as_decimal
-            
-            decimal_str = format_number_as_decimal(value)
-            return float(decimal_str)
-        except Exception:
-            # 실패 시 기본 로직 사용
+            # 🚨 PURE DATA: 원본 값 그대로 반환 (더 이상 변환하지 않음)
             import math
             if math.isnan(value) or math.isinf(value):
-                return value
-            if value == 0.0 or abs(value) < 1e-15:
-                return 0.0
+                return value  # NaN, Infinity는 그대로
+            # 모든 값을 원본 그대로 보존 (극소값도 보존)
+            return value
+        except Exception:
+            # 예외 발생 시에도 원본 값 보존
             return value
 
     def _make_cost_data(self, row) -> dict:
         """완전히 단순화된 SpaceONE 빌링 응답 생성 (test_correct_format.json 기준)"""
         try:
             # 🚨 ULTIMATE: 과학적 표기법 지원 cost 필드 절대 보장 시스템
-            cost_value = getattr(row, "cost", 0.0)
+            cost_value = getattr(row, "cost", None)
             if cost_value is None or cost_value == "":
-                cost_value = 0.0
-                _LOGGER.info(f"[_make_cost_data] CRITICAL: cost was None/empty, enforced to 0.0")
+                _LOGGER.info(f"[_make_cost_data] Cost was None/empty, preserving as None for transparency")
             
-            # 🚨 ULTIMATE: 과학적 표기법(9.6e-05) 처리 개선
-            if not isinstance(cost_value, (int, float)):
-                try:
-                    cost_value = float(cost_value)
-                    _LOGGER.debug(f"[_make_cost_data] Scientific notation converted: {cost_value}")
-                except (ValueError, TypeError):
-                    cost_value = 0.0
-                    _LOGGER.error(f"[_make_cost_data] CRITICAL: cost conversion failed, forced to 0.0")
+            # 🚨 ULTRA PURE DATA: 모든 값을 절대적으로 원본 그대로 보존 (과학적 표기법도 포함)
+            # cost_value는 어떠한 변환도 없이 원본 그대로 유지
+            _LOGGER.debug(f"[_make_cost_data] Cost value preserved as absolute original: {cost_value}")
             
-            # 🚨 ULTIMATE: 극소값도 유효한 비용으로 보존 (1e-10 → 1e-15로 완화)
+            # 모든 cost 값을 원본 그대로 보존 (0으로 강제 처리 제거)
             if isinstance(cost_value, float):
-                if abs(cost_value) < 1e-15:  # 완전히 0에 가까운 경우만 0으로 처리
-                    cost_value = 0.0
-                    _LOGGER.debug(f"[_make_cost_data] Extremely small value normalized to 0.0")
-                elif abs(cost_value) < 1e-6:  # 극소값은 그대로 보존하되 로깅
-                    _LOGGER.info(f"[_make_cost_data] Small cost value preserved: {cost_value}")
-                else:
-                    cost_value = round(cost_value, 6)  # 일반적인 값은 반올림
+                pass
+                # 극소값도 포함하여 모든 값을 원본 그대로 보존
+                # _LOGGER.debug(f"[_make_cost_data] Cost value preserved as-is: {cost_value}")
+                # 반올림도 제거하여 원본 정확도 유지
             
-            usage_quantity = getattr(row, "usage_quantity", 0.0)
-            if isinstance(usage_quantity, float) and abs(usage_quantity) < 1e-4:
-                usage_quantity = 0.0
-            elif isinstance(usage_quantity, float):
-                usage_quantity = round(usage_quantity, 6)
+            # 🚨 SCHEMA FIX + PURE DATA: usage_quantity -> usage.amount (원본 데이터 보존)
+            usage_quantity = getattr(row, "usage_amount", None)  # 🚨 ULTRA PURE: 기본값도 None으로
+            # 🚨 PURE DATA: 절대로 반올림이나 변환 없이 원본 그대로 보존
+            # usage_quantity는 원본 값 그대로 사용
 
             # 🚨 CRITICAL: currency 필드 절대 보장 시스템
             currency_value = str(getattr(row, "currency", "USD")).strip()
@@ -1172,9 +1105,9 @@ class CostManager(BaseManager):
                 "cost": cost_value,  # 🚨 최상위 필수 필드 #1
                 "currency": currency_value,  # 🚨 최상위 필수 필드 #2
                 "usage_quantity": usage_quantity,
-                "usage_unit": str(getattr(row, "pricing_unit", "")).strip(),
+                "usage_unit": str(getattr(row, "usage_unit", "")).strip(),  # 🚨 SCHEMA FIX: usage.unit 사용
                 "provider": "google_cloud",
-                "region_code": str(getattr(row, "region_code", getattr(row, "location_region", "global"))).strip(),
+                "region_code": str(getattr(row, "location_region", "global")).strip(),  # 🚨 SCHEMA FIX: location.region 사용
                 "product": str(getattr(row, "service_description", "Unknown")).strip(),
                 "usage_type": str(getattr(row, "sku_description", "Unknown")).strip(),
                 "resource": str(getattr(row, "project_id", "")).strip(),
@@ -1182,11 +1115,12 @@ class CostManager(BaseManager):
                 "additional_info": {
                     # 기존 필수 필드들
                     "Billing Account ID": str(getattr(row, "billing_account_id", "")).strip(),
-                    "Cost After Credits": float(getattr(row, "cost_after_credits", 0.0)) if getattr(row, "cost_after_credits", 0.0) else 0.0,
-                    "Cost At List": float(getattr(row, "cost_at_list", cost_value)) if getattr(row, "cost_at_list", cost_value) else cost_value,
+                    # 🚨 SCHEMA FIX: cost_after_credits는 스키마에 없음 - 계산 필드로 처리
+                    "Cost After Credits": self._calculate_cost_after_credits(row),
+                    "Cost At List": getattr(row, "cost_at_list", cost_value),  # 🚨 PURE DATA: 원본 데이터 보존
                     "Cost Type": str(getattr(row, "cost_type", "regular")).strip(),
-                    "Credits Detail": [],
-                    "Invoice Month": str(getattr(row, "invoice_month", "")).strip(),
+                    "Credits Detail": self._process_credits_detail(row),
+                    "Invoice Month": self._extract_nested_field(row, "invoice", "month"),  # 🚨 SCHEMA FIX: invoice.month 중첩 구조 처리
                     "Project ID": str(getattr(row, "project_id", "")).strip(),
                     "Project Name": str(getattr(row, "project_name", "")).strip(),
                     "Resource Tags": {},
@@ -1202,47 +1136,85 @@ class CostManager(BaseManager):
                     "Currency": str(getattr(row, "currency", "USD")).strip(),
                     "Transaction Type": str(getattr(row, "transaction_type", "")).strip(),
                     "Seller Name": str(getattr(row, "seller_name", "")).strip(),
-                    "Publisher Type": str(getattr(row, "publisher_type", "")).strip(),
-                    "Usage Unit": str(getattr(row, "usage_unit", "")).strip(),
-                    "Pricing Unit": str(getattr(row, "pricing_unit", "")).strip(),
+                    "Publisher Type": self._extract_nested_field(row, "invoice", "publisher_type"),  # 🚨 SCHEMA FIX: invoice.publisher_type 중첩 구조
+                    "Usage Unit": str(getattr(row, "usage_unit", "")).strip(),  # ✅ 스키마 존재
+                    "Pricing Unit": self._extract_nested_field(row, "usage", "pricing_unit"),  # 🚨 SCHEMA FIX: usage.pricing_unit 중첩 구조
                     
                     # 추가 비용 정보
-                    "Cost at Effective Price Default": float(getattr(row, "cost_at_effective_price_default", 0.0)) if getattr(row, "cost_at_effective_price_default", 0.0) else 0.0,
-                    "Cost at List Consumption Model": float(getattr(row, "cost_at_list_consumption_model", 0.0)) if getattr(row, "cost_at_list_consumption_model", 0.0) else 0.0,
-                    "Currency Conversion Rate": float(getattr(row, "currency_conversion_rate", 1.0)) if getattr(row, "currency_conversion_rate", 1.0) else 1.0,
-                    "Usage Amount": float(getattr(row, "usage_amount", 0.0)) if getattr(row, "usage_amount", 0.0) else 0.0,
-                    "Credits Total Amount": float(getattr(row, "credits_total_amount", 0.0)) if getattr(row, "credits_total_amount", 0.0) else 0.0,
-                    "Cost with Credits": float(getattr(row, "cost_with_credits", cost_value)) if getattr(row, "cost_with_credits", cost_value) else cost_value,
+                    "Cost at Effective Price Default": getattr(row, "cost_at_effective_price_default", None),  # 🚨 ULTRA PURE: 기본값 None
+                    "Cost at List Consumption Model": getattr(row, "cost_at_list_consumption_model", None),  # 🚨 ULTRA PURE: 기본값 None
+                    "Currency Conversion Rate": getattr(row, "currency_conversion_rate", None),  # 🚨 ULTRA PURE: 기본값 None (1.0 제거)
+                    "Usage Amount": getattr(row, "usage_amount", None),  # 🚨 ULTRA PURE: 기본값 None
+                    # 🚨 SCHEMA FIX: credits_total_amount는 스키마에 없음 - 계산 필드로 처리
+                    "Credits Total Amount": self._calculate_credits_total(row),
+                    # 🚨 SCHEMA FIX: cost_with_credits는 스키마에 없음 - 계산 필드로 처리
+                    "Cost with Credits": self._calculate_cost_with_credits(row, cost_value),
                     
                     # 라벨 및 태그 정보 (구조적 데이터로 저장)
                     "Labels": self._process_labels_data(getattr(row, "labels", "[]")),
-                    "System Labels": self._process_system_labels_data(getattr(row, "system_labels_json", "[]")),
+                    # 🚨 SCHEMA FIX: system_labels_json -> system_labels (스키마에는 system_labels만 존재)
+                    "System Labels": self._process_system_labels_data(getattr(row, "system_labels", "[]")),
                     "Ancestry Numbers": str(getattr(row, "ancestry_numbers", "")).strip(),
+                    
+                    # 🚨 누락된 스키마 필드들 추가 (BigQuery 스키마 완전 준수)
+                    "Usage Start Time": str(getattr(row, "usage_start_time", "")).strip(),
+                    "Usage End Time": str(getattr(row, "usage_end_time", "")).strip(),
+                    "Export Time": str(getattr(row, "export_time", "")).strip(),
+                    "Location Region": str(getattr(row, "location_region", "")).strip(),
+                    "Location Location": str(getattr(row, "location_location", "")).strip(),
+                    "Usage Amount in Pricing Units": getattr(row, "usage_amount_in_pricing_units", None),  # 🚨 ULTRA PURE: 기본값 None
+                    
+                    # Price 중첩 구조 필드들
+                    "Price Effective Price": self._extract_nested_field(row, "price", "effective_price"),
+                    "Price Tier Start Amount": self._extract_nested_field(row, "price", "tier_start_amount"),
+                    "Price Unit": self._extract_nested_field(row, "price", "unit"),
+                    "Price Pricing Unit Quantity": self._extract_nested_field(row, "price", "pricing_unit_quantity"),
+                    "Price List Price": self._extract_nested_field(row, "price", "list_price"),
+                    "Price Effective Price Default": self._extract_nested_field(row, "price", "effective_price_default"),
+                    "Price List Price Consumption Model": self._extract_nested_field(row, "price", "list_price_consumption_model"),
+                    
+                    # Consumption Model 중첩 구조 필드들
+                    "Consumption Model ID": self._extract_nested_field(row, "consumption_model", "id"),
+                    "Consumption Model Description": self._extract_nested_field(row, "consumption_model", "description"),
+                    
+                    # Adjustment Info 중첩 구조 필드들
+                    "Adjustment Info ID": self._extract_nested_field(row, "adjustment_info", "id"),
+                    "Adjustment Info Description": self._extract_nested_field(row, "adjustment_info", "description"),
+                    "Adjustment Info Mode": self._extract_nested_field(row, "adjustment_info", "mode"),
+                    "Adjustment Info Type": self._extract_nested_field(row, "adjustment_info", "type"),
+                    
+                    # Tags 중첩 구조 필드들 (기본 구조만)
+                    "Tags": self._process_tags_data(getattr(row, "tags", "[]")),
+                    
+                    # Project Ancestors 중첩 구조
+                    "Project Ancestors": self._process_ancestors_data(getattr(row, "ancestors", "[]")),
                 },
                 "data": {
                     "cost": str(cost_value),
-                    "listed_price": str(float(getattr(row, "cost_at_list", cost_value)) if getattr(row, "cost_at_list", cost_value) else cost_value)
+                    "listed_price": str(getattr(row, "cost_at_list", cost_value))  # 🚨 PURE DATA: 원본 데이터 보존
                 },
-                "billed_date": "2025-09-15"  # 현재 날짜로 고정
+                "billed_date": self._extract_billed_date(row)
             }
             
             # STEP 4: 최종 숫자 정리
-            for key in ["cost", "usage_quantity"]:
-                if isinstance(record.get(key), float) and abs(record[key]) < 1e-4:
-                    record[key] = 0.0
+            # 극소값도 원본 그대로 보존 (0으로 강제 변환 제거)
+            # for key in ["cost", "usage_quantity"]:
+            #     if isinstance(record.get(key), float):
+            #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record[key]}")
             
-            for key in ["Cost After Credits", "Cost At List"]:
-                if isinstance(record["additional_info"].get(key), float) and abs(record["additional_info"][key]) < 1e-4:
-                    record["additional_info"][key] = 0.0
+            # # additional_info의 극소값도 원본 그대로 보존
+            # for key in ["Cost After Credits", "Cost At List"]:
+            #     if isinstance(record["additional_info"].get(key), float):
+            #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record['additional_info'][key]}")
 
-            # STEP 5: 🚨 CRITICAL: 필수 필드 최종 검증 및 강제 보장
-            if "cost" not in record:
-                record["cost"] = 0.0
-                _LOGGER.error(f"[_make_cost_data] CRITICAL: cost field missing after creation, force added 0.0")
+            # # STEP 5: 필수 필드 검증 (0으로 강제 처리 제거)
+            # if "cost" not in record:
+            #     record["cost"] = cost_value  # 원본 값 사용
+            #     _LOGGER.warning(f"[_make_cost_data] Cost field missing after creation, added original value: {cost_value}")
             
-            if "currency" not in record:
-                record["currency"] = "USD"
-                _LOGGER.error(f"[_make_cost_data] CRITICAL: currency field missing after creation, force added USD")
+            # if "currency" not in record:
+            #     record["currency"] = "USD"
+            #     _LOGGER.error(f"[_make_cost_data] CRITICAL: currency field missing after creation, force added USD")
             
             # 🚨 CRITICAL: 필수 필드들을 정확한 순서로 강제 배치
             cost_val = record.pop("cost")
@@ -1255,31 +1227,32 @@ class CostManager(BaseManager):
             record["currency"] = currency_val   # 두 번째 위치
             record.update(record_copy)
             
-            # 🚨 CRITICAL: 최종 필수 필드 존재 재확인
+            # 최종 필수 필드 존재 재확인 (원본 값 보존)
             if "cost" not in record:
                 _LOGGER.error(f"[_make_cost_data] FATAL: cost field disappeared during ordering!")
-                record = {"cost": 0.0, **record}
+                record = {"cost": cost_value, **record}  # 원본 값 사용
                 
             if "currency" not in record:
                 _LOGGER.error(f"[_make_cost_data] FATAL: currency field disappeared during ordering!")
-                record = {"cost": record.get("cost", 0.0), "currency": "USD", **{k: v for k, v in record.items() if k not in ["cost", "currency"]}}
+                record = {"cost": record.get("cost", None), "currency": "USD", **{k: v for k, v in record.items() if k not in ["cost", "currency"]}}  # 🚨 ULTRA PURE: 기본값 None
 
             # 🚨 ULTIMATE: 최종 결과 검증 (cost 필드 절대 보장)
             if "cost" not in record:
                 _LOGGER.error(f"[_make_cost_data] FATAL: cost field missing after creation! Keys: {list(record.keys())}")
-                record = {"cost": 0.0, **record}
+                record = {"cost": cost_value, **record}  # 원본 값 사용
             elif record["cost"] is None:
-                _LOGGER.error(f"[_make_cost_data] FATAL: cost field is None after creation!")
-                record["cost"] = 0.0
+                _LOGGER.warning(f"[_make_cost_data] Cost field is None after creation, preserving original value: {cost_value}")
+                record["cost"] = cost_value  # 원본 값 사용
 
             return {"results": [record]}
 
         except Exception as e:
             _LOGGER.error(f"[_make_cost_data] Simple implementation error: {e}")
-            # 에러 시에도 기본 구조 반환 - cost 필드를 최상위에 보장
+            # 에러 시에도 기본 구조 반환 - cost 필드를 최상위에 보장 (스키마 준수)
             error_record = {
-                "cost": 0.0,  # 🚨 CRITICAL: 최상위 필수 필드
-                "usage_quantity": 0.0,
+                "cost": None,  # 🚨 ULTRA PURE: 최상위 필수 필드도 None 기본값
+                "currency": "USD",  # 🚨 CRITICAL: 필수 통화 필드
+                "usage_quantity": None,  # 🚨 ULTRA PURE: 기본값 None
                 "usage_unit": "",
                 "provider": "google_cloud",
                 "region_code": "global",
@@ -1289,8 +1262,8 @@ class CostManager(BaseManager):
                 "tags": {},
                 "additional_info": {
                     "Billing Account ID": "",
-                    "Cost After Credits": 0.0,
-                    "Cost At List": 0.0,
+                    "Cost After Credits": None,  # 🚨 ULTRA PURE: 에러 시에도 None
+                    "Cost At List": None,  # 🚨 ULTRA PURE: 에러 시에도 None
                     "Cost Type": "regular",
                     "Credits Detail": [],
                     "Invoice Month": "",
@@ -1298,10 +1271,337 @@ class CostManager(BaseManager):
                     "Project Name": "",
                     "Resource Tags": {}
                 },
-                "data": {"cost": "0.0", "listed_price": "0.0"},
-                "billed_date": "2025-09-15"
+                "data": {"cost": None, "listed_price": None},  # 🚨 ULTRA PURE: 에러 시에도 None
+                "billed_date": datetime.now().strftime("%Y-%m-%d")
             }
             return {"results": [error_record]}
+
+    def _calculate_cost_after_credits(self, row):
+        """크레딧 적용 후 비용 계산 (BigQuery 스키마 기반) - 🚨 PURE DATA 보존 + 안전한 연산
+        
+        스키마에 cost_after_credits 필드가 없으므로 원본 데이터 우선, 필요시 안전한 덧셈 연산
+        """
+        try:
+            # 🚨 PURE DATA: 원본 데이터가 있으면 그대로 반환
+            cost_after_credits = getattr(row, "cost_after_credits", None)
+            if cost_after_credits is not None:
+                return cost_after_credits  # 원본 그대로
+            
+            # 원본 데이터가 없는 경우에만 안전한 연산 수행
+            cost = getattr(row, "cost", None)  # 🚨 ULTRA PURE: 기본값 None
+            credits_total = self._calculate_credits_total(row)
+            
+            # 🚨 안전한 덧셈: 원본 데이터 타입 유지
+            if cost is not None and credits_total is not None:
+                return self._safe_add(cost, credits_total)
+            else:
+                return cost  # 원본 그대로
+        except Exception:
+            return None  # 🚨 ULTRA PURE: 예외 시에도 None
+
+    def _calculate_credits_total(self, row):
+        """크레딧 총액 계산 (BigQuery 스키마 기반) - 🚨 PURE DATA 보존
+        
+        원본 데이터 그대로 반환, 계산 없이 보존
+        """
+        try:
+            # 🚨 PURE DATA: 절대로 계산하지 않고 원본 데이터 그대로 반환
+            credits_total = getattr(row, "credits_total_amount", None)
+            if credits_total is not None:
+                return credits_total  # 원본 그대로
+            # 🚨 ULTRA PURE: 원본 데이터가 없으면 None 반환
+            return None  # 🚨 ULTRA PURE: 예외 시에도 None
+        except Exception:
+            return None  # 🚨 ULTRA PURE: 예외 시에도 None
+
+    def _calculate_cost_with_credits(self, row, cost_value):
+        """크레딧을 포함한 비용 계산 - 🚨 PURE DATA 보존 + 안전한 연산
+        
+        Args:
+            row: 데이터 행
+            cost_value: 기본 비용 값
+            
+        Returns:
+            원본 데이터 우선, 필요시 안전한 덧셈 연산
+        """
+        try:
+            # 🚨 PURE DATA: 원본 데이터가 있으면 그대로 반환
+            cost_with_credits = getattr(row, "cost_with_credits", None)
+            if cost_with_credits is not None:
+                return cost_with_credits  # 원본 그대로
+            
+            # 원본 데이터가 없는 경우에만 안전한 연산 수행
+            credits_total = self._calculate_credits_total(row)
+            
+            # 🚨 안전한 덧셈: 원본 데이터 타입 유지
+            if cost_value is not None and credits_total is not None:
+                return self._safe_add(cost_value, credits_total)
+            else:
+                return cost_value if cost_value is not None else None  # 🚨 ULTRA PURE: None 보존
+        except Exception:
+            return cost_value if cost_value is not None else None  # 🚨 ULTRA PURE: 예외 시에도 None
+
+    def _extract_nested_field(self, row, parent_field: str, child_field: str) -> str:
+        """BigQuery 중첩 구조 필드 추출 (스키마 준수)
+        
+        Args:
+            row: 데이터 행
+            parent_field: 부모 필드명 (예: 'invoice', 'usage', 'project')
+            child_field: 자식 필드명 (예: 'month', 'publisher_type', 'pricing_unit')
+            
+        Returns:
+            추출된 필드 값 (문자열)
+        """
+        try:
+            # 1. 직접 중첩 구조 접근 시도 (parent_field.child_field)
+            nested_field_name = f"{parent_field}_{child_field}"
+            direct_value = getattr(row, nested_field_name, None)
+            if direct_value is not None:
+                return str(direct_value).strip()
+            
+            # 2. 부모 필드가 딕셔너리 구조인 경우
+            parent_data = getattr(row, parent_field, None)
+            if isinstance(parent_data, dict) and child_field in parent_data:
+                return str(parent_data[child_field]).strip()
+            
+            # 3. JSON 문자열인 경우 파싱 시도
+            if isinstance(parent_data, str):
+                try:
+                    import json
+                    parsed_data = json.loads(parent_data)
+                    if isinstance(parsed_data, dict) and child_field in parsed_data:
+                        return str(parsed_data[child_field]).strip()
+                except (json.JSONDecodeError, ImportError):
+                    pass
+            
+            # 4. 대체 필드명 시도 (camelCase, snake_case 변형)
+            alt_field_names = [
+                f"{parent_field}_{child_field}",
+                f"{parent_field}{child_field.title()}",
+                f"{parent_field}.{child_field}",
+            ]
+            
+            for alt_name in alt_field_names:
+                alt_value = getattr(row, alt_name, None)
+                if alt_value is not None:
+                    return str(alt_value).strip()
+            
+            return ""  # 기본값 반환
+            
+        except Exception as e:
+            _LOGGER.warning(f"[_extract_nested_field] Failed to extract {parent_field}.{child_field}: {e}")
+            return ""
+
+    def _process_tags_data(self, tags_data) -> list:
+        """Tags 배열 데이터 처리 (BigQuery 스키마 준수)
+        
+        Args:
+            tags_data: tags 필드 데이터 (JSON 문자열 또는 리스트)
+            
+        Returns:
+            처리된 태그 리스트
+        """
+        try:
+            if not tags_data:
+                return []
+            
+            # JSON 문자열인 경우 파싱
+            if isinstance(tags_data, str):
+                import json
+                tags_data = json.loads(tags_data)
+            
+            # 리스트가 아닌 경우 빈 리스트 반환
+            if not isinstance(tags_data, list):
+                return []
+            
+            # 태그 데이터 구조 변환
+            processed_tags = []
+            for tag in tags_data:
+                if isinstance(tag, dict):
+                    processed_tags.append({
+                        "key": str(tag.get("key", "")),
+                        "value": str(tag.get("value", "")),
+                        "inherited": bool(tag.get("inherited", False)),
+                        "namespace": str(tag.get("namespace", ""))
+                    })
+            
+            return processed_tags
+            
+        except Exception as e:
+            _LOGGER.warning(f"[_process_tags_data] Failed to process tags: {e}")
+            return []
+
+    def _process_ancestors_data(self, ancestors_data) -> list:
+        """Project ancestors 배열 데이터 처리 (BigQuery 스키마 준수)
+        
+        Args:
+            ancestors_data: ancestors 필드 데이터 (JSON 문자열 또는 리스트)
+            
+        Returns:
+            처리된 상위 조직 리스트
+        """
+        try:
+            if not ancestors_data:
+                return []
+            
+            # JSON 문자열인 경우 파싱
+            if isinstance(ancestors_data, str):
+                import json
+                ancestors_data = json.loads(ancestors_data)
+            
+            # 리스트가 아닌 경우 빈 리스트 반환
+            if not isinstance(ancestors_data, list):
+                return []
+            
+            # 상위 조직 데이터 구조 변환
+            processed_ancestors = []
+            for ancestor in ancestors_data:
+                if isinstance(ancestor, dict):
+                    processed_ancestors.append({
+                        "resource_name": str(ancestor.get("resource_name", "")),
+                        "display_name": str(ancestor.get("display_name", ""))
+                    })
+            
+            return processed_ancestors
+            
+        except Exception as e:
+            _LOGGER.warning(f"[_process_ancestors_data] Failed to process ancestors: {e}")
+            return []
+
+    def _safe_math_operation(self, operation: str, left_value, right_value):
+        """안전한 수학 연산 처리 - 나눗셈만 Decimal, 나머지는 원본 데이터 유지
+        
+        Args:
+            operation: 연산 종류 ('add', 'subtract', 'multiply', 'divide')
+            left_value: 왼쪽 피연산자
+            right_value: 오른쪽 피연산자
+            
+        Returns:
+            연산 결과 (나눗셈: Decimal 처리, 나머지: 원본 타입 유지)
+        """
+        try:
+            # None 값 처리
+            if left_value is None or right_value is None:
+                return None
+            
+            if operation == 'divide':
+                # 🚨 ULTRA PURE DATA: 나눗셈도 원본 데이터 타입 유지
+                # 0으로 나누기 방지
+                if right_value == 0:
+                    return None
+                
+                # 원본 데이터 타입 그대로 나눗셈 연산
+                result = left_value / right_value
+                
+                _LOGGER.debug(f"[SAFE_MATH] Division with original types: {left_value} / {right_value} = {result}")
+                return result
+                
+            elif operation == 'add':
+                # 🚨 덧셈: 원본 데이터 타입 그대로 유지
+                result = left_value + right_value
+                _LOGGER.debug(f"[SAFE_MATH] Addition with original types: {left_value} + {right_value} = {result}")
+                return result
+                
+            elif operation == 'subtract':
+                # 🚨 뺄셈: 원본 데이터 타입 그대로 유지
+                result = left_value - right_value
+                _LOGGER.debug(f"[SAFE_MATH] Subtraction with original types: {left_value} - {right_value} = {result}")
+                return result
+                
+            elif operation == 'multiply':
+                # 🚨 곱셈: 원본 데이터 타입 그대로 유지
+                result = left_value * right_value
+                _LOGGER.debug(f"[SAFE_MATH] Multiplication with original types: {left_value} * {right_value} = {result}")
+                return result
+                
+            else:
+                _LOGGER.warning(f"[SAFE_MATH] Unknown operation: {operation}")
+                return None
+                
+        except Exception as e:
+            _LOGGER.error(f"[SAFE_MATH] Math operation failed: {operation}({left_value}, {right_value}) - {e}")
+            return None
+
+    def _safe_add(self, left_value, right_value):
+        """안전한 덧셈 - 원본 데이터 타입 유지"""
+        return self._safe_math_operation('add', left_value, right_value)
+
+    def _safe_subtract(self, left_value, right_value):
+        """안전한 뺄셈 - 원본 데이터 타입 유지"""
+        return self._safe_math_operation('subtract', left_value, right_value)
+
+    def _safe_multiply(self, left_value, right_value):
+        """안전한 곱셈 - 원본 데이터 타입 유지"""
+        return self._safe_math_operation('multiply', left_value, right_value)
+
+    def _safe_divide(self, left_value, right_value):
+        """안전한 나눗셈 - 🚨 ULTRA PURE DATA: 원본 데이터 타입 유지"""
+        return self._safe_math_operation('divide', left_value, right_value)
+
+    def _example_math_operations(self):
+        """수학 연산 사용 예시 - 개발자 참고용
+        
+        이 메서드는 실제로 호출되지 않으며, 수학 연산 사용법을 보여주는 예시입니다.
+        """
+        # 🚨 사용 예시 - 실제 코드에서는 이렇게 사용하세요
+        
+        # 나눗셈 (원본 타입 유지)
+        cost_per_unit = self._safe_divide(100.0, 3.0)  # 🚨 예시용: 실제 코드에서 사용 금지
+        
+        # 덧셈 (원본 타입 유지)
+        total_cost = self._safe_add(50.25, 25.75)  # float + float = float
+        
+        # 뺄셈 (원본 타입 유지)
+        discount = self._safe_subtract(100, 10)  # int - int = int
+        
+        # 곱셈 (원본 타입 유지)  
+        extended_cost = self._safe_multiply(12.5, 4)  # float * int = float
+        
+        _LOGGER.debug(f"[EXAMPLE] Division result (original types): {cost_per_unit}")
+        _LOGGER.debug(f"[EXAMPLE] Addition result (original types): {total_cost}")
+        _LOGGER.debug(f"[EXAMPLE] Subtraction result (original types): {discount}")
+        _LOGGER.debug(f"[EXAMPLE] Multiplication result (original types): {extended_cost}")
+
+    def _process_credits_detail(self, row) -> list:
+        """Credits 배열 데이터 처리 (BigQuery 스키마 준수)
+        
+        Args:
+            row: 데이터 행
+            
+        Returns:
+            처리된 크레딧 상세 리스트
+        """
+        try:
+            credits_data = getattr(row, "credits", None)
+            if not credits_data:
+                return []
+            
+            # JSON 문자열인 경우 파싱
+            if isinstance(credits_data, str):
+                import json
+                credits_data = json.loads(credits_data)
+            
+            # 리스트가 아닌 경우 빈 리스트 반환
+            if not isinstance(credits_data, list):
+                return []
+            
+            # 크레딧 데이터 구조 변환 (스키마 필드: name, amount, full_name, id, type)
+            processed_credits = []
+            for credit in credits_data:
+                if isinstance(credit, dict):
+                    processed_credits.append({
+                        "name": str(credit.get("name", "")),
+                        "amount": credit.get("amount", None),  # 🚨 ULTRA PURE: 기본값도 None
+                        "full_name": str(credit.get("full_name", "")),
+                        "id": str(credit.get("id", "")),
+                        "type": str(credit.get("type", ""))
+                    })
+            
+            return processed_credits
+            
+        except Exception as e:
+            _LOGGER.warning(f"[_process_credits_detail] Failed to process credits: {e}")
+            return []
 
 
     def _ensure_top_level_cost_field(self, record: dict) -> dict:
@@ -1316,27 +1616,24 @@ class CostManager(BaseManager):
             # data.cost에서 값 가져오기 시도
             if "data" in record and isinstance(record["data"], dict) and "cost" in record["data"]:
                 try:
-                    cost_value = float(record["data"]["cost"])
+                    # 🚨 ULTRA PURE DATA: 원본 데이터 절대 보존
+                    cost_value = record["data"]["cost"]  # 모든 값을 원본 그대로 보존
                     record["cost"] = cost_value
                     _LOGGER.info(f"[COST_FIX] Added missing top-level cost field: {cost_value} for {usage_type}")
                 except (ValueError, TypeError):
-                    record["cost"] = 0.0
-                    _LOGGER.warning(f"[COST_FIX] Invalid data.cost value, set top-level cost to 0.0 for {usage_type}")
+                    record["cost"] = None
+                    _LOGGER.warning(f"[COST_FIX] Invalid data.cost value, set top-level cost to None for {usage_type}")
             else:
-                record["cost"] = 0.0
-                _LOGGER.error(f"[COST_FIX] Missing cost field, set to 0.0 for {usage_type}")
+                record["cost"] = None
+                _LOGGER.warning(f"[COST_FIX] Missing cost field, set to None for {usage_type}")
         
-        # 타입 검증 및 변환
-        if not isinstance(record["cost"], (int, float)):
-            try:
-                record["cost"] = float(record["cost"])
-            except (ValueError, TypeError):
-                record["cost"] = 0.0
-                _LOGGER.warning(f"[COST_FIX] Invalid cost type, converted to 0.0 for {usage_type}")
+        # 🚨 ULTRA PURE DATA: 타입 검증도 하지 않고 모든 값을 원본 그대로 보존
+        # record["cost"]는 어떠한 변환도 없이 절대적으로 원본 그대로 유지
+        _LOGGER.debug(f"[COST_FIX] Cost field preserved as absolute original for {usage_type}: {record.get('cost')}")
         
         # 모든 SpaceONE 필수 필드 보장
         spaceone_required_fields = {
-            "usage_quantity": 0.0,
+            "usage_quantity": None,  # 🚨 ULTRA PURE: 기본값 None
             "provider": "google_cloud",
             "region_code": "global",
             "product": "",
@@ -1369,34 +1666,71 @@ class CostManager(BaseManager):
             row: BigQuery 또는 파일에서 읽은 데이터 행
 
         Returns:
-            선택된 비용 값 (절대 null 반환 안함, 최소 0.0)
+            선택된 비용 값 (🚨 ULTRA PURE: None도 포함하여 원본 그대로 반환)
         """
         # cost_metric이 AmortizedCost인 경우 credits_amount 사용
         if self.cost_metric_option == "AmortizedCost":
-            cost_value = getattr(row, "credits_amount", 0)
+            cost_value = getattr(row, "credits_amount", None)  # 🚨 ULTRA PURE: 기본값 None
             result = self._convert_to_numeric(cost_value)
         # 기존 select_cost 로직
         elif self.select_cost_option == "list_price":
             # 정가 (크레딧 적용 전 원가)
-            cost_value = getattr(row, "cost_at_list", 0)
+            cost_value = getattr(row, "cost_at_list", None)  # 🚨 ULTRA PURE: 기본값 None
             result = self._convert_to_numeric(cost_value)
         elif self.select_cost_option == "after_credits":
             # 크레딧 적용 후 비용
-            cost_value = getattr(row, "cost_after_credits", 0)
+            cost_value = getattr(row, "cost_after_credits", None)  # 🚨 ULTRA PURE: 기본값 None
             result = self._convert_to_numeric(cost_value)
         elif self.select_cost_option == "net_cost":
             # 순 비용 (기본 cost와 동일)
-            cost_value = getattr(row, "cost", 0)
+            cost_value = getattr(row, "cost", None)  # 🚨 ULTRA PURE: 기본값 None
             result = self._convert_to_numeric(cost_value)
         else:
             # 기본값: cost (크레딧을 포함한 최종 비용)
-            cost_value = getattr(row, "cost", 0)
+            cost_value = getattr(row, "cost", None)  # 🚨 ULTRA PURE: 기본값 None
             result = self._convert_to_numeric(cost_value)
 
         # 이 메서드는 절대 null을 반환하지 않음
         if result is None or str(result).lower() in ["null", "none", "nan"]:
-            return 0.0
+            return None  # 🚨 ULTRA PURE: 예외 시에도 None
         return result
+
+    def _extract_billed_date(self, row) -> str:
+        """BigQuery 결과에서 billed_date를 추출합니다.
+        
+        Args:
+            row: BigQuery 결과 행
+            
+        Returns:
+            str: YYYY-MM-DD 형식의 날짜 문자열
+        """
+        try:
+            # BigQuery에서 billed_at 필드 확인 (timestamp_trunc(usage_start_time, DAY) as billed_at)
+            billed_at = getattr(row, "billed_at", None)
+            if billed_at:
+                # datetime 객체인 경우 문자열로 변환
+                if hasattr(billed_at, 'strftime'):
+                    return billed_at.strftime("%Y-%m-%d")
+                # 문자열인 경우 날짜 부분만 추출
+                elif isinstance(billed_at, str):
+                    # ISO 형식에서 날짜 부분만 추출 (YYYY-MM-DD)
+                    return str(billed_at).split('T')[0].split(' ')[0][:10]
+            
+            # billed_at이 없으면 usage_start_time 확인
+            usage_start_time = getattr(row, "usage_start_time", None)
+            if usage_start_time:
+                if hasattr(usage_start_time, 'strftime'):
+                    return usage_start_time.strftime("%Y-%m-%d")
+                elif isinstance(usage_start_time, str):
+                    return str(usage_start_time).split('T')[0].split(' ')[0][:10]
+            
+            # 둘 다 없으면 현재 날짜 반환
+            _LOGGER.warning("[_extract_billed_date] No date fields found in row, using current date")
+            return datetime.now().strftime("%Y-%m-%d")
+            
+        except Exception as e:
+            _LOGGER.error(f"[_extract_billed_date] Error extracting date: {e}")
+            return datetime.now().strftime("%Y-%m-%d")
 
     @staticmethod
     def _check_bigquery_task_options(task_options):
@@ -1593,29 +1927,29 @@ class CostManager(BaseManager):
               -- 🎯 Credits Detail 처리 (최적화 완료)
               TO_JSON_STRING(ANY_VALUE(credits)) as credits_detail,{resource_fields}
 
-              -- FLOAT 타입 필드들 (집계)
+              -- FLOAT 타입 필드들 (집계) - 🚨 ULTRA PURE: NULL 보존
               SUM(cost) as cost,
-              MAX(IFNULL(currency_conversion_rate, 1.0)) as currency_conversion_rate,
-              SUM(IFNULL(cost_at_list, cost)) as cost_at_list,
-              SUM(IFNULL(cost_at_effective_price_default, cost)) as cost_at_effective_price_default,
-              SUM(IFNULL(cost_at_list_consumption_model, cost)) as cost_at_list_consumption_model,
+              MAX(currency_conversion_rate) as currency_conversion_rate,  -- 🚨 ULTRA PURE: 1.0 기본값 제거
+              SUM(cost_at_list) as cost_at_list,  -- 🚨 ULTRA PURE: cost 대체 제거
+              SUM(cost_at_effective_price_default) as cost_at_effective_price_default,  -- 🚨 ULTRA PURE: cost 대체 제거
+              SUM(cost_at_list_consumption_model) as cost_at_list_consumption_model,  -- 🚨 ULTRA PURE: cost 대체 제거
 
-              -- 사용량 집계 (usage RECORD에서 FLOAT 필드들)
-              SUM(IFNULL(usage.amount, 0)) as usage_amount,
-              SUM(IFNULL(usage.amount_in_pricing_units, 0)) as usage_quantity,
+              -- 사용량 집계 (usage RECORD에서 FLOAT 필드들) - 🚨 ULTRA PURE: NULL 보존
+              SUM(usage.amount) as usage_amount,
+              SUM(usage.amount_in_pricing_units) as usage_quantity,
 
-              -- 크레딧 정보 집계 (credits REPEATED에서 FLOAT 필드들)
-              SUM(IFNULL((SELECT SUM(CAST(c.amount AS FLOAT64))
-                          FROM UNNEST(credits) c), 0)) as credits_total_amount,
+              -- 크레딧 정보 집계 (credits REPEATED에서 FLOAT 필드들) - GROUP BY 호환, 🚨 ULTRA PURE: NULL 보존
+              SUM((SELECT SUM(CAST(c.amount AS FLOAT64))
+                   FROM UNNEST(credits) c)) as credits_total_amount,
 
               -- 계산된 비용 필드들
               SUM(cost) as cost_after_credits,
-              SUM(cost) + SUM(IFNULL((SELECT SUM(CAST(c.amount AS FLOAT64))
-                                      FROM UNNEST(credits) c), 0)) as cost_with_credits,
+              -- 🚨 ULTRA PURE DATA: 수학 연산 제거, 개별 필드로 분리 - GROUP BY 호환
+              SUM(cost) as cost_sum,
+              SUM((SELECT SUM(CAST(c.amount AS FLOAT64)) FROM UNNEST(credits) c)) as credits_sum,
 
-              -- AmortizedCost를 위한 credits_amount 계산 (크레딧 총액의 절대값)
-              ABS(SUM(IFNULL((SELECT SUM(CAST(c.amount AS FLOAT64))
-                              FROM UNNEST(credits) c), 0))) as credits_amount
+              -- AmortizedCost를 위한 credits_amount 계산 (🚨 ULTRA PURE: ABS() 제거) - GROUP BY 호환
+              SUM((SELECT SUM(CAST(c.amount AS FLOAT64)) FROM UNNEST(credits) c)) as credits_amount
             FROM `{self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}`
             {where_condition}
             GROUP BY {group_by_fields}

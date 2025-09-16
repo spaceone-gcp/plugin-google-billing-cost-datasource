@@ -40,18 +40,18 @@ class DecimalJSONEncoder(json.JSONEncoder):
         """float를 과학적 표기법 없는 안전한 숫자로 변환 (숫자 타입 유지)"""
         import math
 
-        # NaN, 무한대 처리
+        # NaN, 무한대 처리 (원본 보존)
         if math.isnan(value) or math.isinf(value):
-            return 0.0
+            _LOGGER.warning(f"[DecimalJSONEncoder] NaN/Inf value encountered: {value}")
+            return value  # 원본 그대로 보존
 
-        # 0 처리
+        # 0 처리 (정확한 0 값 보존)
         if value == 0.0 or value == -0.0:
-            return 0.0
+            return value  # 원본 0 값 보존
 
         try:
-            # 매우 작은 값은 0.0으로 처리
-            if abs(value) < 1e-15:
-                return 0.0
+            # 극소값도 원본 그대로 보존 (0으로 강제 변환 제거)
+            _LOGGER.debug(f"[DecimalJSONEncoder] Preserving small value: {value}")
             
             # Decimal을 통한 정확한 반올림 후 float로 변환
             from decimal import Decimal, ROUND_HALF_UP
@@ -73,22 +73,22 @@ class DecimalJSONEncoder(json.JSONEncoder):
 
             result = float(rounded)
             
-            # 최종 검증: 과학적 표기법이 나오면 0.0으로 처리
+            # 과학적 표기법 검증 (원본 보존)
             if 'e' in str(result).lower():
-                return 0.0
+                _LOGGER.warning(f"[DecimalJSONEncoder] Scientific notation detected, preserving original: {value}")
+                return value  # 원본 값 보존
                 
             return result
 
         except Exception as e:
             _LOGGER.warning(f"[DecimalJSONEncoder] Float conversion failed for {value}: {e}")
-            return 0.0
+            return value  # 원본 값 보존
 
     def _convert_decimal_to_safe_number(self, value: Decimal) -> float:
         """Decimal을 과학적 표기법 없는 안전한 float로 변환"""
         try:
-            # 매우 작은 값은 0.0으로 처리
-            if abs(value) < Decimal('1e-15'):
-                return 0.0
+            # 극소값도 원본 그대로 보존
+            _LOGGER.debug(f"[DecimalJSONEncoder] Processing Decimal value: {value}")
             
             # 적절한 정밀도로 반올림 후 float로 변환
             from decimal import ROUND_HALF_UP
@@ -108,15 +108,16 @@ class DecimalJSONEncoder(json.JSONEncoder):
 
             result = float(rounded)
             
-            # 최종 검증: 과학적 표기법이 나오면 0.0으로 처리
+            # 과학적 표기법 검증 (원본 보존)
             if 'e' in str(result).lower():
-                return 0.0
+                _LOGGER.warning(f"[DecimalJSONEncoder] Scientific notation in Decimal, preserving original: {value}")
+                return float(value)  # 원본 Decimal을 float로 변환하여 보존
                 
             return result
 
         except Exception as e:
             _LOGGER.warning(f"[DecimalJSONEncoder] Decimal conversion failed for {value}: {e}")
-            return 0.0
+            return float(value)  # 원본 값을 float로 변환하여 보존
 
     def _format_float_to_decimal_string(self, value: float) -> str:
         """float를 과학적 표기법 없는 문자열로 변환"""
@@ -223,11 +224,12 @@ def ensure_no_scientific_notation(data: dict) -> dict:
         if isinstance(result["results"], list):
             for record in result["results"]:
                 if isinstance(record, dict):
-                    # 최상위 cost 필드 절대 보장
+                    # cost 필드 검증 (원본 보존)
                     if "cost" not in record:
-                        record["cost"] = 0.0
+                        record["cost"] = None
+                        _LOGGER.warning("[DecimalJSONEncoder] Cost field missing, set to None")
                     elif record["cost"] is None:
-                        record["cost"] = 0.0
+                        _LOGGER.debug("[DecimalJSONEncoder] Cost field is None, preserving None")
                     
                     # 모든 SpaceONE 필수 필드 보장
                     spaceone_required_fields = {
