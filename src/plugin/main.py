@@ -337,10 +337,12 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
         result_generator = _cost_get_data_logic(params)
 
-        # 🚨 CRITICAL: 스트리밍 방식으로 각 배치를 개별적으로 yield
-        # gRPC 메시지 크기 제한 문제 해결을 위해 배치별로 전송
+        # 🚨 ULTIMATE: gRPC 메시지 크기 제한 해결을 위한 스마트 청킹 시스템
+        # 4MB 제한을 고려하여 적절한 크기로 응답을 분할하여 전송
         batch_count = 0
         total_records = 0
+        chunk_buffer = []  # 현재 청크 버퍼
+        MAX_CHUNK_SIZE = 100  # 청크당 최대 레코드 수 (안전한 크기)
         
         for batch_result in result_generator:
             batch_count += 1
@@ -362,16 +364,35 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                                 spaceone_formatted["results"][0]
                             )
 
-                        # 각 배치를 개별적으로 yield (메시지 크기 제한 해결)
-                        batch_results = spaceone_formatted["results"]
-                        total_records += len(batch_results)
+                        # 🚨 ULTIMATE: 최종 응답 검증 및 cost 필드 보장
+                        spaceone_formatted = _ultimate_cost_field_verification(spaceone_formatted, batch_count)
                         
-                        _LOGGER.info(f"[cost_get_data] Yielding batch {batch_count}: {len(batch_results)} records")
-                        yield spaceone_formatted
+                        # 배치 결과를 청크 버퍼에 추가
+                        batch_results = spaceone_formatted["results"]
+                        
+                        for record in batch_results:
+                            chunk_buffer.append(record)
+                            total_records += 1
+                            
+                            # 청크 크기에 도달하면 yield
+                            if len(chunk_buffer) >= MAX_CHUNK_SIZE:
+                                chunk_response = {"results": chunk_buffer}
+                                _LOGGER.info(f"[cost_get_data] Yielding chunk: {len(chunk_buffer)} records")
+                                yield chunk_response
+                                chunk_buffer = []  # 버퍼 초기화
 
             except Exception as e:
                 _LOGGER.error(f"[cost_get_data] Failed to process batch {batch_count}: {e}")
                 # 에러가 발생해도 다음 배치 처리 계속
+        
+        # 🚨 ULTIMATE: 남은 레코드가 있으면 마지막 청크로 전송
+        if chunk_buffer:
+            final_response = {"results": chunk_buffer}
+            _LOGGER.info(f"[cost_get_data] Yielding final chunk: {len(chunk_buffer)} records")
+            yield final_response
+        elif total_records == 0:
+            _LOGGER.warning("[cost_get_data] No results to yield")
+            yield {"results": []}
 
         _LOGGER.info(f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records")
 
@@ -399,6 +420,24 @@ def _convert_to_spaceone_format(batch_result, batch_count):
         spaceone_results = []
         for record in results:
             if isinstance(record, dict):
+                # 🚨 ULTIMATE: 원본 레코드에서 cost 필드 강제 보장 (최우선)
+                if "cost" not in record:
+                    # additional_info에서 cost 복구 시도
+                    cost_value = 0.0
+                    if "additional_info" in record and isinstance(record["additional_info"], dict):
+                        cost_after_credits = record["additional_info"].get("Cost After Credits", 0)
+                        try:
+                            cost_value = float(cost_after_credits)
+                        except (ValueError, TypeError):
+                            cost_value = 0.0
+                    
+                    # 최상위 cost 필드 추가 (첫 번째 위치)
+                    new_record = {"cost": cost_value}
+                    new_record.update(record)
+                    record = new_record
+                    
+                    _LOGGER.error(f"[_convert_to_spaceone_format] ULTIMATE: Added missing cost field: {cost_value}")
+                
                 spaceone_record = _ensure_spaceone_record_format(record)
                 if spaceone_record:  # 유효한 레코드만 추가
                     # 🚨 CRITICAL: cost 필드를 딕셔너리의 첫 번째 위치로 강제 이동
@@ -408,6 +447,11 @@ def _convert_to_spaceone_format(batch_result, batch_count):
                         spaceone_record.clear()
                         spaceone_record["cost"] = cost_value  # 첫 번째 위치에 cost 필드 배치
                         spaceone_record.update(record_copy)
+                    else:
+                        # cost 필드가 여전히 없으면 강제 추가
+                        spaceone_record = {"cost": 0.0, **spaceone_record}
+                        _LOGGER.error(f"[_convert_to_spaceone_format] ULTIMATE: Force-added cost field to spaceone_record")
+                    
                     spaceone_results.append(spaceone_record)
 
         # SpaceONE 표준 응답 구조로 래핑
@@ -429,9 +473,22 @@ def _ensure_spaceone_record_format(record):
         # 원본 레코드에서 cost 필드 추출 및 검증
         cost_value = record.get("cost")
         if cost_value is None:
-            # cost 필드가 누락된 경우 0.0으로 설정하고 에러 로그
-            cost_value = 0.0
-            _LOGGER.error(f"[_ensure_spaceone_record_format] CRITICAL: cost field missing in record, setting to 0.0")
+            # data.cost에서 값 추출 시도
+            if "data" in record and isinstance(record["data"], dict):
+                data_cost = record["data"].get("cost")
+                if data_cost is not None:
+                    try:
+                        cost_value = float(data_cost)
+                        _LOGGER.info(f"[_ensure_spaceone_record_format] RECOVERED: cost field from data.cost: {cost_value}")
+                    except (ValueError, TypeError):
+                        cost_value = 0.0
+                        _LOGGER.warning(f"[_ensure_spaceone_record_format] INVALID data.cost, using 0.0")
+                else:
+                    cost_value = 0.0
+                    _LOGGER.error(f"[_ensure_spaceone_record_format] CRITICAL: cost field missing completely, setting to 0.0")
+            else:
+                cost_value = 0.0
+                _LOGGER.error(f"[_ensure_spaceone_record_format] CRITICAL: cost field missing in record, setting to 0.0")
         
         # 🚨 CRITICAL: currency 필드 추출 및 보장
         currency_value = record.get("currency")
@@ -469,6 +526,11 @@ def _ensure_spaceone_record_format(record):
             from datetime import datetime
 
             spaceone_record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+
+        # 🚨 ULTIMATE: 최종 cost 필드 보장 (이중 검증)
+        if "cost" not in spaceone_record or spaceone_record["cost"] is None:
+            spaceone_record["cost"] = 0.0
+            _LOGGER.error(f"[_ensure_spaceone_record_format] ULTIMATE: Final cost field enforcement applied")
 
         return spaceone_record
 
@@ -531,6 +593,51 @@ def _validate_spaceone_response_format(sample_record):
         _LOGGER.error("CRITICAL: cost field is missing or None")
     elif not isinstance(sample_record["cost"], (int, float)):
         _LOGGER.warning(f"cost field type issue: {type(sample_record['cost'])}")
+
+
+def _ultimate_cost_field_verification(response: dict, batch_count: int) -> dict:
+    """최종 cost 필드 보장 - SpaceONE UI 호환성 확보"""
+    if not isinstance(response.get("results"), list):
+        return response
+    
+    fixed_count = 0
+    missing_cost_count = 0
+    
+    for i, record in enumerate(response["results"]):
+        if isinstance(record, dict):
+            # 최상위 cost 필드 절대 보장
+            if "cost" not in record:
+                # data.cost에서 복구 시도
+                if "data" in record and isinstance(record["data"], dict) and "cost" in record["data"]:
+                    try:
+                        record["cost"] = float(record["data"]["cost"])
+                        fixed_count += 1
+                        _LOGGER.info(f"[ULTIMATE] Batch {batch_count}, Record {i}: Recovered cost from data.cost = {record['cost']}")
+                    except (ValueError, TypeError):
+                        record["cost"] = 0.0
+                        missing_cost_count += 1
+                        _LOGGER.error(f"[ULTIMATE] Batch {batch_count}, Record {i}: Invalid data.cost, forced to 0.0")
+                else:
+                    record["cost"] = 0.0
+                    missing_cost_count += 1
+                    _LOGGER.error(f"[ULTIMATE] Batch {batch_count}, Record {i}: No cost field found, forced to 0.0")
+            elif record["cost"] is None:
+                record["cost"] = 0.0
+                fixed_count += 1
+                _LOGGER.warning(f"[ULTIMATE] Batch {batch_count}, Record {i}: None cost converted to 0.0")
+            
+            # cost 필드를 최상위 첫 번째 위치로 이동 (SpaceONE 호환성)
+            if "cost" in record:
+                cost_value = record.pop("cost")
+                record_copy = record.copy()
+                record.clear()
+                record["cost"] = cost_value
+                record.update(record_copy)
+    
+    if fixed_count > 0 or missing_cost_count > 0:
+        _LOGGER.info(f"[ULTIMATE] Batch {batch_count}: Fixed {fixed_count} records, Missing {missing_cost_count} records")
+    
+    return response
 
 
 def _cost_get_linked_accounts_logic(params: dict) -> dict:

@@ -175,6 +175,13 @@ class FieldMapper:
                             f"[DEBUG] Post-processed Project Ancestry Numbers: {result['additional_info']['Project Ancestry Numbers']}"
                         )
 
+            # 🚨 CRITICAL: 최종 결과 검증 및 디버깅
+            if "cost" not in result:
+                _LOGGER.error(f"[FieldMapper] CRITICAL: map_record result missing cost field! Keys: {list(result.keys())}")
+                result["cost"] = 0.0
+            else:
+                _LOGGER.debug(f"[FieldMapper] map_record result has cost: {result['cost']}")
+
             return result
 
         except Exception as e:

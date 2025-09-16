@@ -79,6 +79,25 @@ class JSONParser(BaseParser):
             try:
                 record = json.loads(line)
                 mapped_record = field_mapper.map_record(record)
+                
+                # 🚨 CRITICAL: cost 필드 보장 (field_mapper 결과 검증)
+                if "cost" not in mapped_record:
+                    # additional_info에서 cost 복구 시도
+                    cost_value = 0.0
+                    if "additional_info" in mapped_record and isinstance(mapped_record["additional_info"], dict):
+                        cost_after_credits = mapped_record["additional_info"].get("Cost After Credits", 0)
+                        try:
+                            cost_value = float(cost_after_credits)
+                        except (ValueError, TypeError):
+                            cost_value = 0.0
+                    
+                    # 최상위 cost 필드 추가 (첫 번째 위치)
+                    new_record = {"cost": cost_value}
+                    new_record.update(mapped_record)
+                    mapped_record = new_record
+                    
+                    _LOGGER.info(f"[JSONParser] RECOVERED cost field: {cost_value}")
+                
                 batch_records.append(mapped_record)
                 processed_count += 1
 

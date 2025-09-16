@@ -210,6 +210,45 @@ class CostManager(BaseManager):
                 cost_data = self._make_cost_data(row)
                 # _make_cost_data가 {"results": [data]} 형식으로 반환하므로 각 결과를 배치에 추가
                 if cost_data and "results" in cost_data:
+                    # 🚨 ULTIMATE: BigQuery 경로에서 cost 필드 강제 보장 (과학적 표기법 지원)
+                    for record in cost_data["results"]:
+                        if isinstance(record, dict) and "cost" not in record:
+                            # 1차: data 필드에서 cost 복구 시도 (과학적 표기법 지원)
+                            cost_value = 0.0
+                            recovery_source = "none"
+                            
+                            if "data" in record and isinstance(record["data"], dict):
+                                data_cost = record["data"].get("cost")
+                                if data_cost is not None:
+                                    try:
+                                        cost_value = float(data_cost)  # 과학적 표기법 자동 변환
+                                        recovery_source = "data.cost"
+                                        _LOGGER.info(f"[BigQuery] Cost recovered from data.cost: {cost_value} (scientific: {data_cost})")
+                                    except (ValueError, TypeError):
+                                        pass
+                            
+                            # 2차: additional_info에서 cost 복구 시도
+                            if cost_value == 0.0 and "additional_info" in record and isinstance(record["additional_info"], dict):
+                                ai = record["additional_info"]
+                                # 여러 cost 필드 시도
+                                for field_name in ["Cost at Effective Price Default", "Cost at List Consumption Model", "Cost with Credits", "Cost After Credits"]:
+                                    if field_name in ai and ai[field_name] != 0:
+                                        try:
+                                            cost_value = float(ai[field_name])
+                                            recovery_source = f"additional_info.{field_name}"
+                                            _LOGGER.info(f"[BigQuery] Cost recovered from {field_name}: {cost_value}")
+                                            break
+                                        except (ValueError, TypeError):
+                                            continue
+                            
+                            # 최상위 cost 필드 추가 (첫 번째 위치)
+                            new_record = {"cost": cost_value}
+                            new_record.update(record)
+                            record.clear()
+                            record.update(new_record)
+                            
+                            _LOGGER.error(f"[BigQuery] ULTIMATE: Added missing cost field: {cost_value} (source: {recovery_source})")
+                    
                     batch_records.extend(cost_data["results"])
 
                     # 배치 크기에 도달하면 yield
@@ -1091,25 +1130,30 @@ class CostManager(BaseManager):
     def _make_cost_data(self, row) -> dict:
         """완전히 단순화된 SpaceONE 빌링 응답 생성 (test_correct_format.json 기준)"""
         try:
-            # 🚨 CRITICAL: cost 필드 절대 보장 시스템 (0 비용도 반드시 포함)
+            # 🚨 ULTIMATE: 과학적 표기법 지원 cost 필드 절대 보장 시스템
             cost_value = getattr(row, "cost", 0.0)
             if cost_value is None or cost_value == "":
                 cost_value = 0.0
                 _LOGGER.info(f"[_make_cost_data] CRITICAL: cost was None/empty, enforced to 0.0")
             
-            # 🚨 CRITICAL: 0 비용도 유효한 비용이므로 절대 제외하지 않음
-            if isinstance(cost_value, float) and abs(cost_value) < 1e-10:
-                cost_value = 0.0  # 극소값만 0으로 정규화
-            elif isinstance(cost_value, float):
-                cost_value = round(cost_value, 6)
-            
-            # 🚨 CRITICAL: cost 값이 숫자가 아닌 경우 강제 변환
+            # 🚨 ULTIMATE: 과학적 표기법(9.6e-05) 처리 개선
             if not isinstance(cost_value, (int, float)):
                 try:
                     cost_value = float(cost_value)
+                    _LOGGER.debug(f"[_make_cost_data] Scientific notation converted: {cost_value}")
                 except (ValueError, TypeError):
                     cost_value = 0.0
                     _LOGGER.error(f"[_make_cost_data] CRITICAL: cost conversion failed, forced to 0.0")
+            
+            # 🚨 ULTIMATE: 극소값도 유효한 비용으로 보존 (1e-10 → 1e-15로 완화)
+            if isinstance(cost_value, float):
+                if abs(cost_value) < 1e-15:  # 완전히 0에 가까운 경우만 0으로 처리
+                    cost_value = 0.0
+                    _LOGGER.debug(f"[_make_cost_data] Extremely small value normalized to 0.0")
+                elif abs(cost_value) < 1e-6:  # 극소값은 그대로 보존하되 로깅
+                    _LOGGER.info(f"[_make_cost_data] Small cost value preserved: {cost_value}")
+                else:
+                    cost_value = round(cost_value, 6)  # 일반적인 값은 반올림
             
             usage_quantity = getattr(row, "usage_quantity", 0.0)
             if isinstance(usage_quantity, float) and abs(usage_quantity) < 1e-4:
@@ -1219,6 +1263,14 @@ class CostManager(BaseManager):
             if "currency" not in record:
                 _LOGGER.error(f"[_make_cost_data] FATAL: currency field disappeared during ordering!")
                 record = {"cost": record.get("cost", 0.0), "currency": "USD", **{k: v for k, v in record.items() if k not in ["cost", "currency"]}}
+
+            # 🚨 ULTIMATE: 최종 결과 검증 (cost 필드 절대 보장)
+            if "cost" not in record:
+                _LOGGER.error(f"[_make_cost_data] FATAL: cost field missing after creation! Keys: {list(record.keys())}")
+                record = {"cost": 0.0, **record}
+            elif record["cost"] is None:
+                _LOGGER.error(f"[_make_cost_data] FATAL: cost field is None after creation!")
+                record["cost"] = 0.0
 
             return {"results": [record]}
 
@@ -1473,6 +1525,11 @@ class CostManager(BaseManager):
             _LOGGER.debug(f"[SQL 생성] 특정 프로젝트 필터링: {self.target_project_id}")
         else:
             _LOGGER.debug("[SQL 생성] 모든 프로젝트 조회 (project_id = '*')")
+        
+        # 🚨 ULTIMATE: 무료 서비스 제외 필터 추가 (SpaceONE 집계 성능 향상)
+        # cost > 0인 레코드만 포함하여 의미 있는 비용 데이터만 처리
+        where_condition += " AND cost > 0"
+        _LOGGER.info("[SQL 생성] 무료 서비스 제외 필터 적용: cost > 0")
 
         # 상세 사용량 데이터인 경우 리소스 정보 포함
         if hasattr(self, "is_detailed_usage") and self.is_detailed_usage:

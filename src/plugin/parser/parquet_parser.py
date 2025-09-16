@@ -86,16 +86,33 @@ class ParquetParser(BaseParser):
 
                     mapped_record = field_mapper.map_record(row_dict)
 
-                    # 매핑 후 data 필드 확인 및 강제 제거
-                    if current_count < 3:
-                        if "data" in mapped_record:
-                            del mapped_record["data"]
-
+                    # 🚨 CRITICAL: cost 필드 보장 (field_mapper 결과 검증)
+                    if "cost" not in mapped_record:
+                        # additional_info에서 cost 복구 시도
+                        cost_value = 0.0
+                        if "additional_info" in mapped_record and isinstance(mapped_record["additional_info"], dict):
+                            cost_after_credits = mapped_record["additional_info"].get("Cost After Credits", 0)
+                            try:
+                                cost_value = float(cost_after_credits)
+                            except (ValueError, TypeError):
+                                cost_value = 0.0
+                        
+                        # 최상위 cost 필드 추가 (첫 번째 위치)
+                        new_record = {"cost": cost_value}
+                        new_record.update(mapped_record)
+                        mapped_record = new_record
+                        
+                        _LOGGER.info(f"[ParquetParser] RECOVERED cost field: {cost_value}")
+                    
                     # SpaceONE 프레임워크 호환성을 위해 data 필드 보장
                     if "data" not in mapped_record or not isinstance(
                         mapped_record["data"], dict
                     ):
-                        mapped_record["data"] = {}
+                        # data 필드에 cost 정보 포함
+                        mapped_record["data"] = {
+                            "cost": str(mapped_record.get("cost", 0.0)),
+                            "listed_price": str(mapped_record.get("cost", 0.0))
+                        }
                     batch_records.append(mapped_record)
                     current_count += 1
 
