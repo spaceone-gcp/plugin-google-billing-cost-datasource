@@ -22,6 +22,7 @@ except ImportError:
 from plugin.manager.cost_manager import CostManager
 from plugin.manager.data_source_manager import DataSourceManager
 from plugin.manager.job_manager import JobManager
+from plugin.manager.credits_detail_manager import CreditsDetailManager
 
 # 전역 JSON 패치 제거 - BigQuery API 호환성 문제로 인해 제거
 # import plugin.utils.json_patch  # BigQuery request_id 변환 문제 발생
@@ -271,7 +272,7 @@ def job_get_tasks(params: dict) -> dict:
 
 
 def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
-    """get cost data - 실제 로직"""
+    """get cost data - 실제 로직 (Credits Detail 모드 지원)"""
     try:
         # 필수 파라미터 추출
         options = params["options"]
@@ -280,13 +281,82 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
         # 선택적 파라미터 추출
         task_options = params.get("task_options", {})
         schema = params.get("schema")
+        
+        # 🎯 Credits Detail 모드 확인
+        credits_detail_mode = task_options.get("credits_detail_mode", False)
+        
+        _LOGGER.info(f"[_cost_get_data_logic] Credits Detail 모드: {credits_detail_mode}")
+        
+        if credits_detail_mode:
+            # 🎯 Credits Detail 모드: 원본 데이터 조회
+            _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드로 실행")
+            
+            from plugin.manager.credits_detail_manager import CreditsDetailManager
+            from plugin.connector.bigquery_connector import BigqueryConnector
+            
+            # Credits Detail Manager 초기화
+            credits_mgr = CreditsDetailManager()
+            
+            # BigQuery 커넥터 설정
+            bigquery_connector = BigqueryConnector()
+            bigquery_connector.create_session(options, secret_data, schema)
+            
+            # 빌링 정보 설정
+            billing_export_project_id = options.get("billing_export_project_id")
+            billing_dataset_id = options.get("billing_dataset_id")
+            billing_account_id = options.get("billing_account_id")
+            
+            if not billing_export_project_id:
+                raise ValueError("billing_export_project_id is required in options")
+            if not billing_dataset_id:
+                raise ValueError("billing_dataset_id is required in options")
+            if not billing_account_id:
+                raise ValueError("billing_account_id is required in options")
+            
+            # 빌링 테이블 이름 생성
+            billing_table = f"gcp_billing_export_v1_{billing_account_id.replace('-', '_')}"
+            
+            # Credits Detail Manager 초기화
+            credits_mgr.initialize(
+                bigquery_connector=bigquery_connector,
+                billing_export_project_id=billing_export_project_id,
+                billing_dataset=billing_dataset_id,
+                billing_table=billing_table
+            )
+            
+            # 쿼리 옵션 파싱
+            start_date = task_options.get("start")
+            end_date = task_options.get("end")
+            project_id = task_options.get("project_id")
+            limit = int(task_options.get("credits_detail_limit", 100))
+            
+            if not start_date:
+                raise ValueError("start date is required for credits detail mode")
+            
+            _LOGGER.info(f"[_cost_get_data_logic] Credits Detail 조회: {start_date} ~ {end_date}, 프로젝트: {project_id}, 제한: {limit}")
+            
+            # Credits Detail 조회
+            for record in credits_mgr.get_credits_detail(
+                start_date=start_date,
+                end_date=end_date,
+                project_id=project_id,
+                billing_account_id=billing_account_id,
+                limit=limit
+            ):
+                yield record
+            
+            _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드 조회 완료")
+            
+        else:
+            # 🚀 기본 모드: 기존 최적화된 집계 데이터 조회
+            _LOGGER.info("[_cost_get_data_logic] 기본 모드로 실행")
+            
+            # CostManager 인스턴스 생성
+            cost_mgr = CostManager()
 
-        # CostManager 인스턴스 생성
-        cost_mgr = CostManager()
+            result_generator = cost_mgr.get_data(options, secret_data, task_options, schema)
 
-        result_generator = cost_mgr.get_data(options, secret_data, task_options, schema)
-
-        return result_generator
+            yield from result_generator
 
     except Exception as e:
         _LOGGER.error(f"[_cost_get_data_logic] Failed to get cost data: {e}")
@@ -699,3 +769,20 @@ def cost_get_linked_accounts(params: dict) -> dict:
     except Exception as e:
         _LOGGER.error(f"[cost_get_linked_accounts] API endpoint failed: {e}")
         raise
+
+
+# =============================================================================
+# 🎯 Credits Detail 기능은 기존 Cost.get_data API에 통합됨
+# 
+# SpaceONE 프레임워크 제약으로 새로운 엔드포인트 추가 불가
+# task_options.credits_detail_mode = true 로 Credits Detail 모드 활성화
+# =============================================================================
+
+
+# =============================================================================
+# 🎯 Credits Detail 기능은 기존 Cost.get_data API에 통합됨
+# 
+# 사용법:
+# task_options.credits_detail_mode = true
+# task_options.credits_detail_limit = 100 (선택사항)
+# =============================================================================

@@ -1924,7 +1924,7 @@ class FieldMapper:
                     "Cost At List Consumption Model": "Cost At List Consumption Model",
                     "Credits Amount": "Credits Amount",  # AmortizedCost용
                     "Credits Detail": {
-                        "field": "credits",
+                        "field": "credits_detail",
                         "transform": "json_parse_array",
                         "output_key": "Credits Detail",
                     },

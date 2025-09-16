@@ -1526,27 +1526,25 @@ class CostManager(BaseManager):
         else:
             _LOGGER.debug("[SQL 생성] 모든 프로젝트 조회 (project_id = '*')")
         
-        # 🚨 ULTIMATE: 무료 서비스 제외 필터 추가 (SpaceONE 집계 성능 향상)
-        # cost > 0인 레코드만 포함하여 의미 있는 비용 데이터만 처리
-        where_condition += " AND cost > 0"
-        _LOGGER.info("[SQL 생성] 무료 서비스 제외 필터 적용: cost > 0")
 
         # 상세 사용량 데이터인 경우 리소스 정보 포함
         if hasattr(self, "is_detailed_usage") and self.is_detailed_usage:
             resource_fields = """
               resource.name as resource_name,
               resource.global_name as resource_global_name,"""
-            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (SUM이 없는 필드들)
-            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING, 23-26: REPEATED JSON, 27-28: 리소스
-            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26"
+            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (ANY_VALUE/SUM 제외)
+            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING
+            # 23-25: ANY_VALUE(REPEATED JSON) - GROUP BY 제외, 26: credits 원본 - GROUP BY 제외, 27-28: 리소스 NULL
+            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
             _LOGGER.debug("[SQL 생성] 상세 사용량 모드 - 리소스 정보 포함")
         else:
             resource_fields = """
               NULL as resource_name,
               NULL as resource_global_name,"""
-            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (SUM이 없는 필드들)
-            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING, 23-26: REPEATED JSON
-            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26"
+            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (ANY_VALUE/SUM 제외)
+            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING
+            # 23-25: ANY_VALUE(REPEATED JSON) - GROUP BY 제외, 26: credits 원본 - GROUP BY 제외
+            group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
             _LOGGER.debug("[SQL 생성] 표준 모드 - 리소스 정보 제외")
 
         query = f"""
@@ -1587,11 +1585,13 @@ class CostManager(BaseManager):
               IFNULL(seller_name, '') as seller_name,
               IFNULL(cost_type, '') as cost_type,
 
-              -- REPEATED 필드들을 JSON 문자열로 변환 (기존 호환성)
-              TO_JSON_STRING(IFNULL(labels, [])) as labels,
-              TO_JSON_STRING(IFNULL(system_labels, [])) as system_labels_json,
-              TO_JSON_STRING(IFNULL(tags, [])) as resource_tags,
-              TO_JSON_STRING(IFNULL(credits, [])) as credits_detail,{resource_fields}
+              -- REPEATED 필드들을 JSON 문자열로 변환 (ANY_VALUE로 집계 호환)
+              TO_JSON_STRING(ANY_VALUE(IFNULL(labels, []))) as labels,
+              TO_JSON_STRING(ANY_VALUE(IFNULL(system_labels, []))) as system_labels_json,
+              TO_JSON_STRING(ANY_VALUE(IFNULL(tags, []))) as resource_tags,
+              
+              -- 🎯 Credits Detail 처리 (최적화 완료)
+              TO_JSON_STRING(ANY_VALUE(credits)) as credits_detail,{resource_fields}
 
               -- FLOAT 타입 필드들 (집계)
               SUM(cost) as cost,
