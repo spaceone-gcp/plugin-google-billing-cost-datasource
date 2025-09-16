@@ -1130,7 +1130,7 @@ class CostManager(BaseManager):
                 "usage_quantity": usage_quantity,
                 "usage_unit": str(getattr(row, "pricing_unit", "")).strip(),
                 "provider": "google_cloud",
-                "region_code": str(getattr(row, "location_region", "global")).strip(),
+                "region_code": str(getattr(row, "region_code", getattr(row, "location_region", "global"))).strip(),
                 "product": str(getattr(row, "service_description", "Unknown")).strip(),
                 "usage_type": str(getattr(row, "sku_description", "Unknown")).strip(),
                 "resource": str(getattr(row, "project_id", "")).strip(),
@@ -1538,7 +1538,7 @@ class CostManager(BaseManager):
 
               -- FLOAT 타입 필드들 (집계)
               SUM(cost) as cost,
-              SUM(IFNULL(currency_conversion_rate, 1.0)) as currency_conversion_rate,
+              MAX(IFNULL(currency_conversion_rate, 1.0)) as currency_conversion_rate,
               SUM(IFNULL(cost_at_list, cost)) as cost_at_list,
               SUM(IFNULL(cost_at_effective_price_default, cost)) as cost_at_effective_price_default,
               SUM(IFNULL(cost_at_list_consumption_model, cost)) as cost_at_list_consumption_model,
@@ -1565,7 +1565,7 @@ class CostManager(BaseManager):
             ORDER BY billed_at desc
             ;
         """
-
+        _LOGGER.debug(f"[SQL 쿼리] {query}")
         _LOGGER.debug("[SQL 생성] 쿼리 생성 완료")
         _LOGGER.debug(
             f"[SQL 생성] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
