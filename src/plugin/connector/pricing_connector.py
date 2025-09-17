@@ -83,8 +83,8 @@ class PricingConnector(BaseConnector):
                 query, 
                 project_id=self.project_id, 
                 credentials=self.credentials,
-                timeout=300,  # 5분 타임아웃 설정
-                progress_bar=False  # 프로그레스바 비활성화
+                # timeout 파라미터는 pandas-gbq>=0.29.0에서 지원되지 않음
+                progress_bar_type=None  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
             )
 
             for _, row in response_df.iterrows():
@@ -112,8 +112,8 @@ class PricingConnector(BaseConnector):
                 query, 
                 project_id=self.project_id, 
                 credentials=self.credentials,
-                timeout=300,  # 5분 타임아웃 설정
-                progress_bar=False  # 프로그레스바 비활성화
+                # timeout 파라미터는 pandas-gbq>=0.29.0에서 지원되지 않음
+                progress_bar_type=None  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
             )
 
             service_summary = {}

@@ -30,12 +30,12 @@ GCS_CONFIG = {
 # Default data source type for backward compatibility
 DEFAULT_DATA_SOURCE_TYPE = "bigquery"
 
-# BigQuery Configuration
+# BigQuery Configuration (pyproject.toml 명시 버전: pandas-gbq>=0.29.0)
 BIGQUERY_CONFIG = {
-    "query_timeout": 300,  # 5분 쿼리 타임아웃
-    "max_results": None,  # 결과 수 제한 없음
-    "progress_bar": False,  # 프로그레스바 비활성화
-    "connection_timeout": 60,  # 연결 타임아웃 (1분)
-    "retry_attempts": 3,  # 재시도 횟수
-    "retry_delay": 5,  # 재시도 간격 (초)
+    # "query_timeout": 300,  # pandas-gbq>=0.29.0에서 지원되지 않음
+    "max_results": None,  # 결과 수 제한 없음 (지원됨)
+    "progress_bar_type": None,  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
+    "connection_timeout": 60,  # 연결 타임아웃 (1분) - 향후 사용
+    "retry_attempts": 3,  # 재시도 횟수 - 향후 사용
+    "retry_delay": 5,  # 재시도 간격 (초) - 향후 사용
 }
