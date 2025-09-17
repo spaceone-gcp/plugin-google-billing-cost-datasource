@@ -1,6 +1,8 @@
 import logging
 import os
 from collections.abc import Generator
+from typing import Set
+from threading import Lock
 
 # SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
 try:
@@ -81,6 +83,11 @@ def setup_logging():
 setup_logging()
 
 _LOGGER = logging.getLogger("spaceone")
+
+# 🎯 전역 프로젝트 처리 추적 시스템
+_processed_projects: Set[str] = set()
+_processing_lock = Lock()
+_expected_total_projects = 0  # JobManager에서 실제 생성된 태스크 수 (동적 설정)
 
 app = DataSourcePluginServer()
 
@@ -246,7 +253,16 @@ def job_get_tasks(params: dict) -> dict:
         }
 
     """
-    _LOGGER.info("[job_get_tasks] API endpoint called")
+    _LOGGER.info("🚀 [job_get_tasks] API endpoint called - 태스크 생성 시작")
+    
+    # 🎯 전역 프로젝트 처리 추적 시스템 초기화
+    with _processing_lock:
+        _processed_projects.clear()
+    _LOGGER.info("🔄 [job_get_tasks] 프로젝트 처리 추적 시스템 초기화 완료")
+    
+    # 🎯 중요: 프로젝트 태스크 생성 시작 알림
+    _LOGGER.info("📊 [job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다...")
+    _LOGGER.info("🔍 [job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다...")
 
     try:
         # 파라미터 기본 검증
@@ -259,10 +275,35 @@ def job_get_tasks(params: dict) -> dict:
 
         if missing_params:
             raise ValueError(f"Missing required parameters: {missing_params}")
+            
+        # 요청 파라미터 상세 로깅
+        _LOGGER.info(f"📋 [job_get_tasks] 요청 파라미터:")
+        _LOGGER.info(f"   - domain_id: {params.get('domain_id')}")
+        _LOGGER.info(f"   - start: {params.get('start', 'None')}")
+        _LOGGER.info(f"   - options keys: {list(params.get('options', {}).keys())}")
+        if 'options' in params:
+            options = params['options']
+            _LOGGER.info(f"   - billing_export_project_id: {options.get('billing_export_project_id')}")
+            _LOGGER.info(f"   - billing_dataset_id: {options.get('billing_dataset_id')}")
+            _LOGGER.info(f"   - billing_account_id: {options.get('billing_account_id')}")
 
         # 작업 태스크 생성
         result = _job_get_tasks_logic(params)
-        _LOGGER.info(f"[job_get_tasks] Completed - {len(result.get('tasks', []))} tasks")
+        
+        # 🎯 태스크 생성 결과 검증 및 로깅
+        actual_tasks = len(result.get('tasks', []))
+        
+        # 전역 변수에 실제 생성된 태스크 수 저장
+        global _expected_total_projects
+        with _processing_lock:
+            _expected_total_projects = actual_tasks
+        
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("🎉 [job_get_tasks] 태스크 생성 API 완료!")
+        _LOGGER.info(f"📊 최종 결과: {actual_tasks}개 태스크 생성")
+        _LOGGER.info(f"🔄 전역 추적 시스템에 예상 태스크 수 설정: {actual_tasks}개")
+        _LOGGER.info("✅ JobManager가 BigQuery에서 탐지한 모든 활성 프로젝트에 대한 태스크 생성 완료!")
+        _LOGGER.info("=" * 80)
 
         return result
 
@@ -464,6 +505,50 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             _LOGGER.warning("[cost_get_data] No results to yield")
             yield {"results": []}
 
+        # 🎯 처리 완료 프로젝트 수 검증 로깅 (JobManager와 동일한 형태)
+        task_options = params.get("task_options", {})
+        processed_project = task_options.get("project_id", "unknown")
+        
+        # 전역 처리된 프로젝트 추적 업데이트
+        with _processing_lock:
+            _processed_projects.add(processed_project)
+            current_processed_count = len(_processed_projects)
+        
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("🎉 [cost_get_data] 개별 프로젝트 처리 완료!")
+        _LOGGER.info(f"📋 처리된 프로젝트: {processed_project}")
+        _LOGGER.info(f"📊 처리된 배치 수: {batch_count}개")
+        _LOGGER.info(f"📝 처리된 총 레코드 수: {total_records}개")
+        
+        # 전체 진행 상황 요약
+        _LOGGER.info(f"🔍 [전체 진행 상황]")
+        _LOGGER.info(f"   📊 현재까지 처리된 프로젝트 수: {current_processed_count}개")
+        _LOGGER.info(f"   🎯 JobManager가 생성한 총 태스크 수: {_expected_total_projects}개")
+        
+        # 0으로 나누기 방지
+        if _expected_total_projects > 0:
+            progress_rate = (current_processed_count / _expected_total_projects * 100)
+            _LOGGER.info(f"   📈 진행률: {progress_rate:.1f}%")
+            
+            # 모든 프로젝트 처리 완료 시 최종 요약
+            if current_processed_count == _expected_total_projects:
+                _LOGGER.info("🎊 [최종 완료] JobManager 태스크와 동일한 수의 프로젝트 처리 완료!")
+                _LOGGER.info("📝 [처리된 프로젝트 목록] - JobManager 태스크와 비교")
+                sorted_projects = sorted(list(_processed_projects))
+                for i, project_id in enumerate(sorted_projects, 1):
+                    _LOGGER.info(f"   {i:2d}. {project_id}")
+            elif current_processed_count < _expected_total_projects:
+                remaining = _expected_total_projects - current_processed_count
+                _LOGGER.info(f"⏳ 남은 프로젝트: {remaining}개")
+            else:
+                extra = current_processed_count - _expected_total_projects
+                _LOGGER.warning(f"🤔 예상보다 {extra}개 더 많은 프로젝트가 처리되었습니다!")
+        else:
+            _LOGGER.warning("⚠️  JobManager에서 생성된 태스크 수가 설정되지 않았습니다!")
+            _LOGGER.warning("💡 Job.get_tasks가 먼저 호출되어야 합니다.")
+        
+        _LOGGER.info("=" * 80)
+        
         _LOGGER.info(f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records")
 
     except Exception as e:

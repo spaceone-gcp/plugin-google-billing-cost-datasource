@@ -299,22 +299,54 @@ class JobManager(BaseManager):
             _LOGGER.info(f"⏱️ 쿼리 실행 시간: {execution_time:.2f}초")
             _LOGGER.info(f"📅 조회 기간: {start_month}-01 이후")
             
-            # 프로젝트 목록 로깅 (디버그용)
+            # 🎯 프로젝트 발견 및 태스크 생성 상세 로깅
             if len(response_stream) > 0:
                 project_list = [row.id for _, row in response_stream.iterrows()]
-                _LOGGER.info(f"🎯 [활성 프로젝트 목록]")
+                
+                # 🚨 중요: 발견된 프로젝트 수 로깅
+                actual_projects = len(project_list)
+                
+                _LOGGER.info(f"🎯 [프로젝트 발견 결과]")
+                _LOGGER.info(f"   📊 BigQuery에서 발견된 활성 프로젝트 수: {actual_projects}개")
+                _LOGGER.info(f"   🔍 필터 조건: cost > 0 OR usage.amount > 0")
+                _LOGGER.info(f"   📅 조회 기간: {start_month}-01 이후")
+                
+                if actual_projects > 0:
+                    _LOGGER.info(f"   ✅ {actual_projects}개의 활성 프로젝트가 발견되었습니다!")
+                else:
+                    _LOGGER.warning(f"   ⚠️  활성 프로젝트가 발견되지 않았습니다!")
+                    _LOGGER.warning(f"   💡 빌링 데이터나 필터 조건을 확인하세요.")
+                
+                _LOGGER.info(f"🎯 [활성 프로젝트 목록] - 총 {actual_projects}개")
                 for i, project_id in enumerate(project_list, 1):
                     _LOGGER.info(f"   {i:2d}. {project_id}")
-                    
-                # 프로젝트별 추가 정보 (처음 3개만)
-                _LOGGER.debug("📋 [프로젝트 상세 정보 - 처음 3개]")
-                for idx, (_, row) in enumerate(response_stream.head(3).iterrows()):
-                    _LOGGER.debug(f"   프로젝트 {idx+1}: {row.id}")
+                
+                # 특정 프로젝트들이 포함되었는지 확인 (누락되기 쉬운 프로젝트들)
+                key_projects_to_check = [
+                    "mkkang-project", 
+                    "dev-project-1-465407",
+                    "inventory-project-465506", 
+                    "iron-man-2-465309",
+                    "marvels-the-avengers-465309",
+                    "the-incredible-hulk-465309",
+                    "thor-465309"
+                ]
+                
+                _LOGGER.info(f"🔍 [핵심 프로젝트 포함 확인]")
+                for key_project in key_projects_to_check:
+                    if key_project in project_list:
+                        _LOGGER.info(f"   ✅ {key_project} - 포함됨")
+                    else:
+                        _LOGGER.warning(f"   ❌ {key_project} - 누락됨!")
+                        
             else:
-                _LOGGER.warning("⚠️ [주의] 활성 프로젝트가 없습니다!")
-                _LOGGER.warning("   - 필터 조건을 확인하세요: 비용 > 0 OR 사용량 > 0")
-                _LOGGER.warning(f"   - 조회 기간을 확인하세요: {start_month}-01 이후")
-                _LOGGER.warning(f"   - 테이블 경로를 확인하세요: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+                _LOGGER.error("🚨 [심각] 활성 프로젝트가 전혀 발견되지 않았습니다!")
+                _LOGGER.error("   💡 문제 해결 체크리스트:")
+                _LOGGER.error("   1. 필터 조건을 확인하세요: cost > 0 OR usage.amount > 0")
+                _LOGGER.error(f"   2. 조회 기간을 확인하세요: {start_month}-01 이후")
+                _LOGGER.error(f"   3. 테이블 경로를 확인하세요: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+                _LOGGER.error("   4. BigQuery 테이블에 데이터가 있는지 확인하세요")
+                _LOGGER.error("   5. 서비스 계정 권한을 확인하세요")
             _LOGGER.info("=" * 80)
             _LOGGER.debug(
                 f"[JobManager._get_bigquery_tasks] Query executed, processing {len(response_stream)} rows"
@@ -342,26 +374,39 @@ class JobManager(BaseManager):
             changed_item = {"start": start_month}
             changed.append(changed_item)
 
-            # 🚀 성능 개선 메트릭 로깅
+            # 🚀 태스크 생성 완료 및 검증 로깅
             total_execution_time = time.time() - start_time
             
             _LOGGER.info("=" * 80)
-            _LOGGER.info("🎉 [작업 생성 완료] BigQuery 태스크 생성 결과")
+            _LOGGER.info("🎉 [태스크 생성 완료] BigQuery 태스크 생성 최종 결과")
             _LOGGER.info(f"📋 생성된 태스크 수: {len(tasks)}개")
             _LOGGER.info(f"📅 대상 시작월: {start_month}")
             _LOGGER.info(f"⏱️ 총 실행시간: {total_execution_time:.2f}초")
             _LOGGER.info(f"🏷️ 변경된 항목 수: {len(changed)}개")
             
-            # 효율성 개선 메트릭 (기존 전체 프로젝트 대비)
-            estimated_total_projects = 21  # 일반적인 GCP 조직의 평균 프로젝트 수
-            saved_queries = max(0, estimated_total_projects - len(tasks))
-            efficiency_improvement = max(0, (saved_queries / estimated_total_projects) * 100) if estimated_total_projects > 0 else 0
+            # 🎯 태스크 생성 완전성 검증
+            actual_tasks = len(tasks)
+            discovered_projects = len(response_stream)  # BigQuery에서 실제 발견된 프로젝트 수
             
-            _LOGGER.info(f"🎯 [효율성 개선]")
-            _LOGGER.info(f"   - 예상 전체 프로젝트: {estimated_total_projects}개")
-            _LOGGER.info(f"   - 실제 활성 프로젝트: {len(tasks)}개")
-            _LOGGER.info(f"   - 절약된 쿼리 수: {saved_queries}개")
-            _LOGGER.info(f"   - 효율성 개선율: {efficiency_improvement:.1f}%")
+            _LOGGER.info(f"🔍 [태스크 생성 검증]")
+            _LOGGER.info(f"   📊 발견된 프로젝트 수: {discovered_projects}개")
+            _LOGGER.info(f"   ✅ 생성된 태스크 수: {actual_tasks}개")
+            
+            if actual_tasks == discovered_projects:
+                _LOGGER.info(f"   🎯 완벽! 발견된 모든 프로젝트에 대한 태스크가 생성되었습니다!")
+            elif actual_tasks < discovered_projects:
+                missing_tasks = discovered_projects - actual_tasks
+                _LOGGER.warning(f"   ⚠️  {missing_tasks}개 태스크 생성 누락!")
+                _LOGGER.warning(f"   💡 프로젝트 발견과 태스크 생성 간 불일치가 있습니다.")
+            else:
+                _LOGGER.warning(f"   🤔 생성된 태스크가 발견된 프로젝트보다 {actual_tasks - discovered_projects}개 많습니다!")
+            
+            # 생성된 태스크의 프로젝트 ID 목록 (검증용)
+            task_project_ids = [task["task_options"]["project_id"] for task in tasks]
+            _LOGGER.info(f"📝 [생성된 태스크의 프로젝트 ID 목록]")
+            for i, project_id in enumerate(task_project_ids, 1):
+                _LOGGER.info(f"   {i:2d}. {project_id}")
+            
             _LOGGER.info("=" * 80)
             _LOGGER.debug(
                 f"[JobManager._get_bigquery_tasks] Changed item: {changed_item}"
