@@ -76,13 +76,21 @@ class BigqueryConnector(BaseConnector):
 
     def read_df_from_bigquery(self, query):
         """BigQuery에서 DataFrame으로 데이터를 읽어옵니다."""
-        _LOGGER.debug("[BigqueryConnector] 쿼리 실행 시작")
+        # 클래스 레벨 쿼리 카운터 (없으면 초기화)
+        if not hasattr(BigqueryConnector, '_query_counter'):
+            BigqueryConnector._query_counter = 0
+        
+        BigqueryConnector._query_counter += 1
+        current_query_num = BigqueryConnector._query_counter
+        
+        _LOGGER.info(f"🚀 [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 시작")
         _LOGGER.debug(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
 
         try:
             result_df = pandas_gbq.read_gbq(
                 query, project_id=self.project_id, credentials=self.credentials
             )
+            _LOGGER.info(f"✅ [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회")
             _LOGGER.debug(f"[BigqueryConnector] 쿼리 실행 성공 - DataFrame 크기: {len(result_df)} 행, {len(result_df.columns)} 열")
 
             # GCS 파서와 동일한 데이터 타입으로 변환
@@ -103,7 +111,8 @@ class BigqueryConnector(BaseConnector):
 
         # 새로운 스키마 기준 필드 분류
         float_fields = ['cost', 'currency_conversion_rate', 'cost_at_list',
-                       'cost_at_effective_price_default', 'cost_at_list_consumption_model']
+                       'cost_at_effective_price_default', 'cost_at_list_consumption_model',
+                       'credits_total_amount']
 
         numeric_fields = ['effective_price', 'tier_start_amount', 'pricing_unit_quantity',
                          'list_price', 'effective_price_default', 'list_price_consumption_model']

@@ -1,6 +1,6 @@
 # API 명세서
 
-Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. 주요 커넥터들의 API와 새로운 기능들을 포함합니다.
+Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 업데이트로 통합된 source 파라미터, Credits Detail 기능, 그리고 향상된 성능 최적화를 포함합니다.
 
 ## 🚨 SpaceONE JSON 응답 형식 제약사항
 
@@ -106,6 +106,101 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. 주�
 - [ ] 응답 전 과학적 표기법 패턴 검증
 - [ ] `1e-15` 미만 값은 `0.0`으로 처리
 - [ ] JSON 직렬화 전 완전한 과학적 표기법 제거
+
+## 통합 Source 파라미터 API (v2.0) ⭐ **NEW**
+
+### Source 기반 데이터 조회
+```python
+def get_data(
+    self,
+    options: dict,
+    secret_data: dict,
+    task_options: dict,
+    schema: str = None
+) -> Generator[dict, None, None]:
+    """
+    통합된 source 파라미터를 기반으로 데이터를 조회합니다.
+    
+    Args:
+        options: 데이터 소스 옵션
+            - source: "bigquery" | "gcs" | "http" (필수)
+        secret_data: 인증 정보 (source에 따라 선택적)
+        task_options: 작업 옵션
+        schema: 스키마 정보
+        
+    Yields:
+        SpaceONE 형식의 빌링 데이터
+        
+    Raises:
+        ERROR_REQUIRED_PARAMETER: source 파라미터 누락 또는 잘못된 값
+    """
+```
+
+### Source 값 검증
+```python
+def _get_source_value(self, options: dict) -> str:
+    """
+    source 값을 추출하고 검증합니다.
+    
+    Args:
+        options: 데이터 소스 옵션
+        
+    Returns:
+        검증된 source 타입 ("bigquery", "gcs", "http")
+        
+    Raises:
+        ERROR_REQUIRED_PARAMETER: source 값이 없거나 지원하지 않는 값
+    """
+```
+
+## Credits Detail API (v2.0) ⭐ **NEW**
+
+### Credits Detail 모드
+```python
+def _get_data_from_bigquery(
+    self,
+    options: dict,
+    secret_data: dict,
+    task_options: dict,
+    schema: str = None
+) -> Generator[dict, None, None]:
+    """
+    BigQuery에서 Credits Detail 정보를 포함한 데이터 조회
+    
+    Args:
+        task_options:
+            - credits_detail_mode: bool (선택사항, 기본값: False)
+            - credits_detail_limit: int (선택사항, 기본값: 1000)
+            
+    Features:
+        - 기본 모드: GROUP BY 집계로 최적화된 성능
+        - Credits Detail 모드: 원본 데이터로 완전한 크레딧 정보
+        - 스마트 청킹: gRPC 메시지 크기 제한 대응
+    """
+```
+
+### Credits 처리
+```python
+def _process_credits_detail(self, row) -> list:
+    """
+    Credits 배열 데이터 처리 (BigQuery 스키마 준수)
+    
+    Args:
+        row: 데이터 행
+        
+    Returns:
+        처리된 크레딧 상세 리스트
+        [
+            {
+                "name": str,
+                "amount": float,
+                "full_name": str,
+                "id": str,
+                "type": str  # DISCOUNT, FREE_TIER, etc.
+            }
+        ]
+    """
+```
 
 ## BigQuery Connector API
 
@@ -639,42 +734,120 @@ logger.info(
 )
 ```
 
-## 📋 최근 업데이트 (v2.1)
+## GCS Connector API (v2.0) ⭐ **NEW**
 
-### SpaceONE Job 스키마 준수 강화 ⭐ **NEW**
-
-#### ValidationError 방지
-- **문제**: `ERROR_DB_QUERY ValidationError (start.String value is too long)` 오류 발생
-- **원인**: SpaceONE Job 스키마의 `start` 필드 길이 제한(최대 7자) 위반
-- **해결**: 자동 필드 길이 제한 및 YYYY-MM 형식 강제 적용
-
-#### Job Manager 개선사항
+### GCS 버킷 데이터 조회
 ```python
-# HTTP 파일 작업 - start 필드 길이 자동 제한
-if start:
-    start_value = start[:7]  # YYYY-MM 형식으로 제한
-else:
-    start_value = datetime.utcnow().strftime("%Y-%m")  # 현재 월
-
-changed_item = {
-    "start": start_value,  # 최대 7자로 제한됨
-    "timestamp": current_time,
-    "file_count": len(tasks),
-}
+def _get_data_from_gcs(
+    self,
+    options: dict,
+    secret_data: dict,
+    task_options: dict,
+    schema: str = None
+) -> Generator[dict, None, None]:
+    """
+    GCS 버킷에서 데이터 조회 - 동시성 제어 및 중복 요청 처리
+    
+    Args:
+        options:
+            - bucket_name: str (필수)
+            - field_mapper: dict (선택사항)
+        task_options:
+            - project_id: str (선택사항)
+            - start: str (날짜 범위 필터링)
+            - file_path: str (특정 파일 지정)
+            - max_files: int (최대 파일 수, 기본값: 10)
+            
+    Features:
+        - 날짜 범위 기반 파일 필터링
+        - 동시성 제어로 안전한 병렬 처리
+        - 압축 파일 자동 해제
+        - 스마트 포맷 감지
+    """
 ```
 
-#### 스키마 검증 결과
-- ✅ **BigQuery 작업**: 기존 YYYY-MM 형식 유지 (7자)
-- ✅ **HTTP 파일 작업**: 자동 길이 제한 적용 (7자)
-- ✅ **하위 호환성**: 기존 기능 완전 보존
-- ✅ **오류 방지**: ValidationError 완전 해결
-
-#### 테스트 검증
-```bash
-# 모든 테스트 통과
-✅ start 필드 길이 제한 로직 성공: '2024-01' (길이: 7)
-✅ start 필드 기본값 생성 로직 성공: '2025-09' (길이: 7)  
-✅ BigQuery start_month 형식 확인: '2024-03' (길이: 7)
-✅ start 필드 경계 조건 테스트 통과
-✅ 형식 길이 확인 - 긴 형식: 19자, 짧은 형식: 7자
+### 파일 목록 조회
+```python
+def _get_gcs_file_list(
+    self,
+    bucket_name: str,
+    project_id: str,
+    start_period: str,
+    task_options: dict
+) -> list[dict]:
+    """
+    GCS 버킷에서 파일 목록 가져오기
+    
+    Args:
+        bucket_name: GCS 버킷 이름
+        project_id: 프로젝트 ID
+        start_period: 시작 기간 (YYYY-MM 형식)
+        task_options: 작업 옵션
+            - file_path: 특정 파일 경로
+            - file_pattern: 커스텀 패턴
+            
+    Returns:
+        파일 메타데이터 리스트
+    """
 ```
+
+## HTTP File Connector API (v2.0) ⭐ **UPDATED**
+
+### HTTP URL 데이터 조회
+```python
+def _get_data_from_http(
+    self,
+    options: dict,
+    secret_data: dict,
+    task_options: dict,
+    schema: str = None
+) -> Generator[dict, None, None]:
+    """
+    HTTP URL에서 데이터 조회 - 인증 불필요
+    
+    Args:
+        options:
+            - base_url: str (필수)
+            - field_mapper: dict (선택사항)
+        secret_data: 인증 정보 (공개 URL의 경우 불필요)
+        task_options: 작업 옵션
+            
+    Features:
+        - 공개 및 인증된 URL 지원
+        - 자동 압축 해제
+        - 메모리 효율적 스트리밍 처리
+        - URL 유효성 검증 및 정리
+    """
+```
+
+## 📋 최근 업데이트 (v2.0)
+
+### 통합 Source 파라미터 ⭐ **NEW**
+- **기능**: 단일 `source` 파라미터로 모든 데이터 소스 통합
+- **값**: `"bigquery"`, `"gcs"`, `"http"`
+- **장점**: 설정 단순화, 명확한 데이터 소스 식별
+
+### Credits Detail 기능 ⭐ **NEW**
+- **기능**: 개별 크레딧 정보의 완전한 세부사항 제공
+- **모드**: `credits_detail_mode: true`로 활성화
+- **성능**: Credits가 있는 레코드만 선택적 조회
+
+### gRPC 최적화 ⭐ **NEW**
+- **문제**: ResourceExhausted 오류 (4MB 제한)
+- **해결**: 스마트 청킹 시스템 (배치 크기 자동 조정)
+- **성능**: 대용량 데이터셋 안정적 전송
+
+### Cost 필드 보장 시스템 ⭐ **NEW**
+- **기능**: 100% cost 필드 커버리지
+- **지원**: 과학적 표기법 (9.6e-05) 완벽 처리
+- **안정성**: 5단계 보장 시스템으로 누락 방지
+
+### 현대적 Python 지원 ⭐ **NEW**
+- **설정**: pyproject.toml 기반 프로젝트 구성
+- **요구사항**: Python 3.9+ 지원
+- **도구**: Ruff, mypy 통합 개발 환경
+
+### BigQuery SQL 최적화 ⭐ **NEW**
+- **집계**: GROUP BY 최적화로 성능 향상
+- **필드**: 모든 BigQuery 스키마 필드 완전 지원
+- **중첩**: 중첩 구조 필드 정확한 처리

@@ -266,10 +266,12 @@ class JobManager(BaseManager):
             query = self._create_google_sql(start_month)
             _LOGGER.debug(f"[JobManager._get_bigquery_tasks] Generated query: {query}")
 
-            _LOGGER.info(
-                "[JobManager._get_bigquery_tasks] Executing BigQuery query to get project list"
-            )
+            _LOGGER.info("=" * 80)
+            _LOGGER.info("🔍 [QUERY #1] JobManager - 프로젝트 목록 조회 쿼리 실행")
+            _LOGGER.info(f"[JobManager._get_bigquery_tasks] Query: {query}")
+            _LOGGER.info("=" * 80)
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
+            _LOGGER.info(f"✅ [QUERY #1 완료] 조회된 프로젝트 수: {len(response_stream)}개")
             _LOGGER.debug(
                 f"[JobManager._get_bigquery_tasks] Query executed, processing {len(response_stream)} rows"
             )

@@ -80,7 +80,16 @@ class CostManager(BaseManager):
         start_month = self._get_start_month()
 
         query = self._create_linked_accounts_google_sql(start_month)
+        
+        # get_linked_accounts 쿼리 실행 로깅
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("🔍 [QUERY #0] CostManager - 링크된 계정(프로젝트) 목록 조회")
+        _LOGGER.info(f"[get_linked_accounts] Query: {query}")
+        _LOGGER.info("=" * 80)
+        
         response_stream = self.bigquery_connector.read_df_from_bigquery(query)
+        
+        _LOGGER.info(f"✅ [QUERY #0 완료] 링크된 계정 수: {len(response_stream)}개")
         for _, row in response_stream.iterrows():
             if row.id is not None:
                 linked_accounts.append({"account_id": row.id, "name": row.project_name})
@@ -175,14 +184,14 @@ class CostManager(BaseManager):
 
         query = self._create_google_sql(start)
 
-        # BigQuery 쿼리문 로깅 추가
-        _LOGGER.info("[BigQuery] 실행할 쿼리문:")
-        _LOGGER.info(f"[BigQuery] Query: {query}")
-        _LOGGER.info(
-            f"[BigQuery] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
-        )
+        # 프로젝트별 쿼리 실행 로깅 강화
+        _LOGGER.info("=" * 80)
+        _LOGGER.info(f"🔍 [QUERY #2-5] CostManager - 프로젝트별 비용 데이터 조회")
         _LOGGER.info(f"[BigQuery] 대상 프로젝트: {self.target_project_id}")
         _LOGGER.info(f"[BigQuery] 조회 시작일: {start}")
+        _LOGGER.info(f"[BigQuery] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+        _LOGGER.info(f"[BigQuery] Query: {query}")
+        _LOGGER.info("=" * 80)
 
         # 쿼리 실행 시간 측정 시작
         import time
@@ -192,6 +201,9 @@ class CostManager(BaseManager):
         try:
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
             query_execution_time = time.time() - query_start_time
+            
+            # 쿼리 완료 로깅
+            _LOGGER.info(f"✅ [QUERY 완료] 프로젝트 '{self.target_project_id}' - 실행시간: {query_execution_time:.2f}초, 조회 건수: {len(response_stream)}건")
 
             # 결과 데이터 건수 확인을 위한 카운터
             row_count = 0
@@ -259,10 +271,10 @@ class CostManager(BaseManager):
                         
                         # 🔍 BigQuery 배치 응답 레코드 로깅 (모든 레코드)
                         if batch_records:
-                            _LOGGER.info(f"[BigQuery-Response] 배치 응답 레코드 수: {len(batch_records)}")
+                            # _LOGGER.info(f"[BigQuery-Response] 배치 응답 레코드 수: {len(batch_records)}")
                             for i, record in enumerate(batch_records):  # 모든 레코드 로깅
-                                _LOGGER.info(f"[BigQuery-Response] 레코드 {i+1}: {record}")
-                        
+                                # _LOGGER.info(f"[BigQuery-Response] 레코드 {i+1}: {record}")
+                                pass
                         yield batch_result
                         batch_records = []
 
@@ -279,8 +291,8 @@ class CostManager(BaseManager):
                 # 🔍 BigQuery 최종 배치 응답 레코드 로깅 (모든 레코드)
                 _LOGGER.info(f"[BigQuery-FinalResponse] 최종 배치 응답 레코드 수: {len(batch_records)}")
                 for i, record in enumerate(batch_records):  # 모든 레코드 로깅
-                    _LOGGER.info(f"[BigQuery-FinalResponse] 레코드 {i+1}: {record}")
-                
+                    # _LOGGER.info(f"[BigQuery-FinalResponse] 레코드 {i+1}: {record}")
+                    pass
                 yield batch_result
 
             _LOGGER.info(f"[BigQuery] 처리 완료 - 총 {row_count}건의 데이터 처리됨")
@@ -1080,7 +1092,7 @@ class CostManager(BaseManager):
             
             # 🚨 ULTRA PURE DATA: 모든 값을 절대적으로 원본 그대로 보존 (과학적 표기법도 포함)
             # cost_value는 어떠한 변환도 없이 원본 그대로 유지
-            _LOGGER.debug(f"[_make_cost_data] Cost value preserved as absolute original: {cost_value}")
+            # _LOGGER.debug(f"[_make_cost_data] Cost value preserved as absolute original: {cost_value}")
             
             # 모든 cost 값을 원본 그대로 보존 (0으로 강제 처리 제거)
             if isinstance(cost_value, float):
@@ -1307,9 +1319,9 @@ class CostManager(BaseManager):
         try:
             # 🚨 PURE DATA: 절대로 계산하지 않고 원본 데이터 그대로 반환
             credits_total = getattr(row, "credits_total_amount", None)
-            if credits_total is not None:
+            if credits_total is not None and credits_total != "" and credits_total != 0.0:
                 return credits_total  # 원본 그대로
-            # 🚨 ULTRA PURE: 원본 데이터가 없으면 None 반환
+            # 🚨 ULTRA PURE: 원본 데이터가 없거나 빈 문자열이거나 0.0이면 None 반환
             return None  # 🚨 ULTRA PURE: 예외 시에도 None
         except Exception:
             return None  # 🚨 ULTRA PURE: 예외 시에도 None
@@ -1486,12 +1498,12 @@ class CostManager(BaseManager):
             
             # 빈 문자열 처리
             if left_value == "" or right_value == "":
-                _LOGGER.warning(f"[SAFE_MATH] Empty string detected in {operation}: left='{left_value}', right='{right_value}'")
+                _LOGGER.error(f"[SAFE_MATH] Empty string detected in {operation}: left='{left_value}', right='{right_value}'")
                 return None
             
             # 타입 호환성 체크
             if not self._is_numeric_compatible(left_value, right_value):
-                _LOGGER.warning(f"[SAFE_MATH] Type incompatible for {operation}: {type(left_value).__name__}({left_value}) and {type(right_value).__name__}({right_value})")
+                _LOGGER.error(f"[SAFE_MATH] Type incompatible for {operation}: {type(left_value).__name__}({left_value}) and {type(right_value).__name__}({right_value})")
                 return None
             
             if operation == 'divide':
@@ -1509,10 +1521,9 @@ class CostManager(BaseManager):
                         return None
                     
                     result = left_value / right_value
-                    _LOGGER.debug(f"[SAFE_MATH] Division with type conversion: {left_value} / {right_value} = {result}")
                     return result
                 except (ValueError, TypeError) as e:
-                    _LOGGER.error(f"[SAFE_MATH] Division type conversion failed: {left_value} / {right_value} - {e}")
+                    _LOGGER.error(f"[SAFE_MATH] Math operation failed: divide({left_value}, {right_value}) - {e}")
                     return None
                 
             elif operation == 'add':
@@ -1525,10 +1536,9 @@ class CostManager(BaseManager):
                         right_value = float(right_value)
                     
                     result = left_value + right_value
-                    _LOGGER.debug(f"[SAFE_MATH] Addition with type conversion: {left_value} + {right_value} = {result}")
                     return result
                 except (ValueError, TypeError) as e:
-                    _LOGGER.error(f"[SAFE_MATH] Addition type conversion failed: {left_value} + {right_value} - {e}")
+                    _LOGGER.error(f"[SAFE_MATH] Math operation failed: add({left_value}, {right_value}) - {e}")
                     return None
                 
             elif operation == 'subtract':
@@ -1541,10 +1551,9 @@ class CostManager(BaseManager):
                         right_value = float(right_value)
                     
                     result = left_value - right_value
-                    _LOGGER.debug(f"[SAFE_MATH] Subtraction with type conversion: {left_value} - {right_value} = {result}")
                     return result
                 except (ValueError, TypeError) as e:
-                    _LOGGER.error(f"[SAFE_MATH] Subtraction type conversion failed: {left_value} - {right_value} - {e}")
+                    _LOGGER.error(f"[SAFE_MATH] Math operation failed: subtract({left_value}, {right_value}) - {e}")
                     return None
                 
             elif operation == 'multiply':
@@ -1557,14 +1566,13 @@ class CostManager(BaseManager):
                         right_value = float(right_value)
                     
                     result = left_value * right_value
-                    _LOGGER.debug(f"[SAFE_MATH] Multiplication with type conversion: {left_value} * {right_value} = {result}")
                     return result
                 except (ValueError, TypeError) as e:
-                    _LOGGER.error(f"[SAFE_MATH] Multiplication type conversion failed: {left_value} * {right_value} - {e}")
+                    _LOGGER.error(f"[SAFE_MATH] Math operation failed: multiply({left_value}, {right_value}) - {e}")
                     return None
                 
             else:
-                _LOGGER.warning(f"[SAFE_MATH] Unknown operation: {operation}")
+                _LOGGER.error(f"[SAFE_MATH] Unknown operation: {operation}")
                 return None
                 
         except Exception as e:

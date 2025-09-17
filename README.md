@@ -1,52 +1,58 @@
 # Google Cloud Billing Cost Datasource Plugin
 
-SpaceONE plugin for collecting Google Cloud Billing data with support for both BigQuery and HTTP file data sources.
+SpaceONE plugin for collecting Google Cloud Billing data with support for multiple data sources including BigQuery, GCS, and HTTP files.
 
 ## Features
 
-### Data Sources
+### Data Sources (v2.0) ⭐ **UPDATED**
 - ✅ **BigQuery**: Real-time querying and analysis (production ready)
   - Standard Billing Export (service/SKU level cost data)
   - Detailed Usage Export (resource-level granular analysis)
-- ✅ **HTTP File**: Direct processing of GCS billing export files (production ready)
+  - Credits Detail Mode for comprehensive credit analysis
+- ✅ **GCS Bucket**: Direct processing of billing export files in Cloud Storage (production ready)
   - Streaming processing for large files
   - Automatic compression detection and decompression
-- ✅ **Pricing Data Export**: Price analysis and comparison (fully implemented) ⭐ **NEW**
-  - Actual cost vs. list price comparison
-  - Automatic discount rate calculation
-  - Service-level price analysis
+  - Date range filtering and batch processing
+- ✅ **HTTP File**: Direct URL-based file processing (production ready)
+  - Support for public and authenticated URLs
+  - Memory-efficient streaming processing
+- ✅ **Unified Source Parameter**: Single `source` parameter for all data sources ⭐ **NEW**
+  - `source: "bigquery"` - BigQuery data source
+  - `source: "gcs"` - Google Cloud Storage bucket
+  - `source: "http"` - HTTP/HTTPS file URLs
 
 ### File Format Support
 - **File Formats**: CSV, JSON, Parquet
 - **Compression**: .gz, .snappy, .zstd, .zst
 - **Streaming Processing**: Memory-efficient large file handling
+- **Smart Format Detection**: Automatic file format detection based on content
 
 ### Key Capabilities
-- ✅ **Dual Data Source**: BigQuery + HTTP file simultaneous support
+- ✅ **Triple Data Source**: BigQuery + GCS + HTTP unified support ⭐ **UPDATED**
+- ✅ **Credits Detail Analysis**: Complete credit breakdown with individual credit information ⭐ **NEW**
 - ✅ **Flexible Field Mapper**: Customizable field mapping for data transformation
-- ✅ **Credits & Discount Analysis**: Detailed cost optimization analysis
+- ✅ **Cost Field Guarantee**: 100% cost field coverage with scientific notation support ⭐ **NEW**
 - ✅ **Label/Tag-Based Tracking**: Project/resource-level cost tracking
-- ✅ **Resource-Level Analysis**: Individual VM, disk, network resource tracking ⭐ **NEW**
-- ✅ **GKE Advanced Support**: Namespace and fleet host project filtering ⭐ **NEW**
-- ✅ **Security Enhanced**: Environment variable-based configuration with validation tools ⭐ **NEW**
-- ✅ **Price Analysis**: Actual cost vs. list price comparison and discount rate calculation ⭐ **NEW**
-- ✅ **Automation Tools**: Configuration validation and security check scripts ⭐ **NEW**
-- ✅ **Schema Compliance**: SpaceONE Job schema validation with automatic field length restriction ⭐ **NEW**
-- ✅ **Error Handling**: Enhanced error management with ValidationError prevention ⭐ **NEW**
+- ✅ **Resource-Level Analysis**: Individual VM, disk, network resource tracking
+- ✅ **GKE Advanced Support**: Namespace and fleet host project filtering
+- ✅ **gRPC Optimization**: Smart chunking for large dataset transmission ⭐ **NEW**
+- ✅ **Modern Python Support**: Python 3.9+ with pyproject.toml configuration ⭐ **NEW**
+- ✅ **Schema Compliance**: Full BigQuery schema compliance with nested field support ⭐ **NEW**
+- ✅ **Error Handling**: Enhanced error management with comprehensive logging ⭐ **NEW**
 
 ## Documentation
 
 📖 **Complete documentation is available in Korean**: [`docs/ko/README.md`](./docs/ko/README.md)
 
 ### Quick Links
-- **[📚 문서_관리_가이드](./docs/ko/문서_관리_가이드.md)** - Comprehensive documentation system ⭐ **NEW**
-- **[🔧 BigQuery_설정_가이드](./docs/ko/user-guide/BigQuery_설정_가이드.md)** - Complete BigQuery billing data setup ⭐ **NEW**
-- **[🚀 SpaceONE_호환성_가이드](./docs/ko/development/SpaceONE_호환성_가이드.md)** - Platform compatibility guide ⭐ **NEW**
+- **[📚 문서_관리_가이드](./docs/ko/문서_관리_가이드.md)** - Comprehensive documentation system
+- **[🔧 BigQuery_설정_가이드](./docs/ko/user-guide/BigQuery_설정_가이드.md)** - Complete BigQuery billing data setup
+- **[🚀 SpaceONE_호환성_가이드](./docs/ko/development/SpaceONE_호환성_가이드.md)** - Platform compatibility guide
+- **[🎯 Credits Detail API 가이드](./CREDITS_DETAIL_API_GUIDE.md)** - Credits analysis with detailed breakdown ⭐ **NEW**
 - **[통합_가이드](./docs/ko/user-guide/통합_가이드.md)** - Plugin configuration and usage
 - **[데이터_분석_가이드](./docs/ko/user-guide/데이터_분석_가이드.md)** - Understanding billing data structure
-- **[빌링_내보내기_설정_가이드](./docs/ko/user-guide/빌링_내보내기_설정_가이드.md)** - How to set up Google Cloud Billing Export
-- **[가격_데이터_내보내기_가이드](./docs/ko/user-guide/가격_데이터_내보내기_가이드.md)** - Price analysis and comparison
 - **[크레딧_및_할인_분석_가이드](./docs/ko/user-guide/크레딧_및_할인_분석_가이드.md)** - Advanced cost optimization analysis
+- **[성능_최적화_가이드](./docs/ko/development/성능_최적화_가이드.md)** - Performance optimization and best practices
 - **[보안_강화_사항](./docs/ko/보안_강화_사항.md)** - Security policies and improvements
 
 ## Quick Start
@@ -101,14 +107,16 @@ cp examples/register_datasource_production.yaml my-config.yaml
 python3 examples/simple_security_check.py my-config.yaml
 ```
 
-### Legacy Configuration (Not Recommended)
+### Configuration Examples (v2.0)
 
 #### BigQuery Mode
 ```yaml
 options:
+  source: "bigquery"  # ⭐ NEW: Unified source parameter
   billing_export_project_id: "your-project-id"
   billing_dataset_id: "billing_export"
   billing_account_id: "XXXXXX-XXXXXX-XXXXXX"
+  provider: "google_cloud"
 
 secret_data:
   type: "service_account"
@@ -118,13 +126,12 @@ secret_data:
   token_uri: "https://oauth2.googleapis.com/token"
 ```
 
-#### HTTP File Mode
+#### GCS Bucket Mode ⭐ **NEW**
 ```yaml
 options:
-  data_source_type: "http_file"
+  source: "gcs"  # ⭐ NEW: Unified source parameter
   provider: "google_cloud"
   bucket_name: "your-billing-export-bucket"
-  file_pattern: "gcp_billing_export_v1_*.csv.gz"
   field_mapper:
     cost: "cost"
     billed_date: "usage_start_time"
@@ -140,23 +147,76 @@ secret_data:
   client_email: "service-account@your-project.iam.gserviceaccount.com"
 ```
 
+#### HTTP File Mode
+```yaml
+options:
+  source: "http"  # ⭐ NEW: Unified source parameter
+  provider: "google_cloud"
+  base_url: "https://storage.googleapis.com/your-bucket/billing-export.csv.gz"
+  field_mapper:
+    cost: "cost"
+    billed_date: "usage_start_time"
+    currency: "currency"
+    additional_info:
+      credits: "credits"
+      cost_at_list: "cost_at_list"
+
+# secret_data not required for public URLs
+```
+
+#### Credits Detail Mode ⭐ **NEW**
+```yaml
+# Add to any configuration above
+task_options:
+  credits_detail_mode: true
+  credits_detail_limit: 50
+  start: "2025-09"
+  end: "2025-09"
+  project_id: "your-project-id"
+```
+
 ## Development
+
+### Modern Python Setup (v2.0) ⭐ **NEW**
+
+This project now uses modern Python packaging with `pyproject.toml`:
+
+```bash
+# Install in development mode
+pip install -e .
+
+# Install with development dependencies
+pip install -e ".[dev]"
+
+# Run linting and formatting
+ruff check src/
+ruff format src/
+
+# Run type checking
+mypy src/
+```
 
 ### Project Structure
 ```
 ├── src/plugin/
-│   ├── connector/          # Data source connectors
+│   ├── connector/          # Data source connectors (BigQuery, GCS, HTTP)
 │   ├── manager/            # Business logic managers
-│   ├── parser/             # File format parsers
-│   └── utils/              # Utility functions
+│   ├── parser/             # File format parsers (CSV, JSON, Parquet)
+│   ├── utils/              # Utility functions and transformers
+│   └── main.py            # Plugin entry point
 ├── docs/ko/                # Korean documentation
-└── test/                   # Test cases
+├── test/                   # Test cases
+├── examples/               # Configuration examples and test data
+├── pyproject.toml          # Modern Python project configuration ⭐ NEW
+└── README.md              # This file
 ```
 
 ### Development Documentation
-- **[PRD](./docs/ko/development/prd.md)** - Product requirements
-- **[Implementation Roadmap](./docs/ko/development/implementation-roadmap.md)** - Development phases
-- **[Architecture Design](./docs/ko/technical/architecture.md)** - System architecture
+- **[🔧 코드_유지보수_가이드](./docs/ko/development/코드_유지보수_가이드.md)** - Code maintenance and best practices ⭐ **NEW**
+- **[🚀 성능_최적화_가이드](./docs/ko/development/성능_최적화_가이드.md)** - Performance optimization guide ⭐ **NEW**
+- **[⚡ 에러_처리_패턴_가이드](./docs/ko/development/에러_처리_패턴_가이드.md)** - Error handling patterns ⭐ **NEW**
+- **[📋 프로젝트_품질_체크리스트](./docs/ko/development/프로젝트_품질_체크리스트.md)** - Quality assurance checklist ⭐ **NEW**
+- **[🎯 시스템_아키텍처](./docs/ko/technical/시스템_아키텍처.md)** - System architecture overview
 
 ### User Documentation
 - **[🏗️ Cloud Billing 데이터를 BigQuery로 내보내기](./docs/ko/user-guide/Cloud%20Billing%20데이터를%20BigQuery로%20내보내기.md)** - BigQuery 내보내기 개요 및 활용 가이드
