@@ -209,7 +209,7 @@ class CostManager(BaseManager):
 
             # 배치 처리를 위한 리스트 - gRPC 메시지 크기 제한 대응 (긴급 감소)
             batch_records = []
-            batch_size = 5  # gRPC 메시지 크기 초과 문제로 긴급 감소
+            batch_size = 3  # Pod 중복 실행 시 안정성을 위해 더 작은 배치로 조정
 
             for _, row in response_stream.iterrows():
                 row_count += 1

@@ -509,8 +509,13 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         task_options = params.get("task_options", {})
         processed_project = task_options.get("project_id", "unknown")
         
-        # 전역 처리된 프로젝트 추적 업데이트
+        # 전역 처리된 프로젝트 추적 업데이트 (Pod 중복 실행 대응)
         with _processing_lock:
+            if processed_project in _processed_projects:
+                _LOGGER.warning(f"🔄 [중복 처리 감지] 프로젝트 '{processed_project}'가 이미 처리되었습니다!")
+                _LOGGER.warning("💡 Pod 중복 실행으로 인한 중복 처리 가능성이 있습니다.")
+                return  # 중복 처리 방지
+            
             _processed_projects.add(processed_project)
             current_processed_count = len(_processed_projects)
         
@@ -550,6 +555,10 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         _LOGGER.info("=" * 80)
         
         _LOGGER.info(f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records")
+        
+        # Pod 중복 실행 시 안정성을 위한 처리 지연 추가
+        import time
+        time.sleep(0.1)  # 100ms 지연으로 리소스 경합 방지
 
     except Exception as e:
         _LOGGER.error(f"[cost_get_data] API endpoint failed: {e}")
