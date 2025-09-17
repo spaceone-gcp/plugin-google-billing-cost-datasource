@@ -107,26 +107,13 @@ class CostManager(BaseManager):
         # source 값 추출 (options에서만)
         source = self._get_source_value(options)
 
-        # secret_data 제외하고 요청 식별을 위한 핵심 데이터만 사용
-        request_data = {
-            "source": source,  # source 항목 추가
-            "project_id": options.get("project_id"),
-            "select_cost": options.get("select_cost"),
-            "field_mapper": options.get("field_mapper"),
-            "bucket_name": options.get("bucket_name"),
-            "base_url": options.get("base_url") or task_options.get("base_url"),
-            "file_path": task_options.get("file_path"),
-            "data_source_type": task_options.get("data_source_type"),
-        }
-        # 해시 생성 (중복 제거를 위해)
-        request_hash = hashlib.md5(
-            json.dumps(request_data, sort_keys=True).encode()
-        ).hexdigest()
-
-        # 중복 요청 확인
+        # 중복 요청 확인 (RequestDeduplicator 사용)
         from ..utils.concurrency_manager import request_deduplicator
 
+        request_hash = request_deduplicator.generate_request_hash(options, task_options)
+        _LOGGER.info(f"[CostManager] 요청 해시 생성 - 해시: {request_hash[:8]}..., 프로젝트: {task_options.get('project_id', 'UNKNOWN')}")
         if request_deduplicator.is_duplicate_request(request_hash):
+            _LOGGER.info(f"[CostManager] 중복 요청 스킵 - 해시: {request_hash[:8]}...")
             return
 
         # source 기반 분기 처리
@@ -190,6 +177,7 @@ class CostManager(BaseManager):
         _LOGGER.info(f"[BigQuery] 대상 프로젝트: {self.target_project_id}")
         _LOGGER.info(f"[BigQuery] 조회 시작일: {start}")
         _LOGGER.info(f"[BigQuery] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+        _LOGGER.info(f"[BigQuery] 필터 조건: cost > 0 OR usage.amount > 0 (Job Manager와 동일)")
         _LOGGER.info(f"[BigQuery] Query: {query}")
         _LOGGER.info("=" * 80)
 
@@ -212,6 +200,12 @@ class CostManager(BaseManager):
                 f"[BigQuery] 쿼리 실행 완료 (소요시간: {query_execution_time:.2f}초)"
             )
             _LOGGER.info(f"[BigQuery] 반환된 DataFrame 크기: {len(response_stream)} 행")
+            
+            # 빈 결과 처리 개선
+            if len(response_stream) == 0:
+                _LOGGER.info(f"[BigQuery] 프로젝트 '{self.target_project_id}' - 필터 조건에 맞는 데이터 없음")
+                _LOGGER.info("[BigQuery] 필터 조건: cost > 0 OR usage.amount > 0")
+                return
 
             # 배치 처리를 위한 리스트 - gRPC 메시지 크기 제한 대응 (긴급 감소)
             batch_records = []
@@ -1961,6 +1955,13 @@ class CostManager(BaseManager):
             _LOGGER.debug(f"[SQL 생성] 특정 프로젝트 필터링: {self.target_project_id}")
         else:
             _LOGGER.debug("[SQL 생성] 모든 프로젝트 조회 (project_id = '*')")
+        
+        # 🚨 CRITICAL FIX: Job Manager와 동일한 비용/사용량 필터 조건 추가
+        where_condition += """
+          AND (cost > 0 OR usage.amount > 0)  -- 비용 또는 사용량이 있는 데이터만
+          AND project.id IS NOT NULL  -- NULL 프로젝트 제외
+        """
+        _LOGGER.debug("[SQL 생성] 비용/사용량 필터 조건 추가: cost > 0 OR usage.amount > 0")
         
 
         # 상세 사용량 데이터인 경우 리소스 정보 포함

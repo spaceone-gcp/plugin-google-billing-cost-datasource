@@ -29,3 +29,13 @@ GCS_CONFIG = {
 
 # Default data source type for backward compatibility
 DEFAULT_DATA_SOURCE_TYPE = "bigquery"
+
+# BigQuery Configuration
+BIGQUERY_CONFIG = {
+    "query_timeout": 300,  # 5분 쿼리 타임아웃
+    "max_results": None,  # 결과 수 제한 없음
+    "progress_bar": False,  # 프로그레스바 비활성화
+    "connection_timeout": 60,  # 연결 타임아웃 (1분)
+    "retry_attempts": 3,  # 재시도 횟수
+    "retry_delay": 5,  # 재시도 간격 (초)
+}

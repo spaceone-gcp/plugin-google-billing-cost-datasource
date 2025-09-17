@@ -185,16 +185,20 @@ class RequestDeduplicator:
         data_source_type = self._get_data_source_type(options)
 
         # 데이터 소스 타입을 기반으로 한 핵심 파라미터만 사용
+        project_id = task_options.get("project_id") or options.get("project_id")
         key_data = {
             "data_source_type": data_source_type,
             "file_path": task_options.get("file_path"),
-            "project_id": options.get("project_id"),
+            "project_id": project_id,  # 🚨 CRITICAL FIX: task_options에서 우선 조회
             "field_mapper": options.get("field_mapper", {}),
             "select_cost": options.get("select_cost"),
         }
 
         key_str = str(sorted(key_data.items()))
-        return hashlib.md5(key_str.encode()).hexdigest()
+        hash_value = hashlib.md5(key_str.encode()).hexdigest()
+        
+        _LOGGER.info(f"[RequestDeduplicator] 해시 생성 - 프로젝트: {project_id}, 해시: {hash_value[:8]}...")
+        return hash_value
 
     def is_duplicate_request(self, request_hash: str) -> bool:
         """중복 요청인지 확인"""
@@ -212,10 +216,12 @@ class RequestDeduplicator:
 
             # 중복 요청 확인
             if request_hash in self._requests:
+                _LOGGER.info(f"[RequestDeduplicator] 중복 요청 감지 - 해시: {request_hash[:8]}...")
                 return True
 
             # 새 요청 등록
             self._requests[request_hash] = current_time
+            _LOGGER.info(f"[RequestDeduplicator] 새 요청 등록 - 해시: {request_hash[:8]}...")
             return False
 
 

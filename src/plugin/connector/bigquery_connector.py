@@ -87,8 +87,14 @@ class BigqueryConnector(BaseConnector):
         _LOGGER.debug(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
 
         try:
+            # BigQuery 쿼리 타임아웃 설정 (5분)
             result_df = pandas_gbq.read_gbq(
-                query, project_id=self.project_id, credentials=self.credentials
+                query, 
+                project_id=self.project_id, 
+                credentials=self.credentials,
+                timeout=300,  # 5분 타임아웃 설정
+                max_results=None,  # 결과 수 제한 없음
+                progress_bar=False  # 프로그레스바 비활성화
             )
             _LOGGER.info(f"✅ [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회")
             _LOGGER.debug(f"[BigqueryConnector] 쿼리 실행 성공 - DataFrame 크기: {len(result_df)} 행, {len(result_df.columns)} 열")
@@ -98,8 +104,19 @@ class BigqueryConnector(BaseConnector):
             return standardized_df
 
         except Exception as e:
-            _LOGGER.error(f"[BigqueryConnector] 쿼리 실행 실패: {str(e)}")
+            error_msg = str(e)
+            _LOGGER.error(f"[BigqueryConnector] 쿼리 실행 실패: {error_msg}")
             _LOGGER.error(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
+            
+            # 타임아웃 관련 에러 상세 로깅
+            if "timeout" in error_msg.lower() or "deadline" in error_msg.lower():
+                _LOGGER.error(f"[BigqueryConnector] ⏰ 타임아웃 발생 - 쿼리 #{current_query_num}")
+                _LOGGER.error(f"[BigqueryConnector] 타임아웃 설정: 300초 (5분)")
+            elif "connection" in error_msg.lower():
+                _LOGGER.error(f"[BigqueryConnector] 🔌 연결 문제 발생 - 쿼리 #{current_query_num}")
+            elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
+                _LOGGER.error(f"[BigqueryConnector] 📊 할당량/제한 초과 - 쿼리 #{current_query_num}")
+            
             raise
 
     def _standardize_dataframe_types(self, df):

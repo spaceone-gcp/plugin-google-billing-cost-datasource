@@ -80,7 +80,11 @@ class PricingConnector(BaseConnector):
             _LOGGER.debug(f"[PricingConnector] Executing query: {query}")
 
             response_df = pandas_gbq.read_gbq(
-                query, project_id=self.project_id, credentials=self.credentials
+                query, 
+                project_id=self.project_id, 
+                credentials=self.credentials,
+                timeout=300,  # 5분 타임아웃 설정
+                progress_bar=False  # 프로그레스바 비활성화
             )
 
             for _, row in response_df.iterrows():
@@ -105,7 +109,11 @@ class PricingConnector(BaseConnector):
         try:
             query = self._build_service_summary_query(date)
             response_df = pandas_gbq.read_gbq(
-                query, project_id=self.project_id, credentials=self.credentials
+                query, 
+                project_id=self.project_id, 
+                credentials=self.credentials,
+                timeout=300,  # 5분 타임아웃 설정
+                progress_bar=False  # 프로그레스바 비활성화
             )
 
             service_summary = {}
