@@ -1484,35 +1484,84 @@ class CostManager(BaseManager):
             if left_value is None or right_value is None:
                 return None
             
+            # 빈 문자열 처리
+            if left_value == "" or right_value == "":
+                _LOGGER.warning(f"[SAFE_MATH] Empty string detected in {operation}: left='{left_value}', right='{right_value}'")
+                return None
+            
+            # 타입 호환성 체크
+            if not self._is_numeric_compatible(left_value, right_value):
+                _LOGGER.warning(f"[SAFE_MATH] Type incompatible for {operation}: {type(left_value).__name__}({left_value}) and {type(right_value).__name__}({right_value})")
+                return None
+            
             if operation == 'divide':
-                # 🚨 ULTRA PURE DATA: 나눗셈도 원본 데이터 타입 유지
-                # 0으로 나누기 방지
-                if right_value == 0:
+                # 🚨 나눗셈: 타입 안전 처리
+                try:
+                    # 문자열 숫자를 float로 변환
+                    if isinstance(left_value, str):
+                        left_value = float(left_value)
+                    if isinstance(right_value, str):
+                        right_value = float(right_value)
+                    
+                    # 0으로 나누기 방지
+                    if right_value == 0:
+                        _LOGGER.warning(f"[SAFE_MATH] Division by zero: {left_value} / {right_value}")
+                        return None
+                    
+                    result = left_value / right_value
+                    _LOGGER.debug(f"[SAFE_MATH] Division with type conversion: {left_value} / {right_value} = {result}")
+                    return result
+                except (ValueError, TypeError) as e:
+                    _LOGGER.error(f"[SAFE_MATH] Division type conversion failed: {left_value} / {right_value} - {e}")
                     return None
                 
-                # 원본 데이터 타입 그대로 나눗셈 연산
-                result = left_value / right_value
-                
-                _LOGGER.debug(f"[SAFE_MATH] Division with original types: {left_value} / {right_value} = {result}")
-                return result
-                
             elif operation == 'add':
-                # 🚨 덧셈: 원본 데이터 타입 그대로 유지
-                result = left_value + right_value
-                _LOGGER.debug(f"[SAFE_MATH] Addition with original types: {left_value} + {right_value} = {result}")
-                return result
+                # 🚨 덧셈: 타입 안전 처리
+                try:
+                    # 문자열 숫자를 float로 변환
+                    if isinstance(left_value, str):
+                        left_value = float(left_value)
+                    if isinstance(right_value, str):
+                        right_value = float(right_value)
+                    
+                    result = left_value + right_value
+                    _LOGGER.debug(f"[SAFE_MATH] Addition with type conversion: {left_value} + {right_value} = {result}")
+                    return result
+                except (ValueError, TypeError) as e:
+                    _LOGGER.error(f"[SAFE_MATH] Addition type conversion failed: {left_value} + {right_value} - {e}")
+                    return None
                 
             elif operation == 'subtract':
-                # 🚨 뺄셈: 원본 데이터 타입 그대로 유지
-                result = left_value - right_value
-                _LOGGER.debug(f"[SAFE_MATH] Subtraction with original types: {left_value} - {right_value} = {result}")
-                return result
+                # 🚨 뺄셈: 타입 안전 처리
+                try:
+                    # 문자열 숫자를 float로 변환
+                    if isinstance(left_value, str):
+                        left_value = float(left_value)
+                    if isinstance(right_value, str):
+                        right_value = float(right_value)
+                    
+                    result = left_value - right_value
+                    _LOGGER.debug(f"[SAFE_MATH] Subtraction with type conversion: {left_value} - {right_value} = {result}")
+                    return result
+                except (ValueError, TypeError) as e:
+                    _LOGGER.error(f"[SAFE_MATH] Subtraction type conversion failed: {left_value} - {right_value} - {e}")
+                    return None
                 
             elif operation == 'multiply':
-                # 🚨 곱셈: 원본 데이터 타입 그대로 유지
-                result = left_value * right_value
-                _LOGGER.debug(f"[SAFE_MATH] Multiplication with original types: {left_value} * {right_value} = {result}")
-                return result
+                # 🚨 곱셈: 타입 안전 처리
+                try:
+                    # 문자열 숫자를 float로 변환
+                    if isinstance(left_value, str):
+                        left_value = float(left_value)
+                    if isinstance(right_value, str):
+                        right_value = float(right_value)
+                    
+                    result = left_value * right_value
+                    _LOGGER.debug(f"[SAFE_MATH] Multiplication with type conversion: {left_value} * {right_value} = {result}")
+                    return result
+                except (ValueError, TypeError) as e:
+                    _LOGGER.error(f"[SAFE_MATH] Multiplication type conversion failed: {left_value} * {right_value} - {e}")
+                    return None
                 
             else:
                 _LOGGER.warning(f"[SAFE_MATH] Unknown operation: {operation}")
@@ -1521,6 +1570,37 @@ class CostManager(BaseManager):
         except Exception as e:
             _LOGGER.error(f"[SAFE_MATH] Math operation failed: {operation}({left_value}, {right_value}) - {e}")
             return None
+
+    def _is_numeric_compatible(self, left_value, right_value):
+        """두 값이 수학 연산에 호환되는지 확인"""
+        # 숫자 타입들
+        numeric_types = (int, float, complex)
+        
+        # 둘 다 숫자 타입인 경우
+        if isinstance(left_value, numeric_types) and isinstance(right_value, numeric_types):
+            return True
+        
+        # 문자열이 숫자로 변환 가능한지 확인
+        def is_numeric_string(value):
+            if not isinstance(value, str):
+                return False
+            try:
+                float(value)
+                return True
+            except (ValueError, TypeError):
+                return False
+        
+        # 한쪽이 숫자, 다른 쪽이 숫자 문자열인 경우
+        if isinstance(left_value, numeric_types) and is_numeric_string(right_value):
+            return True
+        if isinstance(right_value, numeric_types) and is_numeric_string(left_value):
+            return True
+        
+        # 둘 다 숫자 문자열인 경우
+        if is_numeric_string(left_value) and is_numeric_string(right_value):
+            return True
+        
+        return False
 
     def _safe_add(self, left_value, right_value):
         """안전한 덧셈 - 원본 데이터 타입 유지"""
