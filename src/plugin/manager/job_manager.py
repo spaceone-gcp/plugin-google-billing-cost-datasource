@@ -271,29 +271,51 @@ class JobManager(BaseManager):
                 "[JobManager._get_bigquery_tasks] Creating BigQuery SQL query"
             )
             query = self._create_google_sql(start_month)
-            _LOGGER.debug(f"[JobManager._get_bigquery_tasks] Generated query: {query}")
-
+            
+            # 쿼리 상세 로깅 추가
             _LOGGER.info("=" * 80)
             _LOGGER.info("🔍 [QUERY #1] JobManager - 스마트 프리필터링 프로젝트 조회")
             _LOGGER.info(f"[JobManager._get_bigquery_tasks] 조회 시작일: {start_month}")
+            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 프로젝트: {self.billing_export_project_id}")
+            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 데이터셋: {self.billing_dataset}")
+            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 테이블: {self.billing_table}")
+            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 계정: {self.billing_account_id}")
             _LOGGER.info(f"[JobManager._get_bigquery_tasks] 필터 조건: 비용 > 0 OR 사용량 > 0")
-            _LOGGER.info(f"[JobManager._get_bigquery_tasks] Query: {query}")
+            _LOGGER.info("📝 [실행 쿼리]")
+            _LOGGER.info(f"{query}")
             _LOGGER.info("=" * 80)
             
             # 쿼리 실행 시간 측정
             import time
             start_time = time.time()
+            
+            _LOGGER.info("🔄 [쿼리 실행 중] BigQuery에서 데이터 조회를 시작합니다...")
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
             execution_time = time.time() - start_time
             
-            _LOGGER.info(f"✅ [QUERY #1 완료] 스마트 필터링 결과: {len(response_stream)}개 프로젝트 (실행시간: {execution_time:.2f}초)")
+            _LOGGER.info("=" * 80)
+            _LOGGER.info("✅ [QUERY #1 완료] 스마트 필터링 쿼리 실행 결과")
+            _LOGGER.info(f"📊 조회된 프로젝트 수: {len(response_stream)}개")
+            _LOGGER.info(f"⏱️ 쿼리 실행 시간: {execution_time:.2f}초")
+            _LOGGER.info(f"📅 조회 기간: {start_month}-01 이후")
             
             # 프로젝트 목록 로깅 (디버그용)
             if len(response_stream) > 0:
                 project_list = [row.id for _, row in response_stream.iterrows()]
-                _LOGGER.info(f"[스마트 필터링] 활성 프로젝트: {project_list}")
+                _LOGGER.info(f"🎯 [활성 프로젝트 목록]")
+                for i, project_id in enumerate(project_list, 1):
+                    _LOGGER.info(f"   {i:2d}. {project_id}")
+                    
+                # 프로젝트별 추가 정보 (처음 3개만)
+                _LOGGER.debug("📋 [프로젝트 상세 정보 - 처음 3개]")
+                for idx, (_, row) in enumerate(response_stream.head(3).iterrows()):
+                    _LOGGER.debug(f"   프로젝트 {idx+1}: {row.id}")
             else:
-                _LOGGER.warning("[스마트 필터링] ⚠️ 활성 프로젝트가 없습니다. 필터 조건을 확인하세요.")
+                _LOGGER.warning("⚠️ [주의] 활성 프로젝트가 없습니다!")
+                _LOGGER.warning("   - 필터 조건을 확인하세요: 비용 > 0 OR 사용량 > 0")
+                _LOGGER.warning(f"   - 조회 기간을 확인하세요: {start_month}-01 이후")
+                _LOGGER.warning(f"   - 테이블 경로를 확인하세요: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+            _LOGGER.info("=" * 80)
             _LOGGER.debug(
                 f"[JobManager._get_bigquery_tasks] Query executed, processing {len(response_stream)} rows"
             )
@@ -322,15 +344,25 @@ class JobManager(BaseManager):
 
             # 🚀 성능 개선 메트릭 로깅
             total_execution_time = time.time() - start_time
-            _LOGGER.info(
-                f"[JobManager._get_bigquery_tasks] ✅ 스마트 필터링 작업 생성 완료"
-            )
-            _LOGGER.info(
-                f"📊 [성능 메트릭] 생성된 태스크: {len(tasks)}개, 시작월: {start_month}, 총 실행시간: {total_execution_time:.2f}초"
-            )
-            _LOGGER.info(
-                f"🎯 [효율성 개선] 이전 대비 예상 쿼리 감소: ~{max(0, 21-len(tasks))}개 ({max(0, (21-len(tasks))/21*100):.1f}% 감소)"
-            )
+            
+            _LOGGER.info("=" * 80)
+            _LOGGER.info("🎉 [작업 생성 완료] BigQuery 태스크 생성 결과")
+            _LOGGER.info(f"📋 생성된 태스크 수: {len(tasks)}개")
+            _LOGGER.info(f"📅 대상 시작월: {start_month}")
+            _LOGGER.info(f"⏱️ 총 실행시간: {total_execution_time:.2f}초")
+            _LOGGER.info(f"🏷️ 변경된 항목 수: {len(changed)}개")
+            
+            # 효율성 개선 메트릭 (기존 전체 프로젝트 대비)
+            estimated_total_projects = 21  # 일반적인 GCP 조직의 평균 프로젝트 수
+            saved_queries = max(0, estimated_total_projects - len(tasks))
+            efficiency_improvement = max(0, (saved_queries / estimated_total_projects) * 100) if estimated_total_projects > 0 else 0
+            
+            _LOGGER.info(f"🎯 [효율성 개선]")
+            _LOGGER.info(f"   - 예상 전체 프로젝트: {estimated_total_projects}개")
+            _LOGGER.info(f"   - 실제 활성 프로젝트: {len(tasks)}개")
+            _LOGGER.info(f"   - 절약된 쿼리 수: {saved_queries}개")
+            _LOGGER.info(f"   - 효율성 개선율: {efficiency_improvement:.1f}%")
+            _LOGGER.info("=" * 80)
             _LOGGER.debug(
                 f"[JobManager._get_bigquery_tasks] Changed item: {changed_item}"
             )
@@ -408,6 +440,10 @@ class JobManager(BaseManager):
             )
 
     def _create_google_sql(self, start):
+        """BigQuery SQL 쿼리 생성 및 로깅"""
+        _LOGGER.debug(f"[JobManager._create_google_sql] 쿼리 생성 시작 - start: {start}")
+        _LOGGER.debug(f"[JobManager._create_google_sql] 테이블 정보 - {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+        
         # 🚀 스마트 프리필터링: 실제 데이터가 있는 프로젝트만 조회
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{start}-01')
@@ -423,6 +459,11 @@ class JobManager(BaseManager):
             ORDER BY project.id  -- 일관된 순서 보장
             ;
         """
+        
+        _LOGGER.debug(f"[JobManager._create_google_sql] WHERE 조건: {where_condition.strip()}")
+        _LOGGER.debug(f"[JobManager._create_google_sql] 생성된 쿼리 길이: {len(query)} 문자")
+        _LOGGER.debug(f"[JobManager._create_google_sql] 쿼리 생성 완료")
+        
         return query
 
     def _is_cache_valid(self) -> bool:

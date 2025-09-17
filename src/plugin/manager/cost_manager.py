@@ -1122,7 +1122,8 @@ class CostManager(BaseManager):
                 "region_code": str(getattr(row, "location_region", "global")).strip(),  # 🚨 SCHEMA FIX: location.region 사용
                 "product": str(getattr(row, "service_description", "Unknown")).strip(),
                 "usage_type": str(getattr(row, "sku_description", "Unknown")).strip(),
-                "resource": str(getattr(row, "project_id", "")).strip(),
+                # 🎯 화면 표시용: 프로젝트 이름 또는 커스텀 형식 사용
+                "resource": self._format_project_display_name(row),
                 "tags": {},
                 "additional_info": {
                     # 기존 필수 필드들
@@ -2385,3 +2386,34 @@ class CostManager(BaseManager):
         text = text.strip('_')
         # 소문자로 변환
         return text.lower()
+    
+    def _format_project_display_name(self, row) -> str:
+        """프로젝트 표시명을 포맷팅합니다.
+        
+        화면에 표시될 프로젝트 이름을 결정합니다.
+        여러 옵션을 제공하여 사용자 선호에 따라 선택 가능합니다.
+        
+        Args:
+            row: BigQuery 결과 행
+            
+        Returns:
+            str: 포맷팅된 프로젝트 표시명
+        """
+        project_id = str(getattr(row, "project_id", "")).strip()
+        project_name = str(getattr(row, "project_name", "")).strip()
+        
+        # 🎯 옵션 1: 프로젝트 ID만 사용 (로그와 동일)
+        return project_id
+        
+        # 🎯 옵션 2: 프로젝트 이름 사용 (있는 경우)
+        # if project_name:
+        #     return project_name
+        # return project_id
+        
+        # 🎯 옵션 3: ID + 이름 조합
+        # if project_name and project_name != project_id:
+        #     return f"{project_id} ({project_name})"
+        # return project_id
+        
+        # 🎯 옵션 4: 이름 우선, ID 폴백
+        # return project_name if project_name else project_id
