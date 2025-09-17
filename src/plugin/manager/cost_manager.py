@@ -725,9 +725,9 @@ class CostManager(BaseManager):
                     
                     # billed_date 특별 처리 (빈 문자열인 경우 현재 날짜 설정)
                     if not record.get("billed_date") or record["billed_date"] == "":
-                        from datetime import datetime
-                        record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
-                        _LOGGER.warning(f"[CostManager] Set empty billed_date to current date: {record['billed_date']}")
+                        # 현재 날짜 사용하지 않고 None으로 설정
+                        record["billed_date"] = None
+                        _LOGGER.warning(f"[CostManager] Set empty billed_date to None")
         return gcs_result
 
     def _get_listed_price_from_record(self, record: dict):
@@ -1272,7 +1272,7 @@ class CostManager(BaseManager):
                     "Resource Tags": {}
                 },
                 "data": {"cost": None, "listed_price": None},  # 🚨 ULTRA PURE: 에러 시에도 None
-                "billed_date": datetime.now().strftime("%Y-%m-%d")
+                "billed_date": None  # 에러 시에도 현재 날짜 사용하지 않음
             }
             return {"results": [error_record]}
 
@@ -1653,9 +1653,9 @@ class CostManager(BaseManager):
         
         # billed_date 특별 처리 (빈 문자열인 경우 현재 날짜 설정)
         if not record.get("billed_date") or record["billed_date"] == "":
-            from datetime import datetime
-            record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
-            _LOGGER.warning(f"[COST_FIX] Set empty billed_date to current date: {record['billed_date']} for {usage_type}")
+            # 현재 날짜 사용하지 않고 None으로 설정
+            record["billed_date"] = None
+            _LOGGER.warning(f"[COST_FIX] Set empty billed_date to None for {usage_type}")
         
         return record
 
@@ -1702,10 +1702,10 @@ class CostManager(BaseManager):
             row: BigQuery 결과 행
             
         Returns:
-            str: YYYY-MM-DD 형식의 날짜 문자열
+            str: YYYY-MM-DD 형식의 날짜 문자열 또는 None
         """
         try:
-            # BigQuery에서 billed_at 필드 확인 (timestamp_trunc(usage_start_time, DAY) as billed_at)
+            # 1순위: BigQuery에서 billed_at 필드 확인 (timestamp_trunc(usage_start_time, DAY) as billed_at)
             billed_at = getattr(row, "billed_at", None)
             if billed_at:
                 # datetime 객체인 경우 문자열로 변환
@@ -1716,7 +1716,7 @@ class CostManager(BaseManager):
                     # ISO 형식에서 날짜 부분만 추출 (YYYY-MM-DD)
                     return str(billed_at).split('T')[0].split(' ')[0][:10]
             
-            # billed_at이 없으면 usage_start_time 확인
+            # 2순위: usage_start_time 확인 (실제 사용 시작 날짜)
             usage_start_time = getattr(row, "usage_start_time", None)
             if usage_start_time:
                 if hasattr(usage_start_time, 'strftime'):
@@ -1724,13 +1724,26 @@ class CostManager(BaseManager):
                 elif isinstance(usage_start_time, str):
                     return str(usage_start_time).split('T')[0].split(' ')[0][:10]
             
-            # 둘 다 없으면 현재 날짜 반환
-            _LOGGER.warning("[_extract_billed_date] No date fields found in row, using current date")
-            return datetime.now().strftime("%Y-%m-%d")
+            # 3순위: invoice.month를 날짜로 변환 (월말로 설정)
+            invoice_month = getattr(row, "invoice_month", None)
+            if invoice_month and isinstance(invoice_month, str) and len(invoice_month) == 6:  # YYYYMM 형식
+                try:
+                    year = invoice_month[:4]
+                    month = invoice_month[4:6]
+                    # 해당 월의 마지막 날로 설정
+                    import calendar
+                    last_day = calendar.monthrange(int(year), int(month))[1]
+                    return f"{year}-{month}-{last_day:02d}"
+                except (ValueError, TypeError):
+                    pass
+            
+            # 모든 날짜 필드가 없으면 None 반환 (현재 날짜 사용하지 않음)
+            _LOGGER.warning("[_extract_billed_date] No valid date fields found in row, returning None")
+            return None
             
         except Exception as e:
             _LOGGER.error(f"[_extract_billed_date] Error extracting date: {e}")
-            return datetime.now().strftime("%Y-%m-%d")
+            return None
 
     @staticmethod
     def _check_bigquery_task_options(task_options):
@@ -1899,30 +1912,30 @@ class CostManager(BaseManager):
               project.number as project_number,
               project.ancestry_numbers,
 
-              -- 위치 정보 (RECORD 타입에서 추출)
-              IFNULL(location.location, 'global') as location_name,
-              IFNULL(location.country, '') as location_country,
-              IFNULL(location.region, 'global') as region_code,
-              IFNULL(location.zone, '') as location_zone,
+              -- 위치 정보 (RECORD 타입에서 추출) - 🚨 ULTRA PURE: NULL 보존
+              location.location as location_name,
+              location.country as location_country,
+              location.region as region_code,
+              location.zone as location_zone,
 
-              -- 사용량 정보 (RECORD 타입에서 추출)
-              IFNULL(usage.unit, '') as usage_unit,
-              IFNULL(usage.pricing_unit, '') as pricing_unit,
+              -- 사용량 정보 (RECORD 타입에서 추출) - 🚨 ULTRA PURE: NULL 보존
+              usage.unit as usage_unit,
+              usage.pricing_unit as pricing_unit,
 
-              -- 인보이스 정보 (RECORD 타입에서 추출)
-              IFNULL(invoice.month, '') as invoice_month,
-              IFNULL(invoice.publisher_type, '') as publisher_type,
+              -- 인보이스 정보 (RECORD 타입에서 추출) - 🚨 ULTRA PURE: NULL 보존
+              invoice.month as invoice_month,
+              invoice.publisher_type as publisher_type,
 
-              -- 기타 STRING 필드들
+              -- 기타 STRING 필드들 - 🚨 ULTRA PURE: NULL 보존
               currency,
-              IFNULL(transaction_type, '') as transaction_type,
-              IFNULL(seller_name, '') as seller_name,
-              IFNULL(cost_type, '') as cost_type,
+              transaction_type,
+              seller_name,
+              cost_type,
 
-              -- REPEATED 필드들을 JSON 문자열로 변환 (ANY_VALUE로 집계 호환)
-              TO_JSON_STRING(ANY_VALUE(IFNULL(labels, []))) as labels,
-              TO_JSON_STRING(ANY_VALUE(IFNULL(system_labels, []))) as system_labels_json,
-              TO_JSON_STRING(ANY_VALUE(IFNULL(tags, []))) as resource_tags,
+              -- REPEATED 필드들을 JSON 문자열로 변환 (ANY_VALUE로 집계 호환) - 🚨 ULTRA PURE: NULL 보존
+              TO_JSON_STRING(ANY_VALUE(labels)) as labels,
+              TO_JSON_STRING(ANY_VALUE(system_labels)) as system_labels_json,
+              TO_JSON_STRING(ANY_VALUE(tags)) as resource_tags,
               
               -- 🎯 Credits Detail 처리 (최적화 완료)
               TO_JSON_STRING(ANY_VALUE(credits)) as credits_detail,{resource_fields}

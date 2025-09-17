@@ -591,11 +591,10 @@ def _ensure_spaceone_record_format(record):
         if spaceone_record["cost"] is None or spaceone_record["cost"] == "":
             spaceone_record["cost"] = 0.0
 
-        # billed_date 특별 처리 (빈 값인 경우 현재 날짜)
+        # billed_date 특별 처리 (빈 값인 경우 None 유지 - 현재 날짜 사용하지 않음)
         if not spaceone_record["billed_date"]:
-            from datetime import datetime
-
-            spaceone_record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+            spaceone_record["billed_date"] = None
+            _LOGGER.warning("[_ensure_spaceone_record_format] billed_date is empty, keeping as None")
 
         # 🚨 ULTIMATE: 최종 cost 필드 보장 (이중 검증)
         if "cost" not in spaceone_record or spaceone_record["cost"] is None:

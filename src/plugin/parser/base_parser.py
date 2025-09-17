@@ -45,9 +45,8 @@ class BaseParser(ABC):
         validated_records = []
         for record in records:
             if not record.get("billed_date"):
-                from datetime import datetime
-
-                record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+                # 현재 날짜 사용하지 않고 None으로 유지
+                record["billed_date"] = None
 
             # 모든 Pandas/Numpy 객체를 직렬화 가능한 타입으로 변환
             sanitized_record = self._sanitize_record_for_serialization(record)

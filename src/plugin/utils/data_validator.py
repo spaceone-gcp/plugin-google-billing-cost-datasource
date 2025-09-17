@@ -198,40 +198,41 @@ class DataValidator:
                 )
                 billed_date = record["billed_date"]
 
-            # 빈 문자열인 경우 현재 날짜로 설정
+            # 빈 문자열인 경우 None으로 설정 (현재 날짜 사용하지 않음)
             if not billed_date or billed_date.strip() == "":
-                record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+                record["billed_date"] = None
                 billed_date = record["billed_date"]
 
-            # 날짜 형식 검증 및 변환
-            try:
-                # 이미 올바른 형식인지 확인
-                datetime.strptime(billed_date, "%Y-%m-%d")
-            except ValueError:
-                # 다른 형식의 날짜를 YYYY-MM-DD로 변환 시도
-                date_formats = [
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%S.%fZ",
-                    "%Y-%m-%d %H:%M:%S UTC",
-                    "%Y/%m/%d",
-                    "%m/%d/%Y",
-                    "%d/%m/%Y",
-                ]
+            # billed_date가 None이 아닌 경우에만 날짜 형식 검증 및 변환
+            if billed_date is not None:
+                try:
+                    # 이미 올바른 형식인지 확인
+                    datetime.strptime(billed_date, "%Y-%m-%d")
+                except ValueError:
+                    # 다른 형식의 날짜를 YYYY-MM-DD로 변환 시도
+                    date_formats = [
+                        "%Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%dT%H:%M:%S",
+                        "%Y-%m-%dT%H:%M:%S.%fZ",
+                        "%Y-%m-%d %H:%M:%S UTC",
+                        "%Y/%m/%d",
+                        "%m/%d/%Y",
+                        "%d/%m/%Y",
+                    ]
 
-                converted = False
-                for fmt in date_formats:
-                    try:
-                        parsed_date = datetime.strptime(billed_date, fmt)
-                        record["billed_date"] = parsed_date.strftime("%Y-%m-%d")
-                        converted = True
-                        break
-                    except ValueError:
-                        continue
+                    converted = False
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(billed_date, fmt)
+                            record["billed_date"] = parsed_date.strftime("%Y-%m-%d")
+                            converted = True
+                            break
+                        except ValueError:
+                            continue
 
-                # 변환 실패 시 현재 날짜 사용
-                if not converted:
-                    record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+                    # 변환 실패 시 None 유지 (현재 날짜 사용하지 않음)
+                    if not converted:
+                        record["billed_date"] = None
 
         return errors
 

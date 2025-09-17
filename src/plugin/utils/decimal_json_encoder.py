@@ -250,10 +250,9 @@ def ensure_no_scientific_notation(data: dict) -> dict:
                         if field not in record or record[field] is None:
                             record[field] = default_value
                     
-                    # billed_date 특별 처리 (빈 문자열인 경우 현재 날짜 설정)
+                    # billed_date 특별 처리 (빈 문자열인 경우 None 설정 - 현재 날짜 사용하지 않음)
                     if not record.get("billed_date") or record["billed_date"] == "":
-                        from datetime import datetime
-                        record["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+                        record["billed_date"] = None
     
     return result
 

@@ -242,7 +242,7 @@ class FieldMapper:
             "usage_type": "",               # 필수: 사용 유형
             "resource": "",                 # 필수: 리소스 식별자
             "currency": "USD",              # 🆕 필수: 통화 (최상위 필드로 승격)
-            "billed_date": "",              # 필수: 청구 날짜 (YYYY-MM-DD 형식)
+            "billed_date": None,             # 필수: 청구 날짜 (YYYY-MM-DD 형식, 데이터 없으면 None)
             "tags": {},                     # 필수: 태그 (빈 딕셔너리 허용)
             "additional_info": {},          # 필수: 추가 정보 (빈 딕셔너리 허용)
             "data": {},                     # 필수: SpaceONE 프레임워크 요구사항
@@ -313,7 +313,8 @@ class FieldMapper:
             self._debug_record_logged = True
 
     def _process_billed_date(self, source_data: dict) -> str:
-        """billed_date 필드 처리"""
+        """billed_date 필드 처리 - 실제 청구 관련 날짜만 사용"""
+        # 1순위: 매핑된 billed_date 필드
         billed_date_value = self._map_field("billed_date", source_data, "")
 
         # 디버깅: billed_date 매핑 과정 로깅 (더 자세히)
@@ -324,18 +325,36 @@ class FieldMapper:
         if self._debug_billed_date_count < 20:
             self._debug_billed_date_count += 1
 
-        if not billed_date_value or billed_date_value == "":
-            # billed_date가 없으면 현재 날짜를 기본값으로 사용
-            from datetime import datetime
-
-            billed_date_value = datetime.now().strftime("%Y-%m-%d")
-            _LOGGER.warning(
-                f"[FieldMapper] billed_date missing, using current date: {billed_date_value}"
-            )
-        else:
-            billed_date_value = self._format_date(billed_date_value)
-
-        return billed_date_value
+        if billed_date_value and billed_date_value != "":
+            # 유효한 날짜 값이 있으면 형식 변환
+            return self._format_date(billed_date_value)
+        
+        # 2순위: usage_start_time 확인 (실제 사용 시작 날짜)
+        usage_start_time = source_data.get("usage_start_time") or source_data.get("Usage Start Time")
+        if usage_start_time:
+            formatted_date = self._format_date(usage_start_time)
+            if formatted_date:
+                _LOGGER.debug(f"[FieldMapper] Using usage_start_time for billed_date: {formatted_date}")
+                return formatted_date
+        
+        # 3순위: invoice_month를 날짜로 변환 (월말로 설정)
+        invoice_month = source_data.get("invoice_month") or source_data.get("Invoice Month")
+        if invoice_month and isinstance(invoice_month, str) and len(invoice_month) == 6:  # YYYYMM 형식
+            try:
+                year = invoice_month[:4]
+                month = invoice_month[4:6]
+                # 해당 월의 마지막 날로 설정
+                import calendar
+                last_day = calendar.monthrange(int(year), int(month))[1]
+                formatted_date = f"{year}-{month}-{last_day:02d}"
+                _LOGGER.debug(f"[FieldMapper] Using invoice_month for billed_date: {formatted_date}")
+                return formatted_date
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning(f"[FieldMapper] Failed to parse invoice_month {invoice_month}: {e}")
+        
+        # 모든 날짜 필드가 없으면 None 반환 (현재 날짜 사용하지 않음)
+        _LOGGER.warning("[FieldMapper] No valid date fields found for billed_date, returning None")
+        return None
 
     def _get_nested_value(self, data: dict, path: str, default=""):
         """중첩된 딕셔너리에서 점 표기법으로 값 추출"""
@@ -516,11 +535,10 @@ class FieldMapper:
         """매핑된 데이터 최종 후처리"""
         # billed_date 필드 강제 보장
         if not mapped_data.get("billed_date") or mapped_data["billed_date"] == "":
-            from datetime import datetime
-
-            mapped_data["billed_date"] = datetime.now().strftime("%Y-%m-%d")
+            # billed_date가 없으면 None으로 설정 (현재 날짜 사용하지 않음)
+            mapped_data["billed_date"] = None
             _LOGGER.warning(
-                f"[FieldMapper] CRITICAL: Force-set billed_date to current date: {mapped_data['billed_date']}"
+                f"[FieldMapper] CRITICAL: billed_date is missing, set to None"
             )
 
         # 디버깅: 최종 매핑 결과 확인 (첫 번째 레코드만)
@@ -1788,20 +1806,29 @@ class FieldMapper:
         # 디버깅 로깅 (처음 10개만)
         self._log_date_debug_info(value)
 
-        # 빈 값이나 "today" 처리
+        # 빈 값 처리 (None 반환 - 현재 날짜 사용하지 않음)
         if self._is_empty_or_today(value):
-            result = datetime.now().strftime("%Y-%m-%d")
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: _format_date returning default date: {result}"
+            _LOGGER.debug(
+                f"[FieldMapper] DEBUG: _format_date received empty value, returning None"
             )
-            return result
+            return None
 
         try:
+            # Invoice Month 형태 (YYYYMM) 처리
+            if isinstance(value, str) and len(value) == 6 and value.isdigit():
+                year = value[:4]
+                month = value[4:6]
+                import calendar
+                last_day = calendar.monthrange(int(year), int(month))[1]
+                result = f"{year}-{month}-{last_day:02d}"
+                _LOGGER.debug(f"[FieldMapper] Converted invoice_month {value} to {result}")
+                return result
+            
             return self._parse_date_value(value)
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Date format failed: {value}, error: {e}")
-            # 예외 발생 시에도 올바른 YYYY-MM-DD 형식으로 반환
-            return datetime.now().strftime("%Y-%m-%d")
+            # 예외 발생 시에도 None 반환 (현재 날짜 사용하지 않음)
+            return None
 
     def _log_date_debug_info(self, value: Any):
         """날짜 변환 디버깅 정보 로깅"""
@@ -1813,8 +1840,8 @@ class FieldMapper:
             self._debug_format_date_count += 1
 
     def _is_empty_or_today(self, value: Any) -> bool:
-        """빈 값이거나 'today'인지 확인"""
-        return not value or str(value).strip() == "" or str(value) == "today"
+        """빈 값인지 확인 (today는 더 이상 사용하지 않음)"""
+        return not value or str(value).strip() == ""
 
     def _parse_date_value(self, value: Any) -> str:
         """날짜 값 파싱"""
@@ -1829,11 +1856,11 @@ class FieldMapper:
         elif isinstance(value, str):
             return self._parse_string_date(value)
         else:
-            # 기타 타입은 현재 날짜를 기본값으로 사용
+            # 기타 타입은 None 반환 (현재 날짜 사용하지 않음)
             _LOGGER.warning(
-                f"[FieldMapper] Unsupported date type: {type(value)}, value: {value}, using current date"
+                f"[FieldMapper] Unsupported date type: {type(value)}, value: {value}, returning None"
             )
-            return datetime.now().strftime("%Y-%m-%d")
+            return None
 
     def _parse_string_date(self, value: str) -> str:
         """문자열 형태의 날짜 파싱"""
@@ -1867,11 +1894,11 @@ class FieldMapper:
             except ValueError:
                 continue
 
-        # 파싱 실패 시 현재 날짜를 기본값으로 사용
+        # 파싱 실패 시 None 반환 (현재 날짜 사용하지 않음)
         _LOGGER.warning(
-            f"[FieldMapper] Failed to parse date: {value}, using current date"
+            f"[FieldMapper] Failed to parse date: {value}, returning None"
         )
-        return datetime.now().strftime("%Y-%m-%d")
+        return None
 
     def _get_default_mapping(self, provider: str) -> dict:
         """프로바이더별 기본 매핑 반환"""
@@ -1907,8 +1934,8 @@ class FieldMapper:
                 "billed_date": {
                     "field": "usage_start_time",
                     "transform": "date_format",
-                    "fallback": "export_time",
-                    "default": "today",
+                    "fallback": "invoice_month",
+                    "default": None,
                 },
                 "tags": {"field": "labels", "transform": "json_parse"},
                 "additional_info": {

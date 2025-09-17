@@ -4,6 +4,20 @@
 
 이 문서는 `mkkang-project.multi_region_billing_data.gcp_billing_export_v1_01FD8E_B4DDC1_EAB69F` 테이블의 스키마 구조와 각 필드에 대한 상세 정보를 제공합니다.
 
+## 🚨 ABSOLUTE PERFECT ULTRA PURE DATA 원칙
+
+### 데이터 순수성 보장
+- **모든 NULL 값 보존**: BigQuery에서 NULL인 값은 절대 기본값으로 변환하지 않음
+- **원본 데이터 타입 유지**: 숫자, 문자열, 과학적 표기법 등 모든 데이터를 원본 그대로 보존
+- **IFNULL 사용 금지**: BigQuery 쿼리에서 `IFNULL(field, default_value)` 사용 절대 금지
+- **반올림/변환 금지**: `round()`, `float()`, `Decimal()` 등 데이터 변환 작업 금지
+- **기본값 설정 금지**: `getattr(row, "field", 0.0)` 형태의 기본값 설정 금지
+
+### 스키마 일치성 보장
+- **필드 완전 일치**: 응답 필드는 이 스키마에 정의된 필드와 100% 일치해야 함
+- **중첩 구조 정확 매핑**: RECORD 타입의 중첩 필드는 정확한 경로로 매핑
+- **REPEATED 필드 적절 처리**: 배열 필드는 JSON 문자열로 변환하여 처리
+
 ## 테이블 정보
 
 - **프로젝트**: `mkkang-project`
