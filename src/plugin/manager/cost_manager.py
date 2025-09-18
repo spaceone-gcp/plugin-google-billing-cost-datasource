@@ -1956,12 +1956,12 @@ class CostManager(BaseManager):
         else:
             _LOGGER.debug("[SQL 생성] 모든 프로젝트 조회 (project_id = '*')")
         
-        # 🚨 CRITICAL FIX: Job Manager와 동일한 비용/사용량 필터 조건 추가
+        # 🚨 CRITICAL FIX: 금액이 0이 아닌 데이터만 처리
         where_condition += """
-          AND (cost > 0 OR usage.amount > 0)  -- 비용 또는 사용량이 있는 데이터만
+          AND cost > 0  -- 금액이 0이 아닌 데이터만
           AND project.id IS NOT NULL  -- NULL 프로젝트 제외
         """
-        _LOGGER.debug("[SQL 생성] 비용/사용량 필터 조건 추가: cost > 0 OR usage.amount > 0")
+        _LOGGER.debug("[SQL 생성] 비용 필터 조건 추가: cost > 0 (금액이 0이 아닌 데이터만)")
         
 
         # 상세 사용량 데이터인 경우 리소스 정보 포함

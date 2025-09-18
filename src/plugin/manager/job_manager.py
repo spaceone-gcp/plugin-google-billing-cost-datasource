@@ -489,10 +489,10 @@ class JobManager(BaseManager):
         _LOGGER.debug(f"[JobManager._create_google_sql] 쿼리 생성 시작 - start: {start}")
         _LOGGER.debug(f"[JobManager._create_google_sql] 테이블 정보 - {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
         
-        # 🚀 스마트 프리필터링: 실제 데이터가 있는 프로젝트만 조회
+        # 🚀 스마트 프리필터링: 금액이 0이 아닌 프로젝트만 조회
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{start}-01')
-          AND (cost > 0 OR usage.amount > 0)  -- 비용 또는 사용량이 있는 프로젝트만
+          AND cost > 0  -- 금액이 0이 아닌 데이터만
           AND project.id IS NOT NULL  -- NULL 프로젝트 제외
         """
 

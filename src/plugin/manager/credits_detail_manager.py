@@ -109,6 +109,9 @@ class CreditsDetailManager(BaseManager):
         # Credits가 있는 레코드만 조회 (성능 최적화)
         where_conditions.append("ARRAY_LENGTH(IFNULL(credits, [])) > 0")
         
+        # 🚨 금액이 0이 아닌 데이터만 처리 (다른 매니저와 일관성 유지)
+        where_conditions.append("cost > 0")
+        
         where_clause = "WHERE " + " AND ".join(where_conditions)
         
         query = f"""
