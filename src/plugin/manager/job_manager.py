@@ -132,7 +132,7 @@ class JobManager(BaseManager):
                 result = self._get_http_file_tasks(
                     domain_id, options, secret_data, schema, start, last_synchronized_at
                 )
-            elif data_source_type == DATA_SOURCE_TYPES["http_file"]:
+            elif data_source_type == DATA_SOURCE_TYPES["http"]:
                 _LOGGER.info(
                     f"[JobManager.get_tasks] Using HTTP file mode (data_source_type: {data_source_type})"
                 )
@@ -620,7 +620,7 @@ class JobManager(BaseManager):
                     task_options = {
                         "bucket_name": bucket_name,
                         "file_path": file_path,
-                        "data_source_type": DATA_SOURCE_TYPES["http_file"],
+                        "data_source_type": DATA_SOURCE_TYPES["http"],
                         "field_mapper": options.get("field_mapper", {}),
                         "parsing_options": file_info.get("parsing_options", {}),
                     }
@@ -763,7 +763,7 @@ class JobManager(BaseManager):
                         task_options = {
                             "bucket_name": bucket_name,
                             "file_path": file_path,
-                            "data_source_type": DATA_SOURCE_TYPES["http_file"],
+                            "data_source_type": DATA_SOURCE_TYPES["http"],
                             "field_mapper": options.get("field_mapper", {}),
                             "parsing_options": options.get("parsing_options", {}),
                         }
@@ -803,7 +803,7 @@ class JobManager(BaseManager):
                 task_options = {
                     "bucket_name": bucket_name,
                     "file_path": file_path,
-                    "data_source_type": DATA_SOURCE_TYPES["http_file"],
+                    "data_source_type": DATA_SOURCE_TYPES["http"],
                     "field_mapper": options.get("field_mapper", {}),
                     "parsing_options": options.get("parsing_options", {}),
                 }
@@ -918,9 +918,9 @@ class JobManager(BaseManager):
             return DATA_SOURCE_TYPES["gcs"]
         elif source == "http":
             _LOGGER.info(
-                "[JobManager._get_data_source_type] Using source=http -> http_file"
+                "[JobManager._get_data_source_type] Using source=http -> http"
             )
-            return DATA_SOURCE_TYPES["http_file"]
+            return DATA_SOURCE_TYPES["http"]
         elif source:
             _LOGGER.warning(
                 f"[JobManager._get_data_source_type] Unknown source parameter: {source}, "

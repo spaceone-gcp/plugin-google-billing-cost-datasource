@@ -165,7 +165,7 @@ class RequestDeduplicator:
         elif source == "gcs":
             return DATA_SOURCE_TYPES["gcs"]
         elif source == "http":
-            return DATA_SOURCE_TYPES["http_file"]
+            return DATA_SOURCE_TYPES["http"]
 
         # 3. 파라미터 기반 자동 감지
         has_bucket = "bucket_name" in options

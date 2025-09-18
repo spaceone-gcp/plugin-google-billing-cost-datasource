@@ -1899,7 +1899,7 @@ class CostManager(BaseManager):
 
         # data_source_type 검증 (있는 경우)
         data_source_type = options.get("data_source_type")
-        if data_source_type and data_source_type not in ["bigquery", "http_file"]:
+        if data_source_type and data_source_type not in ["bigquery", "http"]:
             raise ERROR_REQUIRED_PARAMETER(
                 key=f"options.data_source_type (invalid value: {data_source_type})"
             )
@@ -2148,22 +2148,22 @@ class CostManager(BaseManager):
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
             return data_source_type
 
-        # base_url 또는 bucket_name이 있으면 http_file 타입으로 자동 감지
+        # base_url 또는 bucket_name이 있으면 http 타입으로 자동 감지
         base_url_in_options = options.get("base_url")
         base_url_in_task_options = task_options.get("base_url")
         bucket_name_in_options = options.get("bucket_name")
         bucket_name_in_task_options = task_options.get("bucket_name")
 
         # HTTP 파일 관련 파라미터가 명확히 있는 경우에만 HTTP 파일로 결정
-        has_http_file_params = (
+        has_http_params = (
             base_url_in_options
             or base_url_in_task_options
             or bucket_name_in_options
             or bucket_name_in_task_options
         )
 
-        if has_http_file_params:
-            return DATA_SOURCE_TYPES["http_file"]
+        if has_http_params:
+            return DATA_SOURCE_TYPES["http"]
 
         # BigQuery 필수 파라미터 확인 (task_options에서)
         bigquery_required_in_task = all(
