@@ -70,7 +70,7 @@ gRPC 서버가 localhost:50051에서 실행 중인지 확인하세요.
 
 ============================================================
 테스트: Cost.get_data - GitHub Raw URL (CSV)
-테스트 타입: http_file, API 타입: get_data
+테스트 타입: http, API 타입: get_data
 Base URL: https://raw.githubusercontent.com/cloudforet-io/plugin-http-file-cost-datasource/master/examples/cost_example.csv
 ============================================================
 ...

@@ -229,6 +229,50 @@ mypy src/
 - **[📊 데이터 분석 가이드](./docs/ko/user-guide/data-analysis-guide.md)** - BigQuery 스키마 및 쿼리 분석
 - **[💰 Pricing Data Export 가이드](./docs/ko/user-guide/pricing-data-export-guide.md)** - 가격 데이터 분석
 
+## Recent Updates
+
+### v2.0.1 (2025-09-18) - Date Range Enhancement ⭐ **NEW**
+
+#### 🎯 Key Improvements
+- **Automatic End Date Setting**: When end date is not provided, automatically sets to current month
+- **BigQuery SQL Compatibility**: Fixed `TIMESTAMP + INTERVAL` syntax for BigQuery compatibility
+- **Enhanced Logging**: Clear logging for date processing and automatic settings
+
+#### 📅 Date Processing Features
+```python
+# Automatic end date setting
+task_options = {
+    "start": "2024-09"      # End date automatically set to current month (2025-09)
+}
+
+# Explicit end date
+task_options = {
+    "start": "2024-09",
+    "end": "2024-12"        # Explicit end date
+}
+```
+
+#### 🔧 Technical Improvements
+- **SQL Compatibility**: `TIMESTAMP(DATE_ADD(DATE('2025-09-01'), INTERVAL 1 MONTH))` instead of `TIMESTAMP + INTERVAL`
+- **Logging Enhancement**: INFO level logging for automatic date settings
+- **PARTITIONDATE Optimization**: Automatic range expansion for optimal BigQuery performance
+
+#### 📊 Logging Examples
+```
+[SQL 생성] 종료일이 None이므로 현재월로 자동 설정: 2025-09
+[PARTITIONDATE 범위] 원본 범위: 2024-09 ~ 2025-09, 확장된 범위: 2024-08-01 ~ 2025-10-31
+[SQL 생성] 날짜 범위 필터: 2024-09 ~ 2025-09
+```
+
+#### 🎯 User Benefits
+- **Convenience**: No need to specify end date for current month queries
+- **Stability**: Fixed BigQuery SQL execution errors
+- **Transparency**: Clear logging shows automatic date processing
+
+#### 🔗 Compatibility
+- **Full Backward Compatibility**: All existing API usage remains unchanged
+- **Additional Features**: Enhanced functionality with automatic date handling
+
 ## License
 
 This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.

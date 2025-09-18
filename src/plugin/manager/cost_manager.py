@@ -77,13 +77,20 @@ class CostManager(BaseManager):
         )
         self._validate_table_exists()
 
-        start_month = self._get_start_month()
+        # JobManager에서 계산된 start 값이 있으면 사용, 없으면 자체 계산
+        start_month = options.get("start") or self._get_start_month()
+        if options.get("start"):
+            _LOGGER.info(f"[get_linked_accounts] JobManager에서 전달된 start 사용: {start_month}")
+        else:
+            _LOGGER.info(f"[get_linked_accounts] 자체 계산된 start 사용: {start_month}")
 
         query = self._create_linked_accounts_google_sql(start_month)
         
         # get_linked_accounts 쿼리 실행 로깅
         _LOGGER.info("=" * 80)
         _LOGGER.info("🔍 [QUERY #0] CostManager - 링크된 계정(프로젝트) 목록 조회")
+        _LOGGER.info(f"[get_linked_accounts] 시작일: {start_month}")
+        _LOGGER.info(f"[get_linked_accounts] PARTITIONDATE 범위: {self._calculate_partition_date_range(start_month)}")
         _LOGGER.info(f"[get_linked_accounts] Query: {query}")
         _LOGGER.info("=" * 80)
         
@@ -156,7 +163,32 @@ class CostManager(BaseManager):
             "cost_metric"
         )
 
-        start = task_options["start"]
+        # Re-sync Plan 모드별 날짜 처리 (날짜 형식으로 모드 판단)
+        original_start = task_options["start"]
+        original_end = task_options.get("end")
+        
+        # 날짜 형식 기반 모드 판단 로직
+        if original_end:
+            # 종료일이 있는 경우 - 날짜 형식으로 모드 판단
+            start_is_daily = len(original_start) == 10 and original_start.count('-') == 2  # YYYY-MM-DD
+            end_is_daily = len(original_end) == 10 and original_end.count('-') == 2      # YYYY-MM-DD
+            
+            if start_is_daily or end_is_daily:
+                # Auto 모드: 일자 형식 (YYYY-MM-DD) 포함
+                # JobManager에서 이미 -1년 계산을 처리하므로, 입력값을 정규화만 함
+                start = self._normalize_date_to_month(original_start)
+                end = self._normalize_date_to_month(original_end)
+                _LOGGER.info(f"[Re-sync] Auto 모드 감지 (일자 형식) - 범위: {original_start} ~ {original_end} -> {start} ~ {end} (JobManager에서 -1년 계산 처리됨)")
+            else:
+                # Manual 모드: 월 형식 (YYYY-MM)
+                start = self._normalize_date_to_month(original_start)
+                end = self._normalize_date_to_month(original_end)
+                _LOGGER.info(f"[Re-sync] Manual 모드 감지 (월 형식) - 범위: {original_start} ~ {original_end} -> {start} ~ {end}")
+        else:
+            # 기존 방식: 시작일만 사용 (하위 호환성)
+            start = self._normalize_date_to_month(original_start)
+            end = None
+            _LOGGER.info(f"[Re-sync] 기존 방식 - 시작일만: {original_start} -> {start}")
         self.billing_export_project_id = task_options["billing_export_project_id"]
         self.billing_dataset = self._extract_dataset_id(
             task_options["billing_dataset_id"]
@@ -169,13 +201,16 @@ class CostManager(BaseManager):
         )
         self._validate_table_exists()
 
-        query = self._create_google_sql(start)
+        query = self._create_google_sql(start, end)
 
         # 프로젝트별 쿼리 실행 로깅 강화
         _LOGGER.info("=" * 80)
         _LOGGER.info(f"🔍 [QUERY #2-5] CostManager - 프로젝트별 비용 데이터 조회")
         _LOGGER.info(f"[BigQuery] 대상 프로젝트: {self.target_project_id}")
-        _LOGGER.info(f"[BigQuery] 조회 시작일: {start}")
+        _LOGGER.info(f"[BigQuery] 조회 범위: {start}" + (f" ~ {end}" if end else ""))
+        validated_start = self._validate_and_fix_date_range(start)
+        validated_end = self._validate_and_fix_date_range(end) if end else None
+        _LOGGER.info(f"[BigQuery] PARTITIONDATE 범위: {self._calculate_partition_date_range(validated_start, validated_end)}")
         _LOGGER.info(f"[BigQuery] 대상 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
         _LOGGER.info(f"[BigQuery] 필터 조건: cost > 0 OR usage.amount > 0 (Job Manager와 동일)")
         _LOGGER.info(f"[BigQuery] Query: {query}")
@@ -1939,17 +1974,38 @@ class CostManager(BaseManager):
         else:
             self.is_detailed_usage = False
 
-    def _create_google_sql(self, start):
+    def _create_google_sql(self, start, end=None):
         """BigQuery용 SQL 쿼리를 생성합니다."""
-        _LOGGER.debug(f"[SQL 생성] 쿼리 생성 시작 - 시작일: {start}")
+        _LOGGER.debug(f"[SQL 생성] 쿼리 생성 시작 - 시작일: {start}, 종료일: {end}")
 
         # 날짜 범위 검증 및 안전한 처리
         validated_start = self._validate_and_fix_date_range(start)
-        _LOGGER.debug(f"[SQL 생성] 검증된 시작일: {validated_start}")
+        
+        # 종료일이 None인 경우 현재월로 자동 설정
+        if end is None:
+            from datetime import datetime
+            current_month = datetime.now().strftime("%Y-%m")
+            validated_end = current_month
+            _LOGGER.info(f"[SQL 생성] 종료일이 None이므로 현재월로 자동 설정: {validated_end}")
+        else:
+            validated_end = self._validate_and_fix_date_range(end)
+            _LOGGER.debug(f"[SQL 생성] 종료일 검증 완료: {validated_end}")
+        
+        _LOGGER.debug(f"[SQL 생성] 검증된 시작일: {validated_start}, 종료일: {validated_end}")
 
+        # PARTITIONDATE 범위 계산 (Data Sources Re-Sync 최적화)
+        partition_start, partition_end = self._calculate_partition_date_range(validated_start, validated_end)
+        
+        # WHERE 조건 생성 (종료일은 항상 설정됨)
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{validated_start}-01')
+          AND usage_start_time < TIMESTAMP(DATE_ADD(DATE('{validated_end}-01'), INTERVAL 1 MONTH))
+          AND _PARTITIONDATE BETWEEN '{partition_start}' AND '{partition_end}'
         """
+        _LOGGER.debug(f"[SQL 생성] 날짜 범위 필터: {validated_start} ~ {validated_end}")
+        
+        _LOGGER.debug(f"[SQL 생성] PARTITIONDATE 필터 추가: {partition_start} ~ {partition_end}")
+        
         if self.target_project_id != "*":
             where_condition += f" AND project.id = '{self.target_project_id}'"
             _LOGGER.debug(f"[SQL 생성] 특정 프로젝트 필터링: {self.target_project_id}")
@@ -2071,9 +2127,15 @@ class CostManager(BaseManager):
         # 날짜 범위 검증 및 안전한 처리
         validated_start = self._validate_and_fix_date_range(start)
 
+        # PARTITIONDATE 범위 계산 (Data Sources Re-Sync 최적화)
+        partition_start, partition_end = self._calculate_partition_date_range(validated_start)
+
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{validated_start}-01')
+          AND _PARTITIONDATE BETWEEN '{partition_start}' AND '{partition_end}'
         """
+        
+        _LOGGER.debug(f"[Linked Accounts SQL] PARTITIONDATE 필터 추가: {partition_start} ~ {partition_end}")
 
         query = f"""
             SELECT
@@ -2085,8 +2147,6 @@ class CostManager(BaseManager):
         return query
 
     @staticmethod
-
-    @staticmethod
     def _get_start_month():
         start_time: datetime = datetime.utcnow() - timedelta(days=365)
         start_time = start_time.replace(day=1)
@@ -2096,6 +2156,147 @@ class CostManager(BaseManager):
         )
 
         return start_time.strftime("%Y-%m")
+
+    @staticmethod
+    def _normalize_date_to_month(date_str: str) -> str:
+        """날짜를 YYYY-MM 형식으로 정규화
+        
+        Args:
+            date_str: YYYY-MM 또는 YYYY-MM-DD 형식의 날짜 문자열
+            
+        Returns:
+            str: YYYY-MM 형식의 날짜 문자열
+        """
+        if not date_str:
+            return None
+            
+        # YYYY-MM-DD 형식인 경우 YYYY-MM으로 변환
+        if len(date_str) == 10 and date_str.count('-') == 2:
+            return date_str[:7]  # YYYY-MM-DD -> YYYY-MM
+        
+        # 이미 YYYY-MM 형식인 경우 그대로 반환
+        if len(date_str) == 7 and date_str.count('-') == 1:
+            return date_str
+            
+        # 기타 형식은 그대로 반환 (오류 처리는 상위에서)
+        return date_str
+
+    @staticmethod
+    def _calculate_partition_date_range(start_date: str, end_date: str = None) -> tuple[str, str]:
+        """Data Sources Re-Sync를 위한 PARTITIONDATE 범위 계산
+        
+        시작일은 -1개월, 종료일은 +1개월로 확장하여 안전한 데이터 수집을 보장합니다.
+        
+        Args:
+            start_date: YYYY-MM 형식의 시작 날짜
+            end_date: YYYY-MM 형식의 종료 날짜 (선택사항, 없으면 start_date 기준으로 계산)
+            
+        Returns:
+            tuple[str, str]: (partition_start_date, partition_end_date) YYYY-MM-DD 형식
+        """
+        try:
+            from dateutil.relativedelta import relativedelta
+            
+            # 시작일 파싱
+            if not start_date or len(start_date) != 7:  # YYYY-MM 형식 검증
+                current_date = datetime.now()
+                start_datetime = datetime(current_date.year, current_date.month, 1)
+            else:
+                start_year, start_month = map(int, start_date.split("-"))
+                start_datetime = datetime(start_year, start_month, 1)
+            
+            # 종료일 파싱
+            if end_date and len(end_date) == 7:  # YYYY-MM 형식 검증
+                end_year, end_month = map(int, end_date.split("-"))
+                end_datetime = datetime(end_year, end_month, 1)
+            else:
+                # 종료일이 없으면 현재월로 설정
+                current_date = datetime.now()
+                end_datetime = datetime(current_date.year, current_date.month, 1)
+                _LOGGER.info(f"[PARTITIONDATE] 종료일이 None이므로 현재월로 설정: {current_date.strftime('%Y-%m')}")
+            
+            # 시작일 계산: start_date -1개월의 첫째 날
+            partition_start = start_datetime - relativedelta(months=1)
+            partition_start_str = partition_start.strftime("%Y-%m-%d")
+            
+            # 종료일 계산: end_date +1개월의 마지막 날
+            partition_end = end_datetime + relativedelta(months=1)
+            # 다음 달의 마지막 날 계산
+            partition_end = partition_end + relativedelta(months=1) - relativedelta(days=1)
+            partition_end_str = partition_end.strftime("%Y-%m-%d")
+            
+            _LOGGER.info(f"[PARTITIONDATE 범위] 원본 범위: {start_date} ~ {end_date or start_date}, 확장된 범위: {partition_start_str} ~ {partition_end_str}")
+            
+            return partition_start_str, partition_end_str
+            
+        except ImportError:
+            # dateutil이 없는 경우 기본 datetime 사용
+            _LOGGER.warning("[PARTITIONDATE] dateutil을 사용할 수 없어 기본 계산 방법을 사용합니다.")
+            try:
+                # 시작일 파싱
+                if not start_date or len(start_date) != 7:
+                    current_date = datetime.now()
+                    start_year, start_month = current_date.year, current_date.month
+                    start_date_valid = False
+                else:
+                    start_year, start_month = map(int, start_date.split("-"))
+                    start_date_valid = True
+                
+                # 종료일 파싱
+                if end_date and len(end_date) == 7:
+                    end_year, end_month = map(int, end_date.split("-"))
+                else:
+                    # 종료일이 없거나 잘못된 경우 현재월로 설정
+                    current_date = datetime.now()
+                    end_year, end_month = current_date.year, current_date.month
+                    _LOGGER.info(f"[PARTITIONDATE] 종료일이 None이므로 현재월로 설정: {current_date.strftime('%Y-%m')}")
+                
+                # 시작일 계산: start_date -1개월
+                if start_month == 1:
+                    partition_start = datetime(start_year - 1, 12, 1)
+                else:
+                    partition_start = datetime(start_year, start_month - 1, 1)
+                
+                # 종료일 계산: end_date +1개월 말일
+                if end_month == 12:
+                    next_month = datetime(end_year + 1, 1, 1)
+                else:
+                    next_month = datetime(end_year, end_month + 1, 1)
+                
+                # 다음 달의 다음 달 첫째 날에서 하루 빼기 (다음 달 마지막 날)
+                if next_month.month == 12:
+                    partition_end = datetime(next_month.year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    partition_end = datetime(next_month.year, next_month.month + 1, 1) - timedelta(days=1)
+                
+                partition_start_str = partition_start.strftime("%Y-%m-%d")
+                partition_end_str = partition_end.strftime("%Y-%m-%d")
+                
+                _LOGGER.info(f"[PARTITIONDATE 범위] 원본 범위: {start_date} ~ {end_date or start_date}, 확장된 범위: {partition_start_str} ~ {partition_end_str}")
+                
+                return partition_start_str, partition_end_str
+                
+            except Exception as e:
+                _LOGGER.error(f"[PARTITIONDATE 범위 계산 오류] {e}")
+                # 기본값으로 현재 월 기준 ±1개월 반환
+                current_date = datetime.now()
+                start_default = current_date.replace(day=1) - timedelta(days=32)
+                start_default = start_default.replace(day=1)
+                end_default = current_date.replace(day=1) + timedelta(days=62)
+                end_default = end_default.replace(day=1) - timedelta(days=1)
+                
+                return start_default.strftime("%Y-%m-%d"), end_default.strftime("%Y-%m-%d")
+        
+        except Exception as e:
+            _LOGGER.error(f"[PARTITIONDATE 범위 계산 오류] {e}")
+            # 기본값으로 현재 월 기준 ±1개월 반환
+            current_date = datetime.now()
+            start_default = current_date.replace(day=1) - timedelta(days=32)
+            start_default = start_default.replace(day=1)
+            end_default = current_date.replace(day=1) + timedelta(days=62)
+            end_default = end_default.replace(day=1) - timedelta(days=1)
+            
+            return start_default.strftime("%Y-%m-%d"), end_default.strftime("%Y-%m-%d")
 
     @staticmethod
     def _validate_and_fix_date_range(start_date: str) -> str:
