@@ -115,6 +115,7 @@ class FieldMapper:
             except:
                 _LOGGER.warning(f"[FieldMapper] Cost value check failed, preserving original: {cost_value}")
             usage_quantity_value = self._safe_get_usage_quantity(source_data)
+            usage_unit_value = self._safe_get_usage_unit(source_data)
             billed_date_value = self._process_billed_date(source_data)
 
             # additional_info 필드 병합 처리
@@ -130,7 +131,7 @@ class FieldMapper:
             mapped_data = {
                 "cost": final_cost,
                 "usage_quantity": usage_quantity_value,
-                "usage_unit": source_data.get("usage_unit", ""),
+                "usage_unit": usage_unit_value,
                 "provider": self.provider,
                 "region_code": source_data.get("region_code", "global"),
                 "product": mapped_fields["product"],
@@ -180,8 +181,8 @@ class FieldMapper:
                 _LOGGER.warning(f"[FieldMapper] Cost field missing from result! Keys: {list(result.keys())}")
                 result["cost"] = None  # None으로 보존
             else:
-                _LOGGER.debug(f"[FieldMapper] map_record result has cost: {result['cost']}")
-
+                # _LOGGER.debug(f"[FieldMapper] map_record result has cost: {result['cost']}")
+                pass           
             return result
 
         except Exception as e:
@@ -252,9 +253,9 @@ class FieldMapper:
         for field, default_value in required_fields.items():
             if field not in data or data[field] is None:
                 data[field] = default_value
-                _LOGGER.debug(
-                    f"[FieldMapper] Added missing required field '{field}' with default value: {default_value}"
-                )
+                # _LOGGER.debug(
+                #     f"[FieldMapper] Added missing required field '{field}' with default value: {default_value}"
+                # )
 
         return data
 
@@ -907,6 +908,9 @@ class FieldMapper:
 
     def _safe_get_usage_quantity(self, source_data: dict):
         """usage_quantity 필드를 안전하게 추출하고 기본값 처리
+        
+        GCP 빌링 데이터에서 Usage Amount 필드를 우선적으로 사용하고,
+        fallback으로 기존 필드들을 확인합니다.
 
         Args:
             source_data: 원본 데이터
@@ -914,24 +918,95 @@ class FieldMapper:
         Returns:
             usage_quantity 값 (없으면 0)
         """
+        # 🎯 1단계: GCP additional_info에서 Usage Amount 추출 (최우선)
+        additional_info = source_data.get("additional_info", {})
+        if isinstance(additional_info, dict):
+            # GCP 빌링 데이터의 Usage Amount 필드 확인
+            usage_amount = additional_info.get("Usage Amount")
+            if usage_amount is not None and usage_amount != "":
+                try:
+                    usage_value = float(usage_amount)
+                    _LOGGER.debug(f"[FieldMapper] Found Usage Amount in additional_info: {usage_value}")
+                    return usage_value
+                except (ValueError, TypeError):
+                    _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount value: {usage_amount}")
+            
+            # Usage Amount In Pricing Units도 확인
+            usage_pricing_amount = additional_info.get("Usage Amount In Pricing Units")
+            if usage_pricing_amount is not None and usage_pricing_amount != "":
+                try:
+                    usage_value = float(usage_pricing_amount)
+                    _LOGGER.debug(f"[FieldMapper] Found Usage Amount In Pricing Units: {usage_value}")
+                    return usage_value
+                except (ValueError, TypeError):
+                    _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
+
+        # 🎯 2단계: 기존 usage_quantity 필드 확인 (fallback)
         usage_quantity = source_data.get("usage_quantity")
+        if usage_quantity is not None and usage_quantity != "" and str(usage_quantity).lower() != "nan":
+            try:
+                usage_value = float(usage_quantity)
+                _LOGGER.debug(f"[FieldMapper] Found usage_quantity field: {usage_value}")
+                return usage_value
+            except (ValueError, TypeError):
+                _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}")
 
-        # None, 빈 문자열, NaN 등의 경우 0으로 처리
-        if (
-            usage_quantity is None
-            or usage_quantity == ""
-            or str(usage_quantity).lower() == "nan"
-        ):
-            return 0
+        # 🎯 3단계: usage_amount 필드 확인 (추가 fallback)
+        usage_amount_field = source_data.get("usage_amount")
+        if usage_amount_field is not None and usage_amount_field != "":
+            try:
+                usage_value = float(usage_amount_field)
+                _LOGGER.debug(f"[FieldMapper] Found usage_amount field: {usage_value}")
+                return usage_value
+            except (ValueError, TypeError):
+                _LOGGER.warning(f"[FieldMapper] Invalid usage_amount value: {usage_amount_field}")
 
-        # 숫자 타입으로 변환 시도 (0 값도 원본 보존)
-        try:
-            return float(usage_quantity)  # 0 값도 원본 그대로 변환
-        except (ValueError, TypeError):
-            _LOGGER.warning(
-                f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}, using 0"
-            )
-            return 0
+        # 🎯 4단계: 모든 방법이 실패한 경우 0 반환
+        _LOGGER.debug("[FieldMapper] No valid usage quantity found, returning 0")
+        return 0
+
+    def _safe_get_usage_unit(self, source_data: dict):
+        """usage_unit 필드를 안전하게 추출하고 기본값 처리
+        
+        GCP 빌링 데이터에서 Usage Unit 필드를 우선적으로 사용하고,
+        fallback으로 기존 필드들을 확인합니다.
+
+        Args:
+            source_data: 원본 데이터
+
+        Returns:
+            usage_unit 값 (없으면 빈 문자열)
+        """
+        # 🎯 1단계: GCP additional_info에서 Usage Unit 추출 (최우선)
+        additional_info = source_data.get("additional_info", {})
+        if isinstance(additional_info, dict):
+            # GCP 빌링 데이터의 Usage Unit 필드 확인
+            usage_unit = additional_info.get("Usage Unit")
+            if usage_unit is not None and usage_unit != "":
+                _LOGGER.debug(f"[FieldMapper] Found Usage Unit in additional_info: {usage_unit}")
+                return str(usage_unit)
+            
+            # Usage Pricing Unit도 확인
+            usage_pricing_unit = additional_info.get("Usage Pricing Unit")
+            if usage_pricing_unit is not None and usage_pricing_unit != "":
+                _LOGGER.debug(f"[FieldMapper] Found Usage Pricing Unit: {usage_pricing_unit}")
+                return str(usage_pricing_unit)
+
+        # 🎯 2단계: 기존 usage_unit 필드 확인 (fallback)
+        usage_unit_field = source_data.get("usage_unit")
+        if usage_unit_field is not None and usage_unit_field != "":
+            _LOGGER.debug(f"[FieldMapper] Found usage_unit field: {usage_unit_field}")
+            return str(usage_unit_field)
+
+        # 🎯 3단계: pricing_unit 필드 확인 (추가 fallback)
+        pricing_unit = source_data.get("pricing_unit")
+        if pricing_unit is not None and pricing_unit != "":
+            _LOGGER.debug(f"[FieldMapper] Found pricing_unit field: {pricing_unit}")
+            return str(pricing_unit)
+
+        # 🎯 4단계: 모든 방법이 실패한 경우 빈 문자열 반환
+        _LOGGER.debug("[FieldMapper] No valid usage unit found, returning empty string")
+        return ""
 
     def _get_cost_by_option(self, source_data: dict):
         """select_cost 및 cost_metric 옵션에 따라 적절한 비용 필드를 선택
@@ -1906,12 +1981,14 @@ class FieldMapper:
             return {
                 "cost": "cost",
                 "usage_quantity": {
-                    "field": "usage.amount_in_pricing_units",
-                    "fallback": "usage_quantity",
+                    "field": "additional_info.Usage Amount",
+                    "fallback": "additional_info.Usage Amount In Pricing Units",
+                    "fallback2": "usage_quantity",
                 },
                 "usage_unit": {
-                    "field": "usage.pricing_unit",
-                    "fallback": "pricing_unit",
+                    "field": "additional_info.Usage Unit",
+                    "fallback": "additional_info.Usage Pricing Unit",
+                    "fallback2": "usage_unit",
                 },
                 "region_code": {
                     "field": "location.region",
