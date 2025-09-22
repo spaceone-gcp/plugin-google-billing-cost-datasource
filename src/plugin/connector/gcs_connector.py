@@ -94,6 +94,30 @@ class GcsConnector(BaseConnector):
             bucket = self.gcs_client.bucket(bucket_name)
 
             if pattern:
+                # 특정 파일 경로인지 확인 (정확한 파일명 포함)
+                if pattern.endswith(('.parquet', '.csv', '.json', '.gz')):
+                    # 정확한 파일 경로인 경우, 해당 파일이 존재하는지 확인
+                    try:
+                        blob = bucket.blob(pattern)
+                        if blob.exists():
+                            _LOGGER.info(f"[GcsConnector] Found specific file: {pattern}")
+                            return [
+                                {
+                                    "name": blob.name,
+                                    "size": blob.size,
+                                    "updated": blob.updated,
+                                    "content_type": blob.content_type,
+                                    "bucket": bucket_name,
+                                }
+                            ]
+                        else:
+                            _LOGGER.warning(f"[GcsConnector] Specific file not found: {pattern}")
+                            return []
+                    except Exception as e:
+                        _LOGGER.warning(f"[GcsConnector] Error checking specific file {pattern}: {e}")
+                        # 실패 시 prefix 검색으로 폴백
+                        
+                # 패턴/접두사 검색
                 blobs = bucket.list_blobs(prefix=pattern)
             else:
                 blobs = bucket.list_blobs()
@@ -120,6 +144,7 @@ class GcsConnector(BaseConnector):
                     if limit and count >= limit:
                         break
 
+            _LOGGER.info(f"[GcsConnector] Pattern '{pattern}' search result: {len(files)} files found (scanned {total_scanned})")
             return files
 
         except Exception as e:

@@ -338,14 +338,9 @@ class CostManager(BaseManager):
     def _get_data_from_gcs(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
-        """GCS 버킷에서 데이터 조회 - 동시성 제어 및 중복 요청 처리"""
+        """GCS 버킷에서 데이터 조회 - 중복 요청 검사는 get_data()에서 이미 완료됨"""
         try:
-            # 요청 중복 제거 검사
-            request_hash = request_deduplicator.generate_request_hash(
-                options, task_options
-            )
-            if request_deduplicator.is_duplicate_request(request_hash):
-                return
+            # 중복 요청 검사는 get_data()에서 이미 완료되었으므로 제거
 
             # GCS 버킷 처리용 파라미터 검증
             self._check_gcs_task_options(task_options, options, secret_data)
