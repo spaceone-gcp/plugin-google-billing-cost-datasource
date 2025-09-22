@@ -13,7 +13,7 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
 {
   "cost": 1.23e-6,        // 과학적 표기법 금지
   "usage_quantity": 4.56E+3,  // 대문자 E도 금지
-  "listed_price": 7.89e-12    // 매우 작은 값도 금지
+  "list_price": 7.89e-12    // 매우 작은 값도 금지
 }
 ```
 
@@ -24,7 +24,7 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
   "usage_quantity": 4560.0,   // 정수도 소수점 포함 권장
   "data": {
     "cost": 0.00000123,       // data 필드 내의 cost (별도)
-    "listed_price": 0.0       // 매우 작은 값은 0.0으로 처리
+    "list_price": 0.0       // 매우 작은 값은 0.0으로 처리
   }
 }
 ```
@@ -50,10 +50,9 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
       "billed_date": "2025-09-10",       // 필수: 청구 날짜 (YYYY-MM-DD)
       "tags": {},                        // 필수: 태그 (빈 객체 허용)
       "additional_info": {},             // 필수: 추가 정보 (빈 객체 허용)
-      "data": {                          // 필수: SpaceONE 프레임워크 요구사항
-        "cost": 123.45,                  // data 필드 내의 cost (별도)
-        "listed_price": 123.45,
-        "currency_conversion_rate": 1354.59
+      "data": {                          // 필수: SpaceONE 프레임워크 요구사항 (cost, list_price만 포함)
+        "cost": 123.45,                  // 🚨 CRITICAL: 실제 비용 (최상위와 동일)
+        "list_price": 150.00           // 🚨 CRITICAL: 정가 정보 (할인 전 가격)
       }
     }
   ]
@@ -90,8 +89,8 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
         "Resource Tags": {}
       },
       "data": {
-        "cost": "0.0",
-        "listed_price": "0.0"
+        "cost": 0.0,                     // 🚨 CRITICAL: 실제 비용 (숫자 타입)
+        "list_price": 0.0              // 🚨 CRITICAL: 정가 정보 (숫자 타입)
       },
       "billed_date": "2025-09-15"
     }

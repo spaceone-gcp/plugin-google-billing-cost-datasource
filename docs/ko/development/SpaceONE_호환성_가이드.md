@@ -21,8 +21,8 @@ SpaceONE Google Cloud Billing Cost Datasource 플러그인에서 **SpaceONE 플�
   "results": [
     {
       "cost": 123.45,                    // 🚨 CRITICAL: 최상위 필드, 절대 누락 금지
-      "usage_quantity": 1000.0,
-      "usage_unit": "GB-hours",
+      "usage_quantity": 1000.0,          // 🚨 CRITICAL: Usage 데이터 타입 지원 필수
+      "usage_unit": "GB-hours",          // 🚨 CRITICAL: 사용량 단위 필수
       "provider": "google_cloud",
       "region_code": "us-central1",
       "product": "BigQuery",
@@ -33,7 +33,7 @@ SpaceONE Google Cloud Billing Cost Datasource 플러그인에서 **SpaceONE 플�
       "tags": {},
       "additional_info": {},
       "data": {
-        "listed_price": 123.45,
+        "list_price": 123.45,
         "cost": 123.45,                 // data 필드 내의 cost (별도)
         "currency_conversion_rate": 1354.59
       }
@@ -41,6 +41,22 @@ SpaceONE Google Cloud Billing Cost Datasource 플러그인에서 **SpaceONE 플�
   ]
 }
 ```
+
+### 1.1. SpaceONE Usage vs Cost 데이터 타입 지원 ⭐ **NEW**
+
+SpaceONE UI는 두 가지 데이터 타입을 지원합니다:
+
+#### **Cost 데이터 타입**
+- **조건**: `cost > 0`인 데이터만 표시
+- **용도**: 비용 기반 분석 및 리포팅
+- **필수 필드**: `cost`, `currency`
+
+#### **Usage 데이터 타입** 
+- **조건**: `usage_quantity > 0`인 데이터만 표시
+- **용도**: 사용량 기반 분석 및 최적화
+- **필수 필드**: `usage_quantity`, `usage_unit`
+
+**🚨 중요**: Usage 데이터 타입에서 `usage_quantity = 0`이면 SpaceONE UI에서 데이터가 표시되지 않습니다!
 
 ### 실제 Google Cloud 응답 예시 (완전한 구조)
 
@@ -95,7 +111,7 @@ SpaceONE Google Cloud Billing Cost Datasource 플러그인에서 **SpaceONE 플�
       },
       "data": {
         "cost": "0.0",
-        "listed_price": "0.0"
+        "list_price": "0.0"
       },
       "billed_date": "2025-09-15"
     }
@@ -142,7 +158,7 @@ SpaceONE 플랫폼은 JSON 응답에서 **과학적 표기법을 지원하지 �
 {
   "cost": 1.23e-6,          // 소문자 e 금지
   "usage_quantity": 4.56E+3, // 대문자 E 금지  
-  "listed_price": 7.89e-12,  // 매우 작은 값도 금지
+  "list_price": 7.89e-12,  // 매우 작은 값도 금지
   "conversion_rate": 1.5e+3  // 큰 값도 금지
 }
 ```
@@ -152,7 +168,7 @@ SpaceONE 플랫폼은 JSON 응답에서 **과학적 표기법을 지원하지 �
 {
   "cost": 0.00000123,       // 소수점 표기법만 허용
   "usage_quantity": 4560.0,  // 정수도 .0 포함 권장
-  "listed_price": 0.0,       // 매우 작은 값은 0.0
+  "list_price": 0.0,       // 매우 작은 값은 0.0
   "conversion_rate": 1500.0  // 큰 값도 소수점 표기법
 }
 ```
@@ -423,8 +439,8 @@ def _ensure_billed_date(self, record: dict) -> dict:
 def _ensure_data_field(self, record: dict) -> dict:
     """data 필드 존재 및 타입 보장"""
     if "data" not in record or not isinstance(record["data"], dict):
-        listed_price = self._get_listed_price_from_record(record)
-        record["data"] = self._create_spaceone_billing_data(record, listed_price)
+        list_price = self._get_list_price_from_record(record)
+        record["data"] = self._create_spaceone_billing_data(record, list_price)
     
     # data 필드 내 숫자들도 과학적 표기법 제거
     record["data"] = ensure_no_scientific_notation({"results": [record["data"]]})["results"][0]

@@ -6,6 +6,56 @@
 
 **문제 상황**: 데이터는 존재하지만 UI에서 보이지 않음
 **근본 원인**: UI 필터링 설정 + 최상위 cost 필드 누락
+**최신 업데이트**: 2025년 9월 22일 Usage 데이터 타입 지원 완료
+
+---
+
+## 🎉 **NEW**: Usage 데이터 타입 지원 (v2.1)
+
+### **SpaceONE UI Data Type 선택 가이드**
+
+SpaceONE Cost Analysis는 이제 **두 가지 데이터 타입**을 완전 지원합니다:
+
+#### **🔸 Cost 데이터 타입 (비용 기반 분석)**
+- **설정 방법**: Data Type → "Cost" 선택
+- **표시 조건**: `cost > 0`인 데이터만 표시
+- **용도**: 비용 최적화, 예산 관리, ROI 분석
+- **예시 데이터**: $2.61, $5.59, $8.23 등
+
+#### **🔹 Usage 데이터 타입 (사용량 기반 분석)** ⭐ **NEW**
+- **설정 방법**: Data Type → "Usage" 선택  
+- **표시 조건**: `usage_quantity > 0`인 데이터만 표시
+- **용도**: 리소스 사용량 최적화, 효율성 분석
+- **예시 데이터**:
+  - Networking: `4,812 seconds`, `10,800 seconds`
+  - Compute Engine: `6.889e+12 byte-seconds`, `3.152e+14 byte-seconds`
+  - Storage: `81GB PD 스토리지 = 315조 byte-seconds`
+
+#### **🎯 사용 시나리오별 권장사항**
+
+| **분석 목적** | **권장 Data Type** | **이유** |
+|---------------|-------------------|----------|
+| 비용 절감 방안 | **Cost** | 실제 지출 금액 기준 분석 |
+| 리소스 효율성 | **Usage** | 실제 사용량 기준 최적화 |
+| 예산 계획 | **Cost** | 비용 예측 및 관리 |
+| 성능 최적화 | **Usage** | 리소스 활용도 분석 |
+
+### **사용량 데이터 해석 가이드**
+
+#### **Networking 서비스**
+```
+usage_quantity: 4,812
+usage_unit: seconds
+→ 해석: Cloud NAT Gateway가 4,812초(약 1.34시간) 동안 활성화됨
+```
+
+#### **Compute Engine 스토리지**
+```
+usage_quantity: 3.152505995264e+14
+usage_unit: byte-seconds  
+→ 해석: 81GB Persistent Disk를 1시간 동안 사용
+→ 계산: 315조 byte-seconds ÷ 3600초 = 87.6GB 평균 용량
+```
 
 ---
 

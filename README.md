@@ -4,6 +4,18 @@ SpaceONE plugin for collecting Google Cloud Billing data with support for multip
 
 ## Features
 
+### SpaceONE Usage Data Type Support (v2.1) ⭐ **NEW**
+- ✅ **Complete Usage Data Type Support**: SpaceONE UI now fully supports Usage-based analysis
+- ✅ **GCP Usage Amount Mapping**: Accurate extraction of usage quantities from GCP billing data
+  - Networking services: seconds (e.g., 4,812 seconds for Cloud NAT Gateway)
+  - Compute Engine: byte-seconds (e.g., 3.15e+14 byte-seconds for 81GB PD storage)
+  - Storage services: various units with proper scaling
+- ✅ **Dual Extraction System**: Robust fallback system prevents data loss
+  - Primary: Enhanced FieldMapper with 4-stage fallback
+  - Secondary: Emergency extraction in main.py from additional_info
+- ✅ **Large-Scale Usage Support**: Handles massive usage amounts (315+ trillion byte-seconds)
+- ✅ **Real Usage Analysis**: Enable resource optimization based on actual usage patterns
+
 ### Data Sources (v2.0) ⭐ **UPDATED**
 - ✅ **BigQuery**: Real-time querying and analysis (production ready)
   - Standard Billing Export (service/SKU level cost data)
@@ -45,10 +57,10 @@ SpaceONE plugin for collecting Google Cloud Billing data with support for multip
 📖 **Complete documentation is available in Korean**: [`docs/ko/README.md`](./docs/ko/README.md)
 
 ### Quick Links
-- **[📚 문서_관리_가이드](./docs/ko/문서_관리_가이드.md)** - Comprehensive documentation system
+- **[📚 문서 표준 가이드](./docs/ko/development/문서_표준_가이드.md)** - Documentation standards and management ⭐ **UPDATED**
 - **[🔧 BigQuery_설정_가이드](./docs/ko/user-guide/BigQuery_설정_가이드.md)** - Complete BigQuery billing data setup
 - **[🚀 SpaceONE_호환성_가이드](./docs/ko/development/SpaceONE_호환성_가이드.md)** - Platform compatibility guide
-- **[🎯 Credits Detail API 가이드](./CREDITS_DETAIL_API_GUIDE.md)** - Credits analysis with detailed breakdown ⭐ **NEW**
+- **[🧪 통합 테스트 가이드](./docs/ko/development/통합_테스트_가이드.md)** - Comprehensive testing guide including Credits Detail ⭐ **UPDATED**
 - **[통합_가이드](./docs/ko/user-guide/통합_가이드.md)** - Plugin configuration and usage
 - **[데이터_분석_가이드](./docs/ko/user-guide/데이터_분석_가이드.md)** - Understanding billing data structure
 - **[크레딧_및_할인_분석_가이드](./docs/ko/user-guide/크레딧_및_할인_분석_가이드.md)** - Advanced cost optimization analysis

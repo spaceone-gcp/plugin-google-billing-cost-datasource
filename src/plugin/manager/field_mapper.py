@@ -568,9 +568,9 @@ class FieldMapper:
 
         # SpaceONE 프레임워크 요구사항 준수
         # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
-        listed_price = self._get_listed_price_from_source(source_data)
+        list_price = self._get_list_price_from_source(source_data)
         mapped_data["data"] = self._create_spaceone_billing_data(
-            source_data, mapped_data, listed_price
+            source_data, mapped_data, list_price
         )
 
         # 일별 카운트 추적
@@ -584,21 +584,21 @@ class FieldMapper:
 
         return mapped_data
 
-    def _get_listed_price_from_source(self, source_data: dict):
-        """다양한 소스에서 listed_price(정가) 정보를 추출
+    def _get_list_price_from_source(self, source_data: dict):
+        """다양한 소스에서 list_price(정가) 정보를 추출
 
         Google Cloud Billing 데이터에서 정가 정보는 다음 순서로 확인:
-        1. cost_at_list (최상위 레벨)
-        2. price.list_price (중첩 구조)
+        1. cost_at_list (최상위 레벨) - 0이 아닌 값만
+        2. price.list_price (중첩 구조) - cost_at_list가 0일 때 중요한 대체 소스
         3. price.list_price_consumption_model (소비 모델 기준 정가)
         4. cost (정가 정보가 없는 경우 실제 비용 사용)
         """
-        # 1. 최상위 레벨의 cost_at_list 필드 확인
+        # 1. 최상위 레벨의 cost_at_list 필드 확인 (0이 아닌 값만)
         cost_at_list = source_data.get("cost_at_list")
         if cost_at_list is not None and cost_at_list != "" and cost_at_list != 0:
             return cost_at_list
 
-        # 2. price.list_price 중첩 구조 확인
+        # 2. price.list_price 중첩 구조 확인 (cost_at_list가 0일 때 중요한 대체 소스)
         price_info = source_data.get("price", {})
         if isinstance(price_info, dict):
             list_price = price_info.get("list_price")
@@ -641,15 +641,15 @@ class FieldMapper:
         return ""
 
     def _create_spaceone_billing_data(
-        self, source_data: dict, mapped_data: dict, listed_price
+        self, source_data: dict, mapped_data: dict, list_price
     ) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 listed_price 포함)"""
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 list_price 포함)"""
         # cost 값을 mapped_data에서 가져오기
         cost_value = mapped_data.get("cost", 0.0)
 
         data_structure = {
             "cost": self._convert_to_numeric(cost_value),
-            "listed_price": self._convert_to_numeric(listed_price),
+            "list_price": self._convert_to_numeric(list_price),
         }
 
         # SpaceONE 응답 형식 보장 - data 필드도 Decimal을 float로 변환

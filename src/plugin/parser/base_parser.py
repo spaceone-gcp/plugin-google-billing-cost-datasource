@@ -53,15 +53,15 @@ class BaseParser(ABC):
 
             # SpaceONE 프레임워크 요구사항 준수
             # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
-            listed_price = self._get_listed_price_from_record(record)
+            list_price = self._get_list_price_from_record(record)
             sanitized_record["data"] = self._create_spaceone_billing_data(
-                record, listed_price
+                record, list_price
             )
 
             validated_records.append(sanitized_record)
 
         # SpaceONE 프레임워크 요구사항 최종 확인
-        # data 필드에 listed_price와 cost 정보가 포함되었는지 최종 확인
+        # data 필드에 list_price와 cost 정보가 포함되었는지 최종 확인
         final_results = []
         for record in validated_records:
             # cost 필드 절대 보장
@@ -72,9 +72,9 @@ class BaseParser(ABC):
 
             # data 필드가 올바르게 설정되었는지 확인하고 보장
             if "data" not in record or not isinstance(record["data"], dict):
-                listed_price = self._get_listed_price_from_record(record)
+                list_price = self._get_list_price_from_record(record)
                 record["data"] = self._create_spaceone_billing_data(
-                    record, listed_price
+                    record, list_price
                 )
 
             # data 필드에도 cost가 있는지 확인
@@ -102,21 +102,21 @@ class BaseParser(ABC):
 
         return response
 
-    def _get_listed_price_from_record(self, record: dict):
-        """레코드에서 listed_price(정가) 정보를 추출
+    def _get_list_price_from_record(self, record: dict):
+        """레코드에서 list_price(정가) 정보를 추출
 
         Google Cloud Billing 데이터에서 정가 정보는 다음 순서로 확인:
-        1. cost_at_list (최상위 레벨)
-        2. price.list_price (중첩 구조)
+        1. cost_at_list (최상위 레벨) - 0이 아닌 값만
+        2. price.list_price (중첩 구조) - cost_at_list가 0일 때 중요한 대체 소스
         3. price.list_price_consumption_model (소비 모델 기준 정가)
         4. cost (정가 정보가 없는 경우 실제 비용 사용)
         """
-        # 1. 최상위 레벨의 cost_at_list 필드 확인
+        # 1. 최상위 레벨의 cost_at_list 필드 확인 (0이 아닌 값만)
         cost_at_list = record.get("cost_at_list")
         if cost_at_list is not None and cost_at_list != "" and cost_at_list != 0:
             return cost_at_list
 
-        # 2. price.list_price 중첩 구조 확인
+        # 2. price.list_price 중첩 구조 확인 (cost_at_list가 0일 때 중요한 대체 소스)
         price_info = record.get("price", {})
         if isinstance(price_info, dict):
             list_price = price_info.get("list_price")
@@ -153,11 +153,11 @@ class BaseParser(ABC):
         # 5. 모든 시도가 실패한 경우 빈 문자열 반환
         return ""
 
-    def _create_spaceone_billing_data(self, record: dict, listed_price) -> dict:
+    def _create_spaceone_billing_data(self, record: dict, list_price) -> dict:
         """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성"""
         # 기본 비용 정보 (숫자 타입으로 처리)
         data_structure = {
-            "listed_price": self._convert_to_numeric(listed_price),
+            "list_price": self._convert_to_numeric(list_price),
             "cost": self._convert_to_numeric(record.get("cost", 0)),
         }
 

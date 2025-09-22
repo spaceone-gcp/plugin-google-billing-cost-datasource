@@ -267,7 +267,7 @@ def test_scientific_notation_removal():
                 "usage_quantity": 0.000000123,  # 1.23e-7
                 "data": {
                     "cost": 0.000001,
-                    "listed_price": 0.000000456,  # 4.56e-7
+                    "list_price": 0.000000456,  # 4.56e-7
                     "currency_conversion_rate": 1354.59
                 }
             }

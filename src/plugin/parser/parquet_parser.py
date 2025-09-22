@@ -111,7 +111,7 @@ class ParquetParser(BaseParser):
                         # data 필드에 cost 정보 포함
                         mapped_record["data"] = {
                             "cost": str(mapped_record.get("cost", 0.0)),
-                            "listed_price": str(mapped_record.get("cost", 0.0))
+                            "list_price": str(mapped_record.get("cost", 0.0))
                         }
                     batch_records.append(mapped_record)
                     current_count += 1

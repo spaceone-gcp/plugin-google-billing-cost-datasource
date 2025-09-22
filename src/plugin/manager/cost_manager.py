@@ -434,8 +434,8 @@ class CostManager(BaseManager):
                             # 🔍 GCS 배치 응답 레코드 로깅 (모든 레코드)
                             _LOGGER.info(f"[GCS-Response] File {file_index} 배치 응답 레코드 수: {batch_size}")
                             for i, record in enumerate(batch_result["results"]):  # 모든 레코드 로깅
-                                _LOGGER.info(f"[GCS-Response] 레코드 {i+1}: {record}")
-                        
+                                # _LOGGER.info(f"[GCS-Response] 레코드 {i+1}: {record}")
+                                pass
                         yield batch_result
 
                     _LOGGER.info(
@@ -733,9 +733,9 @@ class CostManager(BaseManager):
                         _LOGGER.debug("[CostManager] cost field is None before BigQuery conversion, preserving None")
                     
                     # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
-                    listed_price = self._get_listed_price_from_record(record)
+                    list_price = self._get_list_price_from_record(record)
                     record["data"] = self._create_spaceone_billing_data(
-                        record, listed_price
+                        record, list_price
                     )
                     
                     # 모든 SpaceONE 필수 필드 보장 (변환 후)
@@ -766,31 +766,27 @@ class CostManager(BaseManager):
                         _LOGGER.warning(f"[CostManager] Set empty billed_date to None")
         return gcs_result
 
-    def _get_listed_price_from_record(self, record: dict):
-        """레코드에서 listed_price(정가) 정보를 추출
+    def _get_list_price_from_record(self, record: dict):
+        """레코드에서 list_price(정가) 정보를 추출
 
         Google Cloud Billing 데이터에서 정가 정보는 다음 순서로 확인:
-        1. cost_at_list (최상위 레벨)
-        2. price.list_price (중첩 구조)
+        1. cost_at_list (최상위 레벨) - 0이 아닌 값만
+        2. price.list_price (중첩 구조) - cost_at_list가 0일 때 대체
         3. price.list_price_consumption_model (소비 모델 기준 정가)
         4. cost (정가 정보가 없는 경우 실제 비용 사용)
         """
-        # 1. 최상위 레벨의 cost_at_list 필드 확인
+        # 1. 최상위 레벨의 cost_at_list 필드 확인 (0이 아닌 값만)
         cost_at_list = record.get("cost_at_list")
         if cost_at_list is not None and cost_at_list != "" and cost_at_list != 0:
             return cost_at_list
 
-        # 2. price.list_price 중첩 구조 확인
+        # 2. price.list_price 중첩 구조 확인 (cost_at_list가 0일 때 중요한 대체 소스)
         price_info = record.get("price", {})
         if isinstance(price_info, dict):
             list_price = price_info.get("list_price")
             if list_price is not None and list_price != "" and list_price != 0:
-                # 문자열인 경우 숫자로 변환 시도
-                try:
-                    # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
-                    return list_price  # 모든 값을 원본 그대로 보존
-                except (ValueError, TypeError):
-                    pass
+                # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
+                return list_price  # 모든 값을 원본 그대로 보존
 
             # 3. 소비 모델 기준 정가 확인
             list_price_consumption = price_info.get("list_price_consumption_model")
@@ -799,11 +795,8 @@ class CostManager(BaseManager):
                 and list_price_consumption != ""
                 and list_price_consumption != 0
             ):
-                try:
-                    # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
-                    return list_price_consumption  # 모든 값을 원본 그대로 보존
-                except (ValueError, TypeError):
-                    pass
+                # 🚨 ULTRA PURE DATA: 모든 값을 원본 그대로 보존
+                return list_price_consumption  # 모든 값을 원본 그대로 보존
 
         # 4. 정가 정보가 없는 경우 실제 비용 사용 (fallback)
         cost_value = record.get("cost")
@@ -813,14 +806,14 @@ class CostManager(BaseManager):
         # 5. 모든 시도가 실패한 경우 빈 문자열 반환
         return ""
 
-    def _create_spaceone_billing_data(self, record: dict, listed_price) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 listed_price 포함)"""
+    def _create_spaceone_billing_data(self, record: dict, list_price) -> dict:
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 list_price 포함)"""
         # cost 값을 record에서 가져오기
         cost_value = record.get("cost", None)  # 🚨 ULTRA PURE: 기본값 None
 
         data_structure = {
             "cost": self._convert_to_numeric(cost_value),
-            "listed_price": self._convert_to_numeric(listed_price),
+            "list_price": self._convert_to_numeric(list_price),
         }
 
         return data_structure
@@ -905,9 +898,9 @@ class CostManager(BaseManager):
         return row_dict
 
     def _create_spaceone_billing_data_from_bigquery(
-        self, row_dict: dict, listed_price, cost_value=None
+        self, row_dict: dict, list_price, cost_value=None
     ) -> dict:
-        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 listed_price 포함)"""
+        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 list_price 포함)"""
         # cost_value가 전달되면 사용, 아니면 row_dict에서 가져옴
         actual_cost = cost_value if cost_value is not None else row_dict.get("cost", None)  # 🚨 ULTRA PURE: 기본값 None
 
@@ -917,15 +910,15 @@ class CostManager(BaseManager):
             _LOGGER.debug("[CostManager] Actual cost is None/null, preserving as None")
             final_actual_cost = None
 
-        final_listed_price = self._convert_to_numeric(listed_price)
-        if final_listed_price is None or str(final_listed_price).lower() == "null":
-            _LOGGER.debug("[CostManager] Listed price is None/null, preserving as None")
-            final_listed_price = None
+        final_list_price = self._convert_to_numeric(list_price)
+        if final_list_price is None or str(final_list_price).lower() == "null":
+            _LOGGER.debug("[CostManager] List price is None/null, preserving as None")
+            final_list_price = None
 
-        # data 필드에 cost와 listed_price 모두 포함
+        # data 필드에 cost와 list_price 모두 포함
         data_structure = {
             "cost": final_actual_cost,
-            "listed_price": final_listed_price,
+            "list_price": final_list_price,
         }
 
         return self._ensure_spaceone_response_types(data_structure)
@@ -1228,7 +1221,7 @@ class CostManager(BaseManager):
                 },
                 "data": {
                     "cost": str(cost_value),
-                    "listed_price": str(getattr(row, "cost_at_list", cost_value))  # 🚨 PURE DATA: 원본 데이터 보존
+                    "list_price": str(getattr(row, "cost_at_list", cost_value))  # 🚨 PURE DATA: 원본 데이터 보존
                 },
                 "billed_date": self._extract_billed_date(row)
             }
@@ -1308,7 +1301,7 @@ class CostManager(BaseManager):
                     "Project Name": "",
                     "Resource Tags": {}
                 },
-                "data": {"cost": None, "listed_price": None},  # 🚨 ULTRA PURE: 에러 시에도 None
+                "data": {"cost": None, "list_price": None},  # 🚨 ULTRA PURE: 에러 시에도 None
                 "billed_date": None  # 에러 시에도 현재 날짜 사용하지 않음
             }
             return {"results": [error_record]}
