@@ -920,49 +920,76 @@ class FieldMapper:
         """
         # 🎯 1단계: GCP additional_info에서 Usage Amount 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
+        # _LOGGER.debug(f"[FieldMapper] DEBUG: additional_info type: {type(additional_info)}, keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
+        
         if isinstance(additional_info, dict):
             # GCP 빌링 데이터의 Usage Amount 필드 확인
             usage_amount = additional_info.get("Usage Amount")
+            # _LOGGER.debug(f"[FieldMapper] DEBUG: Usage Amount value: {usage_amount}")
             if usage_amount is not None and usage_amount != "":
                 try:
                     usage_value = float(usage_amount)
-                    _LOGGER.debug(f"[FieldMapper] Found Usage Amount in additional_info: {usage_value}")
+                    # _LOGGER.debug(f"[FieldMapper] Found Usage Amount in additional_info: {usage_value}")
                     return usage_value
                 except (ValueError, TypeError):
-                    _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount value: {usage_amount}")
+                    # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount value: {usage_amount}")
+                    pass
             
             # Usage Amount In Pricing Units도 확인
             usage_pricing_amount = additional_info.get("Usage Amount In Pricing Units")
             if usage_pricing_amount is not None and usage_pricing_amount != "":
                 try:
                     usage_value = float(usage_pricing_amount)
-                    _LOGGER.debug(f"[FieldMapper] Found Usage Amount In Pricing Units: {usage_value}")
+                    # _LOGGER.debug(f"[FieldMapper] Found Usage Amount In Pricing Units: {usage_value}")
+                    pass
                     return usage_value
                 except (ValueError, TypeError):
-                    _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
-
+                    # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
+                    pass
         # 🎯 2단계: 기존 usage_quantity 필드 확인 (fallback)
         usage_quantity = source_data.get("usage_quantity")
         if usage_quantity is not None and usage_quantity != "" and str(usage_quantity).lower() != "nan":
             try:
                 usage_value = float(usage_quantity)
-                _LOGGER.debug(f"[FieldMapper] Found usage_quantity field: {usage_value}")
+                # _LOGGER.debug(f"[FieldMapper] Found usage_quantity field: {usage_value}")
                 return usage_value
             except (ValueError, TypeError):
-                _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}")
-
+                # _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}")
+                pass
         # 🎯 3단계: usage_amount 필드 확인 (추가 fallback)
         usage_amount_field = source_data.get("usage_amount")
         if usage_amount_field is not None and usage_amount_field != "":
             try:
                 usage_value = float(usage_amount_field)
-                _LOGGER.debug(f"[FieldMapper] Found usage_amount field: {usage_value}")
+                # _LOGGER.debug(f"[FieldMapper] Found usage_amount field: {usage_value}")
+                pass
                 return usage_value
             except (ValueError, TypeError):
-                _LOGGER.warning(f"[FieldMapper] Invalid usage_amount value: {usage_amount_field}")
-
-        # 🎯 4단계: 모든 방법이 실패한 경우 0 반환
-        _LOGGER.debug("[FieldMapper] No valid usage quantity found, returning 0")
+                # _LOGGER.warning(f"[FieldMapper] Invalid usage_amount value: {usage_amount_field}")
+                pass
+        # 🎯 4단계: 최후의 수단 - 전체 source_data에서 Usage Amount 검색
+        # _LOGGER.debug("[FieldMapper] DEBUG: Searching entire source_data for Usage Amount patterns")
+        
+        # 전체 데이터를 문자열로 변환해서 Usage Amount 찾기
+        data_str = str(source_data)
+        if "Usage Amount" in data_str:
+            # _LOGGER.warning(f"[FieldMapper] FOUND Usage Amount in source_data but couldn't access it properly!")
+            # _LOGGER.warning(f"[FieldMapper] source_data keys: {list(source_data.keys()) if isinstance(source_data, dict) else 'not dict'}")
+            pass
+            # 직접 검색 시도
+            try:
+                import re
+                usage_pattern = r'"Usage Amount":\s*"([^"]+)"'
+                match = re.search(usage_pattern, data_str)
+                if match:
+                    usage_value = float(match.group(1))
+                    # _LOGGER.warning(f"[FieldMapper] EMERGENCY: Found Usage Amount via regex: {usage_value}")
+                    return usage_value
+            except Exception as e:
+                # _LOGGER.error(f"[FieldMapper] Emergency search failed: {e}")
+                pass
+        # 🎯 5단계: 모든 방법이 실패한 경우 0 반환
+        # _LOGGER.debug("[FieldMapper] No valid usage quantity found, returning 0")
         return 0
 
     def _safe_get_usage_unit(self, source_data: dict):
@@ -979,9 +1006,12 @@ class FieldMapper:
         """
         # 🎯 1단계: GCP additional_info에서 Usage Unit 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
+        # _LOGGER.debug(f"[FieldMapper] DEBUG: usage_unit additional_info keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
+        
         if isinstance(additional_info, dict):
             # GCP 빌링 데이터의 Usage Unit 필드 확인
             usage_unit = additional_info.get("Usage Unit")
+            # _LOGGER.debug(f"[FieldMapper] DEBUG: Usage Unit value: {usage_unit}")
             if usage_unit is not None and usage_unit != "":
                 _LOGGER.debug(f"[FieldMapper] Found Usage Unit in additional_info: {usage_unit}")
                 return str(usage_unit)
@@ -989,23 +1019,23 @@ class FieldMapper:
             # Usage Pricing Unit도 확인
             usage_pricing_unit = additional_info.get("Usage Pricing Unit")
             if usage_pricing_unit is not None and usage_pricing_unit != "":
-                _LOGGER.debug(f"[FieldMapper] Found Usage Pricing Unit: {usage_pricing_unit}")
+                # _LOGGER.debug(f"[FieldMapper] Found Usage Pricing Unit: {usage_pricing_unit}")
                 return str(usage_pricing_unit)
 
         # 🎯 2단계: 기존 usage_unit 필드 확인 (fallback)
         usage_unit_field = source_data.get("usage_unit")
         if usage_unit_field is not None and usage_unit_field != "":
-            _LOGGER.debug(f"[FieldMapper] Found usage_unit field: {usage_unit_field}")
+            # _LOGGER.debug(f"[FieldMapper] Found usage_unit field: {usage_unit_field}")
             return str(usage_unit_field)
 
         # 🎯 3단계: pricing_unit 필드 확인 (추가 fallback)
         pricing_unit = source_data.get("pricing_unit")
         if pricing_unit is not None and pricing_unit != "":
-            _LOGGER.debug(f"[FieldMapper] Found pricing_unit field: {pricing_unit}")
+            # _LOGGER.debug(f"[FieldMapper] Found pricing_unit field: {pricing_unit}")
             return str(pricing_unit)
 
         # 🎯 4단계: 모든 방법이 실패한 경우 빈 문자열 반환
-        _LOGGER.debug("[FieldMapper] No valid usage unit found, returning empty string")
+        # _LOGGER.debug("[FieldMapper] No valid usage unit found, returning empty string")
         return ""
 
     def _get_cost_by_option(self, source_data: dict):

@@ -664,12 +664,50 @@ def _ensure_spaceone_record_format(record):
             else:
                 _LOGGER.info(f"[_ensure_spaceone_record_format] Currency field missing, defaulting to USD")
         
+        # 🚨 EMERGENCY FIX: usage_quantity를 additional_info에서 직접 추출
+        usage_quantity_value = record.get("usage_quantity", 0.0)
+        usage_unit_value = record.get("usage_unit", "")
+        
+        # FieldMapper에서 전달되지 않은 경우 additional_info에서 직접 추출
+        if usage_quantity_value == 0.0:
+            additional_info = record.get("additional_info", {})
+            if isinstance(additional_info, dict):
+                # GCP Usage Amount 추출 시도
+                usage_amount = additional_info.get("Usage Amount")
+                if usage_amount:
+                    try:
+                        usage_quantity_value = float(usage_amount)
+                        # _LOGGER.warning(f"[EMERGENCY] Extracted usage_quantity from additional_info: {usage_quantity_value}")
+                    except (ValueError, TypeError):
+                        # _LOGGER.error(f"[EMERGENCY] Invalid Usage Amount: {usage_amount}")
+                        pass
+                
+                # Usage Amount In Pricing Units도 시도
+                if usage_quantity_value == 0.0:
+                    usage_pricing_amount = additional_info.get("Usage Amount In Pricing Units")
+                    if usage_pricing_amount:
+                        try:
+                            usage_quantity_value = float(usage_pricing_amount)
+                            # _LOGGER.warning(f"[EMERGENCY] Extracted usage_quantity from Usage Amount In Pricing Units: {usage_quantity_value}")
+                            pass
+                        except (ValueError, TypeError):
+                            # _LOGGER.error(f"[EMERGENCY] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
+                            pass
+        # usage_unit도 마찬가지로 처리
+        if usage_unit_value == "":
+            additional_info = record.get("additional_info", {})
+            if isinstance(additional_info, dict):
+                usage_unit = additional_info.get("Usage Unit")
+                if usage_unit:
+                    usage_unit_value = str(usage_unit)
+                    # _LOGGER.warning(f"[EMERGENCY] Extracted usage_unit from additional_info: {usage_unit_value}")
+                    pass
         # SpaceONE 필수 필드 정의 (필수 필드들을 정확한 순서로 배치)
         spaceone_record = {
             "cost": _safe_numeric_convert(cost_value),  # 🚨 최상위 필수 필드 #1
             "currency": _safe_string_convert(currency_value),  # 🚨 최상위 필수 필드 #2
-            "usage_quantity": _safe_numeric_convert(record.get("usage_quantity", 0.0)),
-            "usage_unit": _safe_string_convert(record.get("usage_unit", "")),
+            "usage_quantity": _safe_numeric_convert(usage_quantity_value),  # 🚨 EMERGENCY FIX 적용
+            "usage_unit": _safe_string_convert(usage_unit_value),  # 🚨 EMERGENCY FIX 적용
             "provider": _safe_string_convert(record.get("provider", "google_cloud")),
             "region_code": _safe_string_convert(record.get("region_code", "global")),
             "product": _safe_string_convert(record.get("product", "Unknown")),
