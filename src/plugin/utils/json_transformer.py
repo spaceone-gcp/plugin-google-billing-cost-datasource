@@ -57,9 +57,11 @@ class JsonTransformer:
     def stringify(self, value: Any) -> str:
         """값을 JSON 문자열로 변환 (소수점 표기법 전용)"""
         try:
-            # JSON 직렬화 전 cost 필드 최종 보장
+            # JSON 직렬화 전 cost 필드 최종 보장 및 data.cost 제거
             if isinstance(value, dict) and "results" in value:
                 value = self._ensure_cost_fields_in_response(value)
+                # 🆕 JSON 직렬화 직전에 data.cost 제거
+                value = self._remove_data_cost_from_response(value)
 
             # 소수점 표기법만 사용
             from .decimal_json_encoder import dumps_decimal
@@ -93,6 +95,32 @@ class JsonTransformer:
         if fixed_count > 0:
             print(
                 f"[JsonTransformer] ULTIMATE: Fixed {fixed_count} records with missing cost fields"
+            )
+
+        return response
+
+    def _remove_data_cost_from_response(self, response: dict) -> dict:
+        """최종 응답에서 data.cost 필드만 제거 (내부 연산은 유지)
+
+        Args:
+            response: 응답 딕셔너리 {"results": [record1, record2, ...]}
+
+        Returns:
+            data.cost가 제거된 응답 딕셔너리
+        """
+        if not isinstance(response.get("results"), list):
+            return response
+
+        removed_count = 0
+        for record in response["results"]:
+            if isinstance(record, dict) and "data" in record:
+                if isinstance(record["data"], dict) and "cost" in record["data"]:
+                    del record["data"]["cost"]
+                    removed_count += 1
+
+        if removed_count > 0:
+            _LOGGER.debug(
+                f"[JsonTransformer] Removed data.cost from {removed_count} records before JSON serialization"
             )
 
         return response

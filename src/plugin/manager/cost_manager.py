@@ -328,6 +328,11 @@ class CostManager(BaseManager):
                     if len(batch_records) >= batch_size:
                         batch_result = {"results": batch_records}
 
+                        # 🆕 응답 직전에 data.cost 제거
+                        batch_result = self._remove_data_cost_from_response(
+                            batch_result
+                        )
+
                         # 🔍 BigQuery 배치 응답 레코드 로깅 (모든 레코드)
                         if batch_records:
                             # _LOGGER.info(f"[BigQuery-Response] 배치 응답 레코드 수: {len(batch_records)}")
@@ -342,6 +347,10 @@ class CostManager(BaseManager):
             # 남은 레코드 처리
             if batch_records:
                 batch_result = {"results": batch_records}
+
+                # 🆕 응답 직전에 data.cost 제거
+                batch_result = self._remove_data_cost_from_response(batch_result)
+
                 _LOGGER.info(
                     f"[BigQuery] Yielding final batch with {len(batch_records)} records"
                 )
@@ -463,6 +472,11 @@ class CostManager(BaseManager):
                                 f"[CostManager] File {file_index}/{total_files} ({file_name}): "
                                 f"Processed batch of {batch_size:,} records "
                                 f"(File total: {file_processed_count:,})"
+                            )
+
+                            # 🆕 응답 직전에 data.cost 제거
+                            batch_result = self._remove_data_cost_from_response(
+                                batch_result
                             )
 
                             # 🔍 GCS 배치 응답 레코드 로깅 (모든 레코드)
@@ -2878,3 +2892,29 @@ class CostManager(BaseManager):
 
         # 🎯 옵션 4: 이름 우선, ID 폴백
         # return project_name if project_name else project_id
+
+    def _remove_data_cost_from_response(self, response: dict) -> dict:
+        """최종 응답에서 data.cost 필드만 제거 (내부 연산은 유지)
+
+        Args:
+            response: 응답 딕셔너리 {"results": [record1, record2, ...]}
+
+        Returns:
+            data.cost가 제거된 응답 딕셔너리
+        """
+        if not isinstance(response.get("results"), list):
+            return response
+
+        removed_count = 0
+        for record in response["results"]:
+            if isinstance(record, dict) and "data" in record:
+                if isinstance(record["data"], dict) and "cost" in record["data"]:
+                    del record["data"]["cost"]
+                    removed_count += 1
+
+        if removed_count > 0:
+            # _LOGGER.debug(
+            #     f"[CostManager] Removed data.cost from {removed_count} records in response"
+            # )
+            pass
+        return response

@@ -1,13 +1,12 @@
 import logging
 import os
 from collections.abc import Generator
-from typing import Set
 from threading import Lock
+from typing import Set
 
 from spaceone.cost_analysis.plugin.data_source.lib.server import (
     DataSourcePluginServer,
 )
-
 
 from plugin.manager.cost_manager import CostManager
 from plugin.manager.data_source_manager import DataSourceManager
@@ -335,8 +334,8 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
             # 🎯 Credits Detail 모드: 원본 데이터 조회
             _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드로 실행")
 
-            from plugin.manager.credits_detail_manager import CreditsDetailManager
             from plugin.connector.bigquery_connector import BigqueryConnector
+            from plugin.manager.credits_detail_manager import CreditsDetailManager
 
             # Credits Detail Manager 초기화
             credits_mgr = CreditsDetailManager()
@@ -499,6 +498,10 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                             # 청크 크기에 도달하면 yield
                             if len(chunk_buffer) >= MAX_CHUNK_SIZE:
                                 chunk_response = {"results": chunk_buffer}
+                                # 🆕 응답 직전에 data.cost 제거
+                                chunk_response = _remove_data_cost_from_response(
+                                    chunk_response
+                                )
                                 _LOGGER.info(
                                     f"[cost_get_data] Yielding chunk: {len(chunk_buffer)} records"
                                 )
@@ -514,6 +517,8 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         # 🚨 ULTIMATE: 남은 레코드가 있으면 마지막 청크로 전송
         if chunk_buffer:
             final_response = {"results": chunk_buffer}
+            # 🆕 최종 응답 직전에 data.cost 제거
+            final_response = _remove_data_cost_from_response(final_response)
             _LOGGER.info(
                 f"[cost_get_data] Yielding final chunk: {len(chunk_buffer)} records"
             )
@@ -593,6 +598,33 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
     except Exception as e:
         _LOGGER.error(f"[cost_get_data] API endpoint failed: {e}")
         raise
+
+
+def _remove_data_cost_from_response(response: dict) -> dict:
+    """최종 응답에서 data.cost 필드만 제거 (내부 연산은 유지)
+
+    Args:
+        response: 응답 딕셔너리 {"results": [record1, record2, ...]}
+
+    Returns:
+        data.cost가 제거된 응답 딕셔너리
+    """
+    if not isinstance(response.get("results"), list):
+        return response
+
+    removed_count = 0
+    for record in response["results"]:
+        if isinstance(record, dict) and "data" in record:
+            if isinstance(record["data"], dict) and "cost" in record["data"]:
+                del record["data"]["cost"]
+                removed_count += 1
+
+    if removed_count > 0:
+        _LOGGER.debug(
+            f"[main] Removed data.cost from {removed_count} records in final response"
+        )
+
+    return response
 
 
 def _convert_to_spaceone_format(batch_result, batch_count):

@@ -100,6 +100,8 @@ class BaseParser(ABC):
                 record["cost"] = cost_value  # 첫 번째 위치에 cost 필드 배치
                 record.update(record_copy)
 
+        # 🆕 최종 응답에서 data.cost 제거 (내부 연산은 유지됨)
+        response = self._remove_data_cost_from_response(response)
         return response
 
     def _get_list_price_from_record(self, record: dict):
@@ -314,6 +316,32 @@ class BaseParser(ABC):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Processed {processed_count:,} records{file_info}"
             )
+
+    def _remove_data_cost_from_response(self, response: dict) -> dict:
+        """최종 응답에서 data.cost 필드만 제거 (내부 연산은 유지)
+
+        Args:
+            response: 응답 딕셔너리 {"results": [record1, record2, ...]}
+
+        Returns:
+            data.cost가 제거된 응답 딕셔너리
+        """
+        if not isinstance(response.get("results"), list):
+            return response
+
+        removed_count = 0
+        for record in response["results"]:
+            if isinstance(record, dict) and "data" in record:
+                if isinstance(record["data"], dict) and "cost" in record["data"]:
+                    del record["data"]["cost"]
+                    removed_count += 1
+
+        if removed_count > 0:
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}] Removed data.cost from {removed_count} records in response"
+            )
+
+        return response
 
     def _log_batch_processing(
         self, batch_size: int, total_processed: int, file_name: str = ""
