@@ -3,25 +3,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
-# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
-try:
-    from spaceone.core.error import ERROR_INVALID_ARGUMENT
-except ImportError:
-    # Mock for local development
-    class MockError:
-        def __call__(self, *args, **kwargs):
-            return Exception("Mock SpaceONE Error")
-
-    ERROR_INVALID_ARGUMENT = MockError()
+from spaceone.core.error import ERROR_INVALID_ARGUMENT
 
 _LOGGER = logging.getLogger("spaceone")
 
 
 class FieldMapper:
     """SpaceONE 비용 데이터 형식으로 필드 매핑을 수행하는 클래스
-    
+
     🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
-    
+
     모든 매핑 결과는 SpaceONE 표준 응답 구조를 준수해야 합니다:
     - cost: 최상위 필수 필드, 절대 누락 금지
     - usage_quantity, provider, region_code, product, usage_type, resource: 필수
@@ -106,14 +97,22 @@ class FieldMapper:
                 or cost_value == ""
                 or str(cost_value).lower() == "null"
             ):
-                _LOGGER.debug(f"[FieldMapper] Cost value is None/empty/null, preserving as None")
+                _LOGGER.debug(
+                    "[FieldMapper] Cost value is None/empty/null, preserving as None"
+                )
                 cost_value = None
             # NaN이나 inf 체크 (원본 보존)
             try:
-                if isinstance(cost_value, float) and (cost_value != cost_value):  # NaN 체크
-                    _LOGGER.warning(f"[FieldMapper] Cost value is NaN, preserving as NaN")
-            except:
-                _LOGGER.warning(f"[FieldMapper] Cost value check failed, preserving original: {cost_value}")
+                if isinstance(cost_value, float) and (
+                    cost_value != cost_value
+                ):  # NaN 체크
+                    _LOGGER.warning(
+                        "[FieldMapper] Cost value is NaN, preserving as NaN"
+                    )
+            except Exception as e:
+                _LOGGER.warning(
+                    f"[FieldMapper] Cost value check failed, preserving original: {cost_value}, error: {e}"
+                )
             usage_quantity_value = self._safe_get_usage_quantity(source_data)
             usage_unit_value = self._safe_get_usage_unit(source_data)
             billed_date_value = self._process_billed_date(source_data)
@@ -178,11 +177,17 @@ class FieldMapper:
 
             # 🚨 CRITICAL: 최종 결과 검증 및 디버깅
             if "cost" not in result:
-                _LOGGER.warning(f"[FieldMapper] Cost field missing from result! Keys: {list(result.keys())}")
+                _LOGGER.warning(
+                    f"[FieldMapper] Cost field missing from result! Keys: {list(result.keys())}"
+                )
                 result["cost"] = None  # None으로 보존
             else:
                 # _LOGGER.debug(f"[FieldMapper] map_record result has cost: {result['cost']}")
-                pass           
+                pass
+
+            # 일별 카운트 추적 (map_record에서도 호출)
+            self._track_daily_count(result.get("billed_date", "unknown"))
+
             return result
 
         except Exception as e:
@@ -222,7 +227,7 @@ class FieldMapper:
 
     def _ensure_required_fields(self, data: dict) -> dict:
         """SpaceONE 필수 필드가 누락되지 않도록 보장
-        
+
         🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
 
         Args:
@@ -234,19 +239,19 @@ class FieldMapper:
         # SpaceONE 빌링 응답 표준 구조의 모든 필수 필드들
         # 문서 가이드라인에 따른 완전한 필수 필드 목록
         required_fields = {
-            "cost": 0.0,                    # 🚨 최상위 필수 필드, 절대 누락 금지
-            "usage_quantity": 0.0,          # 필수: 사용량 (기본값 0.0)
-            "usage_unit": "",               # 선택적: 사용량 단위
-            "provider": self.provider,      # 필수: 프로바이더
-            "region_code": "global",        # 필수: 리전 코드 (빈 문자열 허용, 기본값 "global")
-            "product": "",                  # 필수: 제품명
-            "usage_type": "",               # 필수: 사용 유형
-            "resource": "",                 # 필수: 리소스 식별자
-            "currency": "USD",              # 🆕 필수: 통화 (최상위 필드로 승격)
-            "billed_date": None,             # 필수: 청구 날짜 (YYYY-MM-DD 형식, 데이터 없으면 None)
-            "tags": {},                     # 필수: 태그 (빈 딕셔너리 허용)
-            "additional_info": {},          # 필수: 추가 정보 (빈 딕셔너리 허용)
-            "data": {},                     # 필수: SpaceONE 프레임워크 요구사항
+            "cost": 0.0,  # 🚨 최상위 필수 필드, 절대 누락 금지
+            "usage_quantity": 0.0,  # 필수: 사용량 (기본값 0.0)
+            "usage_unit": "",  # 선택적: 사용량 단위
+            "provider": self.provider,  # 필수: 프로바이더
+            "region_code": "global",  # 필수: 리전 코드 (빈 문자열 허용, 기본값 "global")
+            "product": "",  # 필수: 제품명
+            "usage_type": "",  # 필수: 사용 유형
+            "resource": "",  # 필수: 리소스 식별자
+            "currency": "USD",  # 🆕 필수: 통화 (최상위 필드로 승격)
+            "billed_date": None,  # 필수: 청구 날짜 (YYYY-MM-DD 형식, 데이터 없으면 None)
+            "tags": {},  # 필수: 태그 (빈 딕셔너리 허용)
+            "additional_info": {},  # 필수: 추가 정보 (빈 딕셔너리 허용)
+            "data": {},  # 필수: SpaceONE 프레임워크 요구사항
         }
 
         # 누락된 필드를 기본값으로 채움
@@ -329,32 +334,47 @@ class FieldMapper:
         if billed_date_value and billed_date_value != "":
             # 유효한 날짜 값이 있으면 형식 변환
             return self._format_date(billed_date_value)
-        
+
         # 2순위: usage_start_time 확인 (실제 사용 시작 날짜)
-        usage_start_time = source_data.get("usage_start_time") or source_data.get("Usage Start Time")
+        usage_start_time = source_data.get("usage_start_time") or source_data.get(
+            "Usage Start Time"
+        )
         if usage_start_time:
             formatted_date = self._format_date(usage_start_time)
             if formatted_date:
-                _LOGGER.debug(f"[FieldMapper] Using usage_start_time for billed_date: {formatted_date}")
+                _LOGGER.debug(
+                    f"[FieldMapper] Using usage_start_time for billed_date: {formatted_date}"
+                )
                 return formatted_date
-        
+
         # 3순위: invoice_month를 날짜로 변환 (월말로 설정)
-        invoice_month = source_data.get("invoice_month") or source_data.get("Invoice Month")
-        if invoice_month and isinstance(invoice_month, str) and len(invoice_month) == 6:  # YYYYMM 형식
+        invoice_month = source_data.get("invoice_month") or source_data.get(
+            "Invoice Month"
+        )
+        if (
+            invoice_month and isinstance(invoice_month, str) and len(invoice_month) == 6
+        ):  # YYYYMM 형식
             try:
                 year = invoice_month[:4]
                 month = invoice_month[4:6]
                 # 해당 월의 마지막 날로 설정
                 import calendar
+
                 last_day = calendar.monthrange(int(year), int(month))[1]
                 formatted_date = f"{year}-{month}-{last_day:02d}"
-                _LOGGER.debug(f"[FieldMapper] Using invoice_month for billed_date: {formatted_date}")
+                _LOGGER.debug(
+                    f"[FieldMapper] Using invoice_month for billed_date: {formatted_date}"
+                )
                 return formatted_date
             except (ValueError, TypeError) as e:
-                _LOGGER.warning(f"[FieldMapper] Failed to parse invoice_month {invoice_month}: {e}")
-        
+                _LOGGER.warning(
+                    f"[FieldMapper] Failed to parse invoice_month {invoice_month}: {e}"
+                )
+
         # 모든 날짜 필드가 없으면 None 반환 (현재 날짜 사용하지 않음)
-        _LOGGER.warning("[FieldMapper] No valid date fields found for billed_date, returning None")
+        _LOGGER.warning(
+            "[FieldMapper] No valid date fields found for billed_date, returning None"
+        )
         return None
 
     def _get_nested_value(self, data: dict, path: str, default=""):
@@ -455,7 +475,6 @@ class FieldMapper:
             _LOGGER.error(f"[FieldMapper] Error in _merge_additional_info: {e}")
             return {}
 
-
     def _map_additional_info_with_title_case(self, source_data: dict) -> dict:
         """additional_info 매핑 시 Title Case 키 유지"""
         additional_info_config = self.compiled_mappings.get("additional_info")
@@ -539,7 +558,7 @@ class FieldMapper:
             # billed_date가 없으면 None으로 설정 (현재 날짜 사용하지 않음)
             mapped_data["billed_date"] = None
             _LOGGER.warning(
-                f"[FieldMapper] CRITICAL: billed_date is missing, set to None"
+                "[FieldMapper] CRITICAL: billed_date is missing, set to None"
             )
 
         # 디버깅: 최종 매핑 결과 확인 (첫 번째 레코드만)
@@ -791,9 +810,13 @@ class FieldMapper:
         # cost 필드 검증 (원본 값 보존)
         if "cost" not in sanitized_data:
             sanitized_data["cost"] = None
-            _LOGGER.warning("[FieldMapper] Cost field was removed during sanitization, set to None")
+            _LOGGER.warning(
+                "[FieldMapper] Cost field was removed during sanitization, set to None"
+            )
         elif sanitized_data["cost"] is None:
-            _LOGGER.debug("[FieldMapper] Cost field is None after sanitization, preserving None value")
+            _LOGGER.debug(
+                "[FieldMapper] Cost field is None after sanitization, preserving None value"
+            )
 
         return sanitized_data
 
@@ -861,13 +884,17 @@ class FieldMapper:
             if key == "cost":
                 # cost 필드 원본 값 보존
                 if sanitized_value is None:
-                    _LOGGER.debug("[FieldMapper] Cost field is None, preserving None value")
+                    _LOGGER.debug(
+                        "[FieldMapper] Cost field is None, preserving None value"
+                    )
                 # 숫자 변환 시도 (실패해도 원본 보존)
                 elif not isinstance(sanitized_value, (int, float)):
                     try:
                         sanitized_value = float(sanitized_value)
                     except (ValueError, TypeError):
-                        _LOGGER.warning(f"[FieldMapper] Cost value conversion failed, preserving original: {value}")
+                        _LOGGER.warning(
+                            f"[FieldMapper] Cost value conversion failed, preserving original: {value}"
+                        )
                 return sanitized_value
 
             # SpaceONE 프레임워크 요구사항 준수
@@ -908,7 +935,7 @@ class FieldMapper:
 
     def _safe_get_usage_quantity(self, source_data: dict):
         """usage_quantity 필드를 안전하게 추출하고 기본값 처리
-        
+
         GCP 빌링 데이터에서 Usage Amount 필드를 우선적으로 사용하고,
         fallback으로 기존 필드들을 확인합니다.
 
@@ -921,7 +948,7 @@ class FieldMapper:
         # 🎯 1단계: GCP additional_info에서 Usage Amount 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
         # _LOGGER.debug(f"[FieldMapper] DEBUG: additional_info type: {type(additional_info)}, keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
-        
+
         if isinstance(additional_info, dict):
             # GCP 빌링 데이터의 Usage Amount 필드 확인
             usage_amount = additional_info.get("Usage Amount")
@@ -934,7 +961,7 @@ class FieldMapper:
                 except (ValueError, TypeError):
                     # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount value: {usage_amount}")
                     pass
-            
+
             # Usage Amount In Pricing Units도 확인
             usage_pricing_amount = additional_info.get("Usage Amount In Pricing Units")
             if usage_pricing_amount is not None and usage_pricing_amount != "":
@@ -948,7 +975,11 @@ class FieldMapper:
                     pass
         # 🎯 2단계: 기존 usage_quantity 필드 확인 (fallback)
         usage_quantity = source_data.get("usage_quantity")
-        if usage_quantity is not None and usage_quantity != "" and str(usage_quantity).lower() != "nan":
+        if (
+            usage_quantity is not None
+            and usage_quantity != ""
+            and str(usage_quantity).lower() != "nan"
+        ):
             try:
                 usage_value = float(usage_quantity)
                 # _LOGGER.debug(f"[FieldMapper] Found usage_quantity field: {usage_value}")
@@ -969,7 +1000,7 @@ class FieldMapper:
                 pass
         # 🎯 4단계: 최후의 수단 - 전체 source_data에서 Usage Amount 검색
         # _LOGGER.debug("[FieldMapper] DEBUG: Searching entire source_data for Usage Amount patterns")
-        
+
         # 전체 데이터를 문자열로 변환해서 Usage Amount 찾기
         data_str = str(source_data)
         if "Usage Amount" in data_str:
@@ -979,13 +1010,14 @@ class FieldMapper:
             # 직접 검색 시도
             try:
                 import re
+
                 usage_pattern = r'"Usage Amount":\s*"([^"]+)"'
                 match = re.search(usage_pattern, data_str)
                 if match:
                     usage_value = float(match.group(1))
                     # _LOGGER.warning(f"[FieldMapper] EMERGENCY: Found Usage Amount via regex: {usage_value}")
                     return usage_value
-            except Exception as e:
+            except Exception:
                 # _LOGGER.error(f"[FieldMapper] Emergency search failed: {e}")
                 pass
         # 🎯 5단계: 모든 방법이 실패한 경우 0 반환
@@ -994,7 +1026,7 @@ class FieldMapper:
 
     def _safe_get_usage_unit(self, source_data: dict):
         """usage_unit 필드를 안전하게 추출하고 기본값 처리
-        
+
         GCP 빌링 데이터에서 Usage Unit 필드를 우선적으로 사용하고,
         fallback으로 기존 필드들을 확인합니다.
 
@@ -1007,15 +1039,17 @@ class FieldMapper:
         # 🎯 1단계: GCP additional_info에서 Usage Unit 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
         # _LOGGER.debug(f"[FieldMapper] DEBUG: usage_unit additional_info keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
-        
+
         if isinstance(additional_info, dict):
             # GCP 빌링 데이터의 Usage Unit 필드 확인
             usage_unit = additional_info.get("Usage Unit")
             # _LOGGER.debug(f"[FieldMapper] DEBUG: Usage Unit value: {usage_unit}")
             if usage_unit is not None and usage_unit != "":
-                _LOGGER.debug(f"[FieldMapper] Found Usage Unit in additional_info: {usage_unit}")
+                _LOGGER.debug(
+                    f"[FieldMapper] Found Usage Unit in additional_info: {usage_unit}"
+                )
                 return str(usage_unit)
-            
+
             # Usage Pricing Unit도 확인
             usage_pricing_unit = additional_info.get("Usage Pricing Unit")
             if usage_pricing_unit is not None and usage_pricing_unit != "":
@@ -1914,7 +1948,7 @@ class FieldMapper:
         # 빈 값 처리 (None 반환 - 현재 날짜 사용하지 않음)
         if self._is_empty_or_today(value):
             _LOGGER.debug(
-                f"[FieldMapper] DEBUG: _format_date received empty value, returning None"
+                "[FieldMapper] DEBUG: _format_date received empty value, returning None"
             )
             return None
 
@@ -1924,11 +1958,14 @@ class FieldMapper:
                 year = value[:4]
                 month = value[4:6]
                 import calendar
+
                 last_day = calendar.monthrange(int(year), int(month))[1]
                 result = f"{year}-{month}-{last_day:02d}"
-                _LOGGER.debug(f"[FieldMapper] Converted invoice_month {value} to {result}")
+                _LOGGER.debug(
+                    f"[FieldMapper] Converted invoice_month {value} to {result}"
+                )
                 return result
-            
+
             return self._parse_date_value(value)
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Date format failed: {value}, error: {e}")
@@ -2000,9 +2037,7 @@ class FieldMapper:
                 continue
 
         # 파싱 실패 시 None 반환 (현재 날짜 사용하지 않음)
-        _LOGGER.warning(
-            f"[FieldMapper] Failed to parse date: {value}, returning None"
-        )
+        _LOGGER.warning(f"[FieldMapper] Failed to parse date: {value}, returning None")
         return None
 
     def _get_default_mapping(self, provider: str) -> dict:

@@ -4,21 +4,10 @@ import google.oauth2.service_account
 import pandas_gbq
 from googleapiclient.discovery import build
 
-# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
-try:
-    from spaceone.core.connector import BaseConnector
-except ImportError:
-    # Mock for local development
-    class BaseConnector:
-        """Mock BaseConnector for local development"""
-
-        def __init__(self, *args, **kwargs):
-            pass
+from spaceone.core.connector import BaseConnector
 
 
 _LOGGER = logging.getLogger("spaceone")
-
-REQUIRED_SECRET_KEYS = ["project_id", "private_key", "token_uri", "client_email"]
 
 
 class BigqueryConnector(BaseConnector):
@@ -30,26 +19,43 @@ class BigqueryConnector(BaseConnector):
 
     def create_session(self, options: dict, secret_data: dict, schema: str):
         if not secret_data:
+            _LOGGER.warning("[BigqueryConnector] secret_data가 비어있습니다.")
             return
 
         self.project_id = secret_data.get("project_id")
+        _LOGGER.info(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
 
-        # private_key 기본 처리만 수행 (검증 제거)
+        # private_key 처리 (프론트엔드에서 이미 검증됨)
         processed_secret_data = secret_data.copy()
         if "private_key" in processed_secret_data:
+            original_key = processed_secret_data["private_key"]
             # 이스케이프된 개행 문자를 실제 개행으로 변환
-            if "\\n" in processed_secret_data["private_key"]:
-                processed_secret_data["private_key"] = processed_secret_data[
-                    "private_key"
-                ].replace("\\n", "\n")
+            if "\\n" in original_key:
+                processed_secret_data["private_key"] = original_key.replace("\\n", "\n")
 
-        # Google API 인증 정보로 직접 생성 (상세 오류 처리 제거)
-        self.credentials = (
-            google.oauth2.service_account.Credentials.from_service_account_info(
-                processed_secret_data
+        try:
+            # Google API 인증 정보로 직접 생성
+            self.credentials = (
+                google.oauth2.service_account.Credentials.from_service_account_info(
+                    processed_secret_data
+                )
             )
-        )
-        self.google_client = build("bigquery", "v2", credentials=self.credentials)
+            _LOGGER.info("[BigqueryConnector] Google 서비스 계정 인증 정보 생성 성공")
+
+            self.google_client = build("bigquery", "v2", credentials=self.credentials)
+            _LOGGER.info("[BigqueryConnector] BigQuery 클라이언트 생성 성공")
+
+        except Exception as e:
+            error_msg = f"Google 인증 정보 생성 실패: {str(e)}"
+            _LOGGER.error(f"[BigqueryConnector] {error_msg}")
+            _LOGGER.error(f"[BigqueryConnector] 에러 타입: {type(e).__name__}")
+            _LOGGER.error(
+                f"[BigqueryConnector] 클라이언트 이메일: {secret_data.get('client_email', 'N/A')}"
+            )
+            _LOGGER.error(
+                f"[BigqueryConnector] 프로젝트 ID: {secret_data.get('project_id', 'N/A')}"
+            )
+            raise
 
     def list_tables(self, billing_export_project_id, dataset_id, **query):
         table_list = []
@@ -77,12 +83,12 @@ class BigqueryConnector(BaseConnector):
     def read_df_from_bigquery(self, query):
         """BigQuery에서 DataFrame으로 데이터를 읽어옵니다."""
         # 클래스 레벨 쿼리 카운터 (없으면 초기화)
-        if not hasattr(BigqueryConnector, '_query_counter'):
+        if not hasattr(BigqueryConnector, "_query_counter"):
             BigqueryConnector._query_counter = 0
-        
+
         BigqueryConnector._query_counter += 1
         current_query_num = BigqueryConnector._query_counter
-        
+
         _LOGGER.info(f"🚀 [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 시작")
         _LOGGER.debug(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
 
@@ -93,10 +99,14 @@ class BigqueryConnector(BaseConnector):
                 project_id=self.project_id,
                 credentials=self.credentials,
                 max_results=None,  # 결과 수 제한 없음 (지원됨)
-                progress_bar_type=None  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
+                progress_bar_type=None,  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
             )
-            _LOGGER.info(f"✅ [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회")
-            _LOGGER.debug(f"[BigqueryConnector] 쿼리 실행 성공 - DataFrame 크기: {len(result_df)} 행, {len(result_df.columns)} 열")
+            _LOGGER.info(
+                f"✅ [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회"
+            )
+            _LOGGER.debug(
+                f"[BigqueryConnector] 쿼리 실행 성공 - DataFrame 크기: {len(result_df)} 행, {len(result_df.columns)} 열"
+            )
 
             # GCS 파서와 동일한 데이터 타입으로 변환
             standardized_df = self._standardize_dataframe_types(result_df)
@@ -106,18 +116,26 @@ class BigqueryConnector(BaseConnector):
             error_msg = str(e)
             _LOGGER.error(f"[BigqueryConnector] 쿼리 실행 실패: {error_msg}")
             _LOGGER.error(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
-            
+
             # 상세 에러 분류 로깅
             if "timeout" in error_msg.lower() or "deadline" in error_msg.lower():
-                _LOGGER.error(f"[BigqueryConnector] ⏰ 타임아웃 발생 - 쿼리 #{current_query_num}")
+                _LOGGER.error(
+                    f"[BigqueryConnector] ⏰ 타임아웃 발생 - 쿼리 #{current_query_num}"
+                )
             elif "connection" in error_msg.lower():
-                _LOGGER.error(f"[BigqueryConnector] 🔌 연결 문제 발생 - 쿼리 #{current_query_num}")
+                _LOGGER.error(
+                    f"[BigqueryConnector] 🔌 연결 문제 발생 - 쿼리 #{current_query_num}"
+                )
             elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
-                _LOGGER.error(f"[BigqueryConnector] 📊 할당량/제한 초과 - 쿼리 #{current_query_num}")
+                _LOGGER.error(
+                    f"[BigqueryConnector] 📊 할당량/제한 초과 - 쿼리 #{current_query_num}"
+                )
             elif "unexpected keyword argument" in error_msg.lower():
-                _LOGGER.error(f"[BigqueryConnector] 🔧 API 호환성 문제 - 쿼리 #{current_query_num}")
-                _LOGGER.error(f"[BigqueryConnector] pandas-gbq>=0.29.0 API 호환성 문제")
-            
+                _LOGGER.error(
+                    f"[BigqueryConnector] 🔧 API 호환성 문제 - 쿼리 #{current_query_num}"
+                )
+                _LOGGER.error("[BigqueryConnector] pandas-gbq>=0.29.0 API 호환성 문제")
+
             raise
 
     def _standardize_dataframe_types(self, df):
@@ -128,76 +146,127 @@ class BigqueryConnector(BaseConnector):
         standardized_df = df.copy()
 
         # 새로운 스키마 기준 필드 분류
-        float_fields = ['cost', 'currency_conversion_rate', 'cost_at_list',
-                       'cost_at_effective_price_default', 'cost_at_list_consumption_model',
-                       'credits_total_amount']
+        float_fields = [
+            "cost",
+            "currency_conversion_rate",
+            "cost_at_list",
+            "cost_at_effective_price_default",
+            "cost_at_list_consumption_model",
+            "credits_total_amount",
+        ]
 
-        numeric_fields = ['effective_price', 'tier_start_amount', 'pricing_unit_quantity',
-                         'list_price', 'effective_price_default', 'list_price_consumption_model']
+        numeric_fields = [
+            "effective_price",
+            "tier_start_amount",
+            "pricing_unit_quantity",
+            "list_price",
+            "effective_price_default",
+            "list_price_consumption_model",
+        ]
 
-        timestamp_fields = ['usage_start_time', 'usage_end_time', 'export_time']
-        string_fields = ['billing_account_id', 'currency', 'transaction_type', 'seller_name', 'cost_type']
+        timestamp_fields = ["usage_start_time", "usage_end_time", "export_time"]
+        string_fields = [
+            "billing_account_id",
+            "currency",
+            "transaction_type",
+            "seller_name",
+            "cost_type",
+        ]
 
         # 명시적으로 문자열로 처리해야 하는 필드들 (cost가 포함되어도 float가 아님)
-        explicit_string_fields = ['cost_type', 'transaction_type', 'seller_name']
+        explicit_string_fields = ["cost_type", "transaction_type", "seller_name"]
 
         # REPEATED 필드들 (배열로 처리)
-        repeated_fields = ['labels', 'system_labels', 'tags', 'credits']
+        repeated_fields = ["labels", "system_labels", "tags", "credits"]
 
         # 중첩 구조 필드들 (RECORD 타입)
-        record_fields = ['service', 'sku', 'project', 'location', 'price', 'usage',
-                        'invoice', 'adjustment_info', 'consumption_model']
+        record_fields = [
+            "service",
+            "sku",
+            "project",
+            "location",
+            "price",
+            "usage",
+            "invoice",
+            "adjustment_info",
+            "consumption_model",
+        ]
 
         for col in standardized_df.columns:
             try:
                 # 명시적 문자열 필드 우선 처리
                 if col in explicit_string_fields:
-                    standardized_df[col] = standardized_df[col].astype(str).fillna('')
-                    standardized_df[col] = standardized_df[col].replace('nan', '')
+                    standardized_df[col] = standardized_df[col].astype(str).fillna("")
+                    standardized_df[col] = standardized_df[col].replace("nan", "")
 
                 # FLOAT 타입 필드 처리 (명시적 문자열 필드 제외)
-                elif col in float_fields or (any(field in col.lower() for field in ['cost', 'rate']) and col not in explicit_string_fields):
+                elif col in float_fields or (
+                    any(field in col.lower() for field in ["cost", "rate"])
+                    and col not in explicit_string_fields
+                ):
                     standardized_df[col] = standardized_df[col].apply(
                         lambda x, column=col: self._process_float_field(x, column)
                     )
 
                 # NUMERIC 타입 필드 처리 (price 하위 필드들)
-                elif col in numeric_fields or (col.startswith('price_') and any(field in col for field in numeric_fields)):
+                elif col in numeric_fields or (
+                    col.startswith("price_")
+                    and any(field in col for field in numeric_fields)
+                ):
                     standardized_df[col] = standardized_df[col].apply(
                         lambda x, column=col: self._process_numeric_field(x, column)
                     )
 
                 # TIMESTAMP 필드 처리
-                elif col in timestamp_fields or any(field in col.lower() for field in ['time']):
-                    standardized_df[col] = pd.to_datetime(standardized_df[col], errors='coerce')
+                elif col in timestamp_fields or any(
+                    field in col.lower() for field in ["time"]
+                ):
+                    standardized_df[col] = pd.to_datetime(
+                        standardized_df[col], errors="coerce"
+                    )
                     # TIMESTAMP를 ISO 형식 문자열로 변환
-                    standardized_df[col] = standardized_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                    standardized_df[col] = standardized_df[col].fillna('')
+                    standardized_df[col] = standardized_df[col].dt.strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    standardized_df[col] = standardized_df[col].fillna("")
 
                 # STRING 필드 처리
-                elif col in string_fields or any(field in col.lower() for field in ['id', 'name', 'description', 'type']):
-                    standardized_df[col] = standardized_df[col].astype(str).fillna('')
+                elif col in string_fields or any(
+                    field in col.lower()
+                    for field in ["id", "name", "description", "type"]
+                ):
+                    standardized_df[col] = standardized_df[col].astype(str).fillna("")
                     # 'nan' 문자열을 빈 문자열로 변환
-                    standardized_df[col] = standardized_df[col].replace('nan', '')
+                    standardized_df[col] = standardized_df[col].replace("nan", "")
 
                 # REPEATED 필드들 (배열 구조로 처리)
                 elif col in repeated_fields:
-                    standardized_df[col] = standardized_df[col].apply(self._process_repeated_field)
+                    standardized_df[col] = standardized_df[col].apply(
+                        self._process_repeated_field
+                    )
 
                 # RECORD 타입 필드들 (중첩 구조 처리)
                 elif col in record_fields:
-                    standardized_df[col] = standardized_df[col].apply(self._normalize_nested_structure)
+                    standardized_df[col] = standardized_df[col].apply(
+                        self._normalize_nested_structure
+                    )
 
                 # 기타 필드들의 NaN 값 처리
                 else:
-                    standardized_df[col] = standardized_df[col].where(pd.notnull(standardized_df[col]), '')
+                    standardized_df[col] = standardized_df[col].where(
+                        pd.notnull(standardized_df[col]), ""
+                    )
 
             except Exception as e:
-                _LOGGER.warning(f"[BigqueryConnector] Failed to standardize column {col}: {e}")
+                _LOGGER.warning(
+                    f"[BigqueryConnector] Failed to standardize column {col}: {e}"
+                )
                 # 실패한 경우 원본 값 유지
                 continue
 
-        _LOGGER.debug(f"[BigqueryConnector] 데이터 타입 표준화 완료 - {len(standardized_df)} 행")
+        _LOGGER.debug(
+            f"[BigqueryConnector] 데이터 타입 표준화 완료 - {len(standardized_df)} 행"
+        )
         return standardized_df
 
     def _clean_float_precision(self, value):
@@ -230,8 +299,10 @@ class BigqueryConnector(BaseConnector):
                 precision = 12
 
             # 지정된 정밀도로 반올림
-            quantize_exp = Decimal('0.1') ** precision
-            rounded_decimal = decimal_value.quantize(quantize_exp, rounding=ROUND_HALF_UP)
+            quantize_exp = Decimal("0.1") ** precision
+            rounded_decimal = decimal_value.quantize(
+                quantize_exp, rounding=ROUND_HALF_UP
+            )
 
             # float로 변환
             return float(rounded_decimal)
@@ -254,33 +325,44 @@ class BigqueryConnector(BaseConnector):
 
             # pandas의 NaN 체크
             import pandas as pd
+
             if pd.isna(value):
                 return {}
 
             # 문자열인 경우 JSON 파싱 시도
             if isinstance(value, str):
-                if value.strip() == '' or value.lower() == 'nan':
+                if value.strip() == "" or value.lower() == "nan":
                     return {}
                 try:
                     parsed = json.loads(value)
-                    return self._clean_nested_structure(parsed) if isinstance(parsed, (dict, list)) else {}
+                    return (
+                        self._clean_nested_structure(parsed)
+                        if isinstance(parsed, (dict, list))
+                        else {}
+                    )
                 except (json.JSONDecodeError, ValueError):
                     # JSON이 아닌 문자열인 경우 그대로 반환
                     return value
 
             # 기타 타입은 문자열로 변환 후 재시도
             str_value = str(value)
-            if str_value.lower() in ['nan', 'none', '']:
+            if str_value.lower() in ["nan", "none", ""]:
                 return {}
 
             try:
                 parsed = json.loads(str_value)
-                return self._clean_nested_structure(parsed) if isinstance(parsed, (dict, list)) else {}
+                return (
+                    self._clean_nested_structure(parsed)
+                    if isinstance(parsed, (dict, list))
+                    else {}
+                )
             except (json.JSONDecodeError, ValueError):
                 return str_value
 
         except Exception as e:
-            _LOGGER.warning(f"[BigqueryConnector] Failed to normalize nested structure: {e}")
+            _LOGGER.warning(
+                f"[BigqueryConnector] Failed to normalize nested structure: {e}"
+            )
             return {} if value is None else str(value)
 
     def _clean_nested_structure(self, data):
@@ -291,6 +373,7 @@ class BigqueryConnector(BaseConnector):
                 if value is not None:
                     try:
                         import pandas as pd
+
                         if not pd.isna(value):
                             if isinstance(value, (dict, list)):
                                 cleaned[key] = self._clean_nested_structure(value)
@@ -308,6 +391,7 @@ class BigqueryConnector(BaseConnector):
                 if item is not None:
                     try:
                         import pandas as pd
+
                         if not pd.isna(item):
                             if isinstance(item, (dict, list)):
                                 cleaned.append(self._clean_nested_structure(item))
@@ -329,6 +413,7 @@ class BigqueryConnector(BaseConnector):
 
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return 0
         except (TypeError, ValueError, ImportError):
@@ -337,16 +422,19 @@ class BigqueryConnector(BaseConnector):
         try:
             # Decimal을 사용하여 정밀도 유지
             from decimal import Decimal
+
             if isinstance(value, (int, float)):
                 return float(Decimal(str(value)))
             elif isinstance(value, str):
-                if value.strip().lower() in ('', 'nan', 'none', 'null'):
+                if value.strip().lower() in ("", "nan", "none", "null"):
                     return 0
                 return float(Decimal(value.strip()))
             else:
                 return float(Decimal(str(value)))
         except (ValueError, TypeError) as e:
-            _LOGGER.warning(f"[BigqueryConnector] Failed to process NUMERIC field {field_name}: {e}")
+            _LOGGER.warning(
+                f"[BigqueryConnector] Failed to process NUMERIC field {field_name}: {e}"
+            )
             return 0
 
     def _process_float_field(self, value, field_name: str):
@@ -356,6 +444,7 @@ class BigqueryConnector(BaseConnector):
 
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return 0.0
         except (TypeError, ValueError, ImportError):
@@ -365,7 +454,7 @@ class BigqueryConnector(BaseConnector):
             if isinstance(value, (int, float)):
                 return float(value)
             elif isinstance(value, str):
-                if value.strip().lower() in ('', 'nan', 'none', 'null'):
+                if value.strip().lower() in ("", "nan", "none", "null"):
                     return 0.0
                 # 숫자가 아닌 문자열인 경우 0.0 반환 (예: 'regular', 'usage' 등)
                 stripped_value = value.strip()
@@ -373,12 +462,16 @@ class BigqueryConnector(BaseConnector):
                 try:
                     return float(stripped_value)
                 except ValueError:
-                    _LOGGER.debug(f"[BigqueryConnector] Non-numeric string in FLOAT field {field_name}: '{value}', using 0.0")
+                    _LOGGER.debug(
+                        f"[BigqueryConnector] Non-numeric string in FLOAT field {field_name}: '{value}', using 0.0"
+                    )
                     return 0.0
             else:
                 return float(value)
         except (ValueError, TypeError) as e:
-            _LOGGER.warning(f"[BigqueryConnector] Failed to process FLOAT field {field_name}: {e}")
+            _LOGGER.warning(
+                f"[BigqueryConnector] Failed to process FLOAT field {field_name}: {e}"
+            )
             return 0.0
 
     def _process_repeated_field(self, value):
@@ -388,6 +481,7 @@ class BigqueryConnector(BaseConnector):
 
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return []
         except (TypeError, ValueError, ImportError):
@@ -405,6 +499,7 @@ class BigqueryConnector(BaseConnector):
 
             try:
                 import json
+
                 parsed = json.loads(str_value)
                 if isinstance(parsed, list):
                     return self._clean_nested_structure(parsed)

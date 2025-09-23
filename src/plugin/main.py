@@ -4,27 +4,14 @@ from collections.abc import Generator
 from typing import Set
 from threading import Lock
 
-# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
-try:
-    from spaceone.cost_analysis.plugin.data_source.lib.server import (
-        DataSourcePluginServer,
-    )
-except ImportError:
-    # Mock for local development
-    class DataSourcePluginServer:
-        """Mock DataSourcePluginServer for local development"""
-
-        def route(self, path):
-            def decorator(func):
-                return func
-
-            return decorator
+from spaceone.cost_analysis.plugin.data_source.lib.server import (
+    DataSourcePluginServer,
+)
 
 
 from plugin.manager.cost_manager import CostManager
 from plugin.manager.data_source_manager import DataSourceManager
 from plugin.manager.job_manager import JobManager
-from plugin.manager.credits_detail_manager import CreditsDetailManager
 
 # 전역 JSON 패치 제거 - BigQuery API 호환성 문제로 인해 제거
 # import plugin.utils.json_patch  # BigQuery request_id 변환 문제 발생
@@ -98,7 +85,7 @@ def _data_source_init_logic(params: dict) -> dict:
     try:
         # 파라미터 추출 및 검증
         options = params["options"]
-        
+
         # DataSourceManager 인스턴스 생성 및 초기화 응답 생성
         data_source_mgr = DataSourceManager()
         result = data_source_mgr.init_response(options)
@@ -106,7 +93,9 @@ def _data_source_init_logic(params: dict) -> dict:
         return result
 
     except Exception as e:
-        _LOGGER.error(f"[_data_source_init_logic] Failed to initialize data source: {e}")
+        _LOGGER.error(
+            f"[_data_source_init_logic] Failed to initialize data source: {e}"
+        )
         raise
 
 
@@ -254,15 +243,19 @@ def job_get_tasks(params: dict) -> dict:
 
     """
     _LOGGER.info("🚀 [job_get_tasks] API endpoint called - 태스크 생성 시작")
-    
+
     # 🎯 전역 프로젝트 처리 추적 시스템 초기화
     with _processing_lock:
         _processed_projects.clear()
     _LOGGER.info("🔄 [job_get_tasks] 프로젝트 처리 추적 시스템 초기화 완료")
-    
+
     # 🎯 중요: 프로젝트 태스크 생성 시작 알림
-    _LOGGER.info("📊 [job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다...")
-    _LOGGER.info("🔍 [job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다...")
+    _LOGGER.info(
+        "📊 [job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다..."
+    )
+    _LOGGER.info(
+        "🔍 [job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다..."
+    )
 
     try:
         # 파라미터 기본 검증
@@ -275,34 +268,42 @@ def job_get_tasks(params: dict) -> dict:
 
         if missing_params:
             raise ValueError(f"Missing required parameters: {missing_params}")
-            
+
         # 요청 파라미터 상세 로깅
-        _LOGGER.info(f"📋 [job_get_tasks] 요청 파라미터:")
+        _LOGGER.info("📋 [job_get_tasks] 요청 파라미터:")
         _LOGGER.info(f"   - domain_id: {params.get('domain_id')}")
         _LOGGER.info(f"   - start: {params.get('start', 'None')}")
         _LOGGER.info(f"   - options keys: {list(params.get('options', {}).keys())}")
-        if 'options' in params:
-            options = params['options']
-            _LOGGER.info(f"   - billing_export_project_id: {options.get('billing_export_project_id')}")
-            _LOGGER.info(f"   - billing_dataset_id: {options.get('billing_dataset_id')}")
-            _LOGGER.info(f"   - billing_account_id: {options.get('billing_account_id')}")
+        if "options" in params:
+            options = params["options"]
+            _LOGGER.info(
+                f"   - billing_export_project_id: {options.get('billing_export_project_id')}"
+            )
+            _LOGGER.info(
+                f"   - billing_dataset_id: {options.get('billing_dataset_id')}"
+            )
+            _LOGGER.info(
+                f"   - billing_account_id: {options.get('billing_account_id')}"
+            )
 
         # 작업 태스크 생성
         result = _job_get_tasks_logic(params)
-        
+
         # 🎯 태스크 생성 결과 검증 및 로깅
-        actual_tasks = len(result.get('tasks', []))
-        
+        actual_tasks = len(result.get("tasks", []))
+
         # 전역 변수에 실제 생성된 태스크 수 저장
         global _expected_total_projects
         with _processing_lock:
             _expected_total_projects = actual_tasks
-        
+
         _LOGGER.info("=" * 80)
         _LOGGER.info("🎉 [job_get_tasks] 태스크 생성 API 완료!")
         _LOGGER.info(f"📊 최종 결과: {actual_tasks}개 태스크 생성")
         _LOGGER.info(f"🔄 전역 추적 시스템에 예상 태스크 수 설정: {actual_tasks}개")
-        _LOGGER.info("✅ JobManager가 BigQuery에서 탐지한 모든 활성 프로젝트에 대한 태스크 생성 완료!")
+        _LOGGER.info(
+            "✅ JobManager가 BigQuery에서 탐지한 모든 활성 프로젝트에 대한 태스크 생성 완료!"
+        )
         _LOGGER.info("=" * 80)
 
         return result
@@ -322,80 +323,88 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
         # 선택적 파라미터 추출
         task_options = params.get("task_options", {})
         schema = params.get("schema")
-        
+
         # 🎯 Credits Detail 모드 확인
         credits_detail_mode = task_options.get("credits_detail_mode", False)
-        
-        _LOGGER.info(f"[_cost_get_data_logic] Credits Detail 모드: {credits_detail_mode}")
-        
+
+        _LOGGER.info(
+            f"[_cost_get_data_logic] Credits Detail 모드: {credits_detail_mode}"
+        )
+
         if credits_detail_mode:
             # 🎯 Credits Detail 모드: 원본 데이터 조회
             _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드로 실행")
-            
+
             from plugin.manager.credits_detail_manager import CreditsDetailManager
             from plugin.connector.bigquery_connector import BigqueryConnector
-            
+
             # Credits Detail Manager 초기화
             credits_mgr = CreditsDetailManager()
-            
+
             # BigQuery 커넥터 설정
             bigquery_connector = BigqueryConnector()
             bigquery_connector.create_session(options, secret_data, schema)
-            
+
             # 빌링 정보 설정
             billing_export_project_id = options.get("billing_export_project_id")
             billing_dataset_id = options.get("billing_dataset_id")
             billing_account_id = options.get("billing_account_id")
-            
+
             if not billing_export_project_id:
                 raise ValueError("billing_export_project_id is required in options")
             if not billing_dataset_id:
                 raise ValueError("billing_dataset_id is required in options")
             if not billing_account_id:
                 raise ValueError("billing_account_id is required in options")
-            
+
             # 빌링 테이블 이름 생성
-            billing_table = f"gcp_billing_export_v1_{billing_account_id.replace('-', '_')}"
-            
+            billing_table = (
+                f"gcp_billing_export_v1_{billing_account_id.replace('-', '_')}"
+            )
+
             # Credits Detail Manager 초기화
             credits_mgr.initialize(
                 bigquery_connector=bigquery_connector,
                 billing_export_project_id=billing_export_project_id,
                 billing_dataset=billing_dataset_id,
-                billing_table=billing_table
+                billing_table=billing_table,
             )
-            
+
             # 쿼리 옵션 파싱
             start_date = task_options.get("start")
             end_date = task_options.get("end")
             project_id = task_options.get("project_id")
             limit = int(task_options.get("credits_detail_limit", 100))
-            
+
             if not start_date:
                 raise ValueError("start date is required for credits detail mode")
-            
-            _LOGGER.info(f"[_cost_get_data_logic] Credits Detail 조회: {start_date} ~ {end_date}, 프로젝트: {project_id}, 제한: {limit}")
-            
+
+            _LOGGER.info(
+                f"[_cost_get_data_logic] Credits Detail 조회: {start_date} ~ {end_date}, 프로젝트: {project_id}, 제한: {limit}"
+            )
+
             # Credits Detail 조회
             for record in credits_mgr.get_credits_detail(
                 start_date=start_date,
                 end_date=end_date,
                 project_id=project_id,
                 billing_account_id=billing_account_id,
-                limit=limit
+                limit=limit,
             ):
                 yield record
-            
+
             _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드 조회 완료")
-            
+
         else:
             # 🚀 기본 모드: 기존 최적화된 집계 데이터 조회
             _LOGGER.info("[_cost_get_data_logic] 기본 모드로 실행")
-            
+
             # CostManager 인스턴스 생성
             cost_mgr = CostManager()
 
-            result_generator = cost_mgr.get_data(options, secret_data, task_options, schema)
+            result_generator = cost_mgr.get_data(
+                options, secret_data, task_options, schema
+            )
 
             yield from result_generator
 
@@ -454,7 +463,7 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         total_records = 0
         chunk_buffer = []  # 현재 청크 버퍼
         MAX_CHUNK_SIZE = 100  # 청크당 최대 레코드 수 (안전한 크기)
-        
+
         for batch_result in result_generator:
             batch_count += 1
 
@@ -476,30 +485,38 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                             )
 
                         # 🚨 ULTIMATE: 최종 응답 검증 및 cost 필드 보장
-                        spaceone_formatted = _ultimate_cost_field_verification(spaceone_formatted, batch_count)
-                        
+                        spaceone_formatted = _ultimate_cost_field_verification(
+                            spaceone_formatted, batch_count
+                        )
+
                         # 배치 결과를 청크 버퍼에 추가
                         batch_results = spaceone_formatted["results"]
-                        
+
                         for record in batch_results:
                             chunk_buffer.append(record)
                             total_records += 1
-                            
+
                             # 청크 크기에 도달하면 yield
                             if len(chunk_buffer) >= MAX_CHUNK_SIZE:
                                 chunk_response = {"results": chunk_buffer}
-                                _LOGGER.info(f"[cost_get_data] Yielding chunk: {len(chunk_buffer)} records")
+                                _LOGGER.info(
+                                    f"[cost_get_data] Yielding chunk: {len(chunk_buffer)} records"
+                                )
                                 yield chunk_response
                                 chunk_buffer = []  # 버퍼 초기화
 
             except Exception as e:
-                _LOGGER.error(f"[cost_get_data] Failed to process batch {batch_count}: {e}")
+                _LOGGER.error(
+                    f"[cost_get_data] Failed to process batch {batch_count}: {e}"
+                )
                 # 에러가 발생해도 다음 배치 처리 계속
-        
+
         # 🚨 ULTIMATE: 남은 레코드가 있으면 마지막 청크로 전송
         if chunk_buffer:
             final_response = {"results": chunk_buffer}
-            _LOGGER.info(f"[cost_get_data] Yielding final chunk: {len(chunk_buffer)} records")
+            _LOGGER.info(
+                f"[cost_get_data] Yielding final chunk: {len(chunk_buffer)} records"
+            )
             yield final_response
         elif total_records == 0:
             _LOGGER.warning("[cost_get_data] No results to yield")
@@ -508,36 +525,44 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         # 🎯 처리 완료 프로젝트 수 검증 로깅 (JobManager와 동일한 형태)
         task_options = params.get("task_options", {})
         processed_project = task_options.get("project_id", "unknown")
-        
+
         # 전역 처리된 프로젝트 추적 업데이트 (Pod 중복 실행 대응)
         with _processing_lock:
             if processed_project in _processed_projects:
-                _LOGGER.warning(f"🔄 [중복 처리 감지] 프로젝트 '{processed_project}'가 이미 처리되었습니다!")
-                _LOGGER.warning("💡 Pod 중복 실행으로 인한 중복 처리 가능성이 있습니다.")
+                _LOGGER.warning(
+                    f"🔄 [중복 처리 감지] 프로젝트 '{processed_project}'가 이미 처리되었습니다!"
+                )
+                _LOGGER.warning(
+                    "💡 Pod 중복 실행으로 인한 중복 처리 가능성이 있습니다."
+                )
                 return  # 중복 처리 방지
-            
+
             _processed_projects.add(processed_project)
             current_processed_count = len(_processed_projects)
-        
+
         _LOGGER.info("=" * 80)
         _LOGGER.info("🎉 [cost_get_data] 개별 프로젝트 처리 완료!")
         _LOGGER.info(f"📋 처리된 프로젝트: {processed_project}")
         _LOGGER.info(f"📊 처리된 배치 수: {batch_count}개")
         _LOGGER.info(f"📝 처리된 총 레코드 수: {total_records}개")
-        
+
         # 전체 진행 상황 요약
-        _LOGGER.info(f"🔍 [전체 진행 상황]")
+        _LOGGER.info("🔍 [전체 진행 상황]")
         _LOGGER.info(f"   📊 현재까지 처리된 프로젝트 수: {current_processed_count}개")
-        _LOGGER.info(f"   🎯 JobManager가 생성한 총 태스크 수: {_expected_total_projects}개")
-        
+        _LOGGER.info(
+            f"   🎯 JobManager가 생성한 총 태스크 수: {_expected_total_projects}개"
+        )
+
         # 0으로 나누기 방지
         if _expected_total_projects > 0:
-            progress_rate = (current_processed_count / _expected_total_projects * 100)
+            progress_rate = current_processed_count / _expected_total_projects * 100
             _LOGGER.info(f"   📈 진행률: {progress_rate:.1f}%")
-            
+
             # 모든 프로젝트 처리 완료 시 최종 요약
             if current_processed_count == _expected_total_projects:
-                _LOGGER.info("🎊 [최종 완료] JobManager 태스크와 동일한 수의 프로젝트 처리 완료!")
+                _LOGGER.info(
+                    "🎊 [최종 완료] JobManager 태스크와 동일한 수의 프로젝트 처리 완료!"
+                )
                 _LOGGER.info("📝 [처리된 프로젝트 목록] - JobManager 태스크와 비교")
                 sorted_projects = sorted(list(_processed_projects))
                 for i, project_id in enumerate(sorted_projects, 1):
@@ -547,17 +572,22 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                 _LOGGER.info(f"⏳ 남은 프로젝트: {remaining}개")
             else:
                 extra = current_processed_count - _expected_total_projects
-                _LOGGER.warning(f"🤔 예상보다 {extra}개 더 많은 프로젝트가 처리되었습니다!")
+                _LOGGER.warning(
+                    f"🤔 예상보다 {extra}개 더 많은 프로젝트가 처리되었습니다!"
+                )
         else:
             _LOGGER.warning("⚠️  JobManager에서 생성된 태스크 수가 설정되지 않았습니다!")
             _LOGGER.warning("💡 Job.get_tasks가 먼저 호출되어야 합니다.")
-        
+
         _LOGGER.info("=" * 80)
-        
-        _LOGGER.info(f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records")
-        
+
+        _LOGGER.info(
+            f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records"
+        )
+
         # Pod 중복 실행 시 안정성을 위한 처리 지연 추가
         import time
+
         time.sleep(0.1)  # 100ms 지연으로 리소스 경합 방지
 
     except Exception as e:
@@ -588,20 +618,26 @@ def _convert_to_spaceone_format(batch_result, batch_count):
                 if "cost" not in record:
                     # additional_info에서 cost 복구 시도
                     cost_value = 0.0
-                    if "additional_info" in record and isinstance(record["additional_info"], dict):
-                        cost_after_credits = record["additional_info"].get("Cost After Credits", 0)
+                    if "additional_info" in record and isinstance(
+                        record["additional_info"], dict
+                    ):
+                        cost_after_credits = record["additional_info"].get(
+                            "Cost After Credits", 0
+                        )
                         try:
                             cost_value = float(cost_after_credits)
                         except (ValueError, TypeError):
                             cost_value = 0.0
-                    
+
                     # 최상위 cost 필드 추가 (첫 번째 위치)
                     new_record = {"cost": cost_value}
                     new_record.update(record)
                     record = new_record
-                    
-                    _LOGGER.error(f"[_convert_to_spaceone_format] ULTIMATE: Added missing cost field: {cost_value}")
-                
+
+                    _LOGGER.error(
+                        f"[_convert_to_spaceone_format] ULTIMATE: Added missing cost field: {cost_value}"
+                    )
+
                 spaceone_record = _ensure_spaceone_record_format(record)
                 if spaceone_record:  # 유효한 레코드만 추가
                     # 🚨 CRITICAL: cost 필드를 딕셔너리의 첫 번째 위치로 강제 이동
@@ -609,13 +645,17 @@ def _convert_to_spaceone_format(batch_result, batch_count):
                         cost_value = spaceone_record.pop("cost")
                         record_copy = spaceone_record.copy()
                         spaceone_record.clear()
-                        spaceone_record["cost"] = cost_value  # 첫 번째 위치에 cost 필드 배치
+                        spaceone_record["cost"] = (
+                            cost_value  # 첫 번째 위치에 cost 필드 배치
+                        )
                         spaceone_record.update(record_copy)
                     else:
                         # cost 필드가 여전히 없으면 강제 추가
                         spaceone_record = {"cost": 0.0, **spaceone_record}
-                        _LOGGER.error(f"[_convert_to_spaceone_format] ULTIMATE: Force-added cost field to spaceone_record")
-                    
+                        _LOGGER.error(
+                            "[_convert_to_spaceone_format] ULTIMATE: Force-added cost field to spaceone_record"
+                        )
+
                     spaceone_results.append(spaceone_record)
 
         # SpaceONE 표준 응답 구조로 래핑
@@ -643,31 +683,43 @@ def _ensure_spaceone_record_format(record):
                 if data_cost is not None:
                     try:
                         cost_value = float(data_cost)
-                        _LOGGER.info(f"[_ensure_spaceone_record_format] RECOVERED: cost field from data.cost: {cost_value}")
+                        _LOGGER.info(
+                            f"[_ensure_spaceone_record_format] RECOVERED: cost field from data.cost: {cost_value}"
+                        )
                     except (ValueError, TypeError):
                         cost_value = 0.0
-                        _LOGGER.warning(f"[_ensure_spaceone_record_format] INVALID data.cost, using 0.0")
+                        _LOGGER.warning(
+                            "[_ensure_spaceone_record_format] INVALID data.cost, using 0.0"
+                        )
                 else:
                     cost_value = 0.0
-                    _LOGGER.error(f"[_ensure_spaceone_record_format] CRITICAL: cost field missing completely, setting to 0.0")
+                    _LOGGER.error(
+                        "[_ensure_spaceone_record_format] CRITICAL: cost field missing completely, setting to 0.0"
+                    )
             else:
                 cost_value = 0.0
-                _LOGGER.error(f"[_ensure_spaceone_record_format] CRITICAL: cost field missing in record, setting to 0.0")
-        
+                _LOGGER.error(
+                    "[_ensure_spaceone_record_format] CRITICAL: cost field missing in record, setting to 0.0"
+                )
+
         # 🚨 CRITICAL: currency 필드 추출 및 보장
         currency_value = record.get("currency")
         if currency_value is None or currency_value == "":
             # additional_info에서 Currency 필드 추출 시도
             currency_value = record.get("additional_info", {}).get("Currency", "USD")
             if currency_value != "USD":
-                _LOGGER.debug(f"[_ensure_spaceone_record_format] Currency extracted from additional_info: {currency_value}")
+                _LOGGER.debug(
+                    f"[_ensure_spaceone_record_format] Currency extracted from additional_info: {currency_value}"
+                )
             else:
-                _LOGGER.info(f"[_ensure_spaceone_record_format] Currency field missing, defaulting to USD")
-        
+                _LOGGER.info(
+                    "[_ensure_spaceone_record_format] Currency field missing, defaulting to USD"
+                )
+
         # 🚨 EMERGENCY FIX: usage_quantity를 additional_info에서 직접 추출
         usage_quantity_value = record.get("usage_quantity", 0.0)
         usage_unit_value = record.get("usage_unit", "")
-        
+
         # FieldMapper에서 전달되지 않은 경우 additional_info에서 직접 추출
         if usage_quantity_value == 0.0:
             additional_info = record.get("additional_info", {})
@@ -681,10 +733,12 @@ def _ensure_spaceone_record_format(record):
                     except (ValueError, TypeError):
                         # _LOGGER.error(f"[EMERGENCY] Invalid Usage Amount: {usage_amount}")
                         pass
-                
+
                 # Usage Amount In Pricing Units도 시도
                 if usage_quantity_value == 0.0:
-                    usage_pricing_amount = additional_info.get("Usage Amount In Pricing Units")
+                    usage_pricing_amount = additional_info.get(
+                        "Usage Amount In Pricing Units"
+                    )
                     if usage_pricing_amount:
                         try:
                             usage_quantity_value = float(usage_pricing_amount)
@@ -706,8 +760,12 @@ def _ensure_spaceone_record_format(record):
         spaceone_record = {
             "cost": _safe_numeric_convert(cost_value),  # 🚨 최상위 필수 필드 #1
             "currency": _safe_string_convert(currency_value),  # 🚨 최상위 필수 필드 #2
-            "usage_quantity": _safe_numeric_convert(usage_quantity_value),  # 🚨 EMERGENCY FIX 적용
-            "usage_unit": _safe_string_convert(usage_unit_value),  # 🚨 EMERGENCY FIX 적용
+            "usage_quantity": _safe_numeric_convert(
+                usage_quantity_value
+            ),  # 🚨 EMERGENCY FIX 적용
+            "usage_unit": _safe_string_convert(
+                usage_unit_value
+            ),  # 🚨 EMERGENCY FIX 적용
             "provider": _safe_string_convert(record.get("provider", "google_cloud")),
             "region_code": _safe_string_convert(record.get("region_code", "global")),
             "product": _safe_string_convert(record.get("product", "Unknown")),
@@ -726,12 +784,16 @@ def _ensure_spaceone_record_format(record):
         # billed_date 특별 처리 (빈 값인 경우 None 유지 - 현재 날짜 사용하지 않음)
         if not spaceone_record["billed_date"]:
             spaceone_record["billed_date"] = None
-            _LOGGER.warning("[_ensure_spaceone_record_format] billed_date is empty, keeping as None")
+            _LOGGER.warning(
+                "[_ensure_spaceone_record_format] billed_date is empty, keeping as None"
+            )
 
         # 🚨 ULTIMATE: 최종 cost 필드 보장 (이중 검증)
         if "cost" not in spaceone_record or spaceone_record["cost"] is None:
             spaceone_record["cost"] = 0.0
-            _LOGGER.error(f"[_ensure_spaceone_record_format] ULTIMATE: Final cost field enforcement applied")
+            _LOGGER.error(
+                "[_ensure_spaceone_record_format] ULTIMATE: Final cost field enforcement applied"
+            )
 
         return spaceone_record
 
@@ -800,33 +862,45 @@ def _ultimate_cost_field_verification(response: dict, batch_count: int) -> dict:
     """최종 cost 필드 보장 - SpaceONE UI 호환성 확보"""
     if not isinstance(response.get("results"), list):
         return response
-    
+
     fixed_count = 0
     missing_cost_count = 0
-    
+
     for i, record in enumerate(response["results"]):
         if isinstance(record, dict):
             # 최상위 cost 필드 절대 보장
             if "cost" not in record:
                 # data.cost에서 복구 시도
-                if "data" in record and isinstance(record["data"], dict) and "cost" in record["data"]:
+                if (
+                    "data" in record
+                    and isinstance(record["data"], dict)
+                    and "cost" in record["data"]
+                ):
                     try:
                         record["cost"] = float(record["data"]["cost"])
                         fixed_count += 1
-                        _LOGGER.info(f"[ULTIMATE] Batch {batch_count}, Record {i}: Recovered cost from data.cost = {record['cost']}")
+                        _LOGGER.info(
+                            f"[ULTIMATE] Batch {batch_count}, Record {i}: Recovered cost from data.cost = {record['cost']}"
+                        )
                     except (ValueError, TypeError):
                         record["cost"] = 0.0
                         missing_cost_count += 1
-                        _LOGGER.error(f"[ULTIMATE] Batch {batch_count}, Record {i}: Invalid data.cost, forced to 0.0")
+                        _LOGGER.error(
+                            f"[ULTIMATE] Batch {batch_count}, Record {i}: Invalid data.cost, forced to 0.0"
+                        )
                 else:
                     record["cost"] = 0.0
                     missing_cost_count += 1
-                    _LOGGER.error(f"[ULTIMATE] Batch {batch_count}, Record {i}: No cost field found, forced to 0.0")
+                    _LOGGER.error(
+                        f"[ULTIMATE] Batch {batch_count}, Record {i}: No cost field found, forced to 0.0"
+                    )
             elif record["cost"] is None:
                 record["cost"] = 0.0
                 fixed_count += 1
-                _LOGGER.warning(f"[ULTIMATE] Batch {batch_count}, Record {i}: None cost converted to 0.0")
-            
+                _LOGGER.warning(
+                    f"[ULTIMATE] Batch {batch_count}, Record {i}: None cost converted to 0.0"
+                )
+
             # cost 필드를 최상위 첫 번째 위치로 이동 (SpaceONE 호환성)
             if "cost" in record:
                 cost_value = record.pop("cost")
@@ -834,10 +908,12 @@ def _ultimate_cost_field_verification(response: dict, batch_count: int) -> dict:
                 record.clear()
                 record["cost"] = cost_value
                 record.update(record_copy)
-    
+
     if fixed_count > 0 or missing_cost_count > 0:
-        _LOGGER.info(f"[ULTIMATE] Batch {batch_count}: Fixed {fixed_count} records, Missing {missing_cost_count} records")
-    
+        _LOGGER.info(
+            f"[ULTIMATE] Batch {batch_count}: Fixed {fixed_count} records, Missing {missing_cost_count} records"
+        )
+
     return response
 
 
@@ -856,7 +932,9 @@ def _cost_get_linked_accounts_logic(params: dict) -> dict:
         return result
 
     except Exception as e:
-        _LOGGER.error(f"[_cost_get_linked_accounts_logic] Failed to get linked accounts: {e}")
+        _LOGGER.error(
+            f"[_cost_get_linked_accounts_logic] Failed to get linked accounts: {e}"
+        )
         raise
 
 
@@ -904,7 +982,7 @@ def cost_get_linked_accounts(params: dict) -> dict:
 
 # =============================================================================
 # 🎯 Credits Detail 기능은 기존 Cost.get_data API에 통합됨
-# 
+#
 # SpaceONE 프레임워크 제약으로 새로운 엔드포인트 추가 불가
 # task_options.credits_detail_mode = true 로 Credits Detail 모드 활성화
 # =============================================================================
@@ -912,7 +990,7 @@ def cost_get_linked_accounts(params: dict) -> dict:
 
 # =============================================================================
 # 🎯 Credits Detail 기능은 기존 Cost.get_data API에 통합됨
-# 
+#
 # 사용법:
 # task_options.credits_detail_mode = true
 # task_options.credits_detail_limit = 100 (선택사항)

@@ -8,9 +8,15 @@
         "module": "spaceone.core.command",
         "python": "${workspaceFolder}/.venv/bin/python",
         "env": {
-          "PYTHONPATH": "./src:"
+          "PYTHONPATH": "./src:",
+          "DEBUG": "true",
+          "LOG_LEVEL": "DEBUG",
+          "SPACEONE_CONFIG_FILE": "./config.yaml"
         },
-        "args": ["run", "plugin-server", "plugin"]
+        "args": ["run", "plugin-server", "plugin", "--port", "50051"],
+        "console": "integratedTerminal",
+        "cwd": "${workspaceFolder}",
+        "justMyCode": false
       }
     ]
   }

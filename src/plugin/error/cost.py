@@ -1,19 +1,4 @@
-# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
-try:
-    from spaceone.core.error import ERROR_INVALID_ARGUMENT, ERROR_UNKNOWN
-except ImportError:
-    # Mock for local development
-    class MockError:
-        _message = "Mock SpaceONE Error: {message}"
-        
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-        
-        def __call__(self, *args, **kwargs):
-            return Exception(self._message.format(**kwargs))
-
-    ERROR_INVALID_ARGUMENT = MockError
-    ERROR_UNKNOWN = MockError
+from spaceone.core.error import ERROR_INVALID_ARGUMENT, ERROR_UNKNOWN
 
 
 class ERROR_INVALID_SECRET_TYPE(ERROR_INVALID_ARGUMENT):

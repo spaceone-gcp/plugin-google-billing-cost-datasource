@@ -80,11 +80,11 @@ class PricingConnector(BaseConnector):
             _LOGGER.debug(f"[PricingConnector] Executing query: {query}")
 
             response_df = pandas_gbq.read_gbq(
-                query, 
-                project_id=self.project_id, 
+                query,
+                project_id=self.project_id,
                 credentials=self.credentials,
                 # timeout 파라미터는 pandas-gbq>=0.29.0에서 지원되지 않음
-                progress_bar_type=None  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
+                progress_bar_type=None,  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
             )
 
             for _, row in response_df.iterrows():
@@ -109,11 +109,11 @@ class PricingConnector(BaseConnector):
         try:
             query = self._build_service_summary_query(date)
             response_df = pandas_gbq.read_gbq(
-                query, 
-                project_id=self.project_id, 
+                query,
+                project_id=self.project_id,
                 credentials=self.credentials,
                 # timeout 파라미터는 pandas-gbq>=0.29.0에서 지원되지 않음
-                progress_bar_type=None  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
+                progress_bar_type=None,  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
             )
 
             service_summary = {}

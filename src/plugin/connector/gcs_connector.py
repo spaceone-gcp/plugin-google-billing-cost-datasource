@@ -6,23 +6,8 @@ import requests
 from google.cloud import storage
 from google.oauth2 import service_account
 
-# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
-try:
-    from spaceone.core.connector import BaseConnector
-    from spaceone.core.error import ERROR_INVALID_ARGUMENT
-except ImportError:
-    # Mock for local development
-    class BaseConnector:
-        """Mock BaseConnector for local development"""
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-    class MockError:
-        def __call__(self, *args, **kwargs):
-            return Exception("Mock SpaceONE Error")
-
-    ERROR_INVALID_ARGUMENT = MockError()
+from spaceone.core.connector import BaseConnector
+from spaceone.core.error import ERROR_INVALID_ARGUMENT
 
 from ..conf.cost_conf import GCS_CONFIG
 from ..error.cost import ERROR_FILE_DOWNLOAD_FAILED
@@ -95,12 +80,14 @@ class GcsConnector(BaseConnector):
 
             if pattern:
                 # 특정 파일 경로인지 확인 (정확한 파일명 포함)
-                if pattern.endswith(('.parquet', '.csv', '.json', '.gz')):
+                if pattern.endswith((".parquet", ".csv", ".json", ".gz")):
                     # 정확한 파일 경로인 경우, 해당 파일이 존재하는지 확인
                     try:
                         blob = bucket.blob(pattern)
                         if blob.exists():
-                            _LOGGER.info(f"[GcsConnector] Found specific file: {pattern}")
+                            _LOGGER.info(
+                                f"[GcsConnector] Found specific file: {pattern}"
+                            )
                             return [
                                 {
                                     "name": blob.name,
@@ -111,12 +98,16 @@ class GcsConnector(BaseConnector):
                                 }
                             ]
                         else:
-                            _LOGGER.warning(f"[GcsConnector] Specific file not found: {pattern}")
+                            _LOGGER.warning(
+                                f"[GcsConnector] Specific file not found: {pattern}"
+                            )
                             return []
                     except Exception as e:
-                        _LOGGER.warning(f"[GcsConnector] Error checking specific file {pattern}: {e}")
+                        _LOGGER.warning(
+                            f"[GcsConnector] Error checking specific file {pattern}: {e}"
+                        )
                         # 실패 시 prefix 검색으로 폴백
-                        
+
                 # 패턴/접두사 검색
                 blobs = bucket.list_blobs(prefix=pattern)
             else:
@@ -144,7 +135,9 @@ class GcsConnector(BaseConnector):
                     if limit and count >= limit:
                         break
 
-            _LOGGER.info(f"[GcsConnector] Pattern '{pattern}' search result: {len(files)} files found (scanned {total_scanned})")
+            _LOGGER.info(
+                f"[GcsConnector] Pattern '{pattern}' search result: {len(files)} files found (scanned {total_scanned})"
+            )
             return files
 
         except Exception as e:
@@ -228,7 +221,9 @@ class GcsConnector(BaseConnector):
 
         except Exception as e:
             _LOGGER.error(f"[GcsConnector] Failed to download GCS file: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}") from e
+            raise ERROR_FILE_DOWNLOAD_FAILED(
+                file_path=f"{bucket_name}/{file_path}"
+            ) from e
 
     def download_file_from_url(self, url: str) -> IO:
         """HTTP URL에서 파일을 스트림으로 다운로드 (외부 URL 지원용)"""
@@ -241,10 +236,7 @@ class GcsConnector(BaseConnector):
 
             # Content-Length 헤더로 파일 크기 확인
             content_length = response.headers.get("content-length")
-            if (
-                content_length
-                and int(content_length) > GCS_CONFIG["max_file_size"]
-            ):
+            if content_length and int(content_length) > GCS_CONFIG["max_file_size"]:
                 raise ERROR_INVALID_ARGUMENT(
                     key=f"File size {content_length} exceeds maximum allowed size {GCS_CONFIG['max_file_size']}"
                 )
@@ -300,7 +292,9 @@ class GcsConnector(BaseConnector):
 
         except Exception as e:
             _LOGGER.error(f"[GcsConnector] Failed to get GCS file info: {e}")
-            raise ERROR_FILE_DOWNLOAD_FAILED(file_path=f"{bucket_name}/{file_path}") from e
+            raise ERROR_FILE_DOWNLOAD_FAILED(
+                file_path=f"{bucket_name}/{file_path}"
+            ) from e
 
     def _is_supported_file(self, file_name: str) -> bool:
         """지원되는 파일 형식인지 확인"""

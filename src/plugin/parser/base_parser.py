@@ -73,9 +73,7 @@ class BaseParser(ABC):
             # data 필드가 올바르게 설정되었는지 확인하고 보장
             if "data" not in record or not isinstance(record["data"], dict):
                 list_price = self._get_list_price_from_record(record)
-                record["data"] = self._create_spaceone_billing_data(
-                    record, list_price
-                )
+                record["data"] = self._create_spaceone_billing_data(record, list_price)
 
             # data 필드에도 cost가 있는지 확인
             if isinstance(record.get("data"), dict):
@@ -86,13 +84,15 @@ class BaseParser(ABC):
 
         # 궁극적 보장 시스템 적용 - cost 필드 최종 검증
         response = {"results": final_results}
-        
+
         # 🚨 CRITICAL: 모든 레코드에 cost 필드가 최상위에 있는지 최종 확인
         for record in response["results"]:
             if isinstance(record, dict):
                 if "cost" not in record:
                     record["cost"] = 0.0
-                    _LOGGER.error("[BaseParser] CRITICAL: cost field missing, added 0.0")
+                    _LOGGER.error(
+                        "[BaseParser] CRITICAL: cost field missing, added 0.0"
+                    )
                 # cost 필드를 딕셔너리의 첫 번째 위치로 이동
                 cost_value = record.pop("cost")
                 record_copy = record.copy()
@@ -285,7 +285,9 @@ class BaseParser(ABC):
         """동적 청크 크기 조정 - 더욱 보수적인 접근"""
         estimated_size = self._estimate_message_size(records)
 
-        if estimated_size > self.grpc_message_limit * 0.6:  # 60% 임계값으로 더욱 보수적 접근
+        if (
+            estimated_size > self.grpc_message_limit * 0.6
+        ):  # 60% 임계값으로 더욱 보수적 접근
             # 청크 크기를 줄여야 함
             new_chunk_size = max(50, int(self.chunk_size * 0.5))  # 더 적극적으로 감소
             if new_chunk_size != self.chunk_size:
@@ -299,7 +301,9 @@ class BaseParser(ABC):
             and self.chunk_size < self.max_chunk_size
         ):
             # 청크 크기를 늘릴 수 있음 (천천히)
-            new_chunk_size = min(self.max_chunk_size, int(self.chunk_size * 1.1))  # 10%씩만 증가
+            new_chunk_size = min(
+                self.max_chunk_size, int(self.chunk_size * 1.1)
+            )  # 10%씩만 증가
             if new_chunk_size != self.chunk_size:
                 self.chunk_size = new_chunk_size
 

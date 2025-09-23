@@ -1,27 +1,12 @@
 import logging
 from datetime import datetime, timedelta
 
-# SpaceONE Mock for local development (프로젝트 규칙 13.1 준수)
-try:
-    from spaceone.core.error import (
-        ERROR_INVALID_PARAMETER,
-        ERROR_INVALID_PARAMETER_TYPE,
-        ERROR_REQUIRED_PARAMETER,
-    )
-    from spaceone.core.manager import BaseManager
-except ImportError:
-    # Mock for local development
-    class MockError:
-        def __call__(self, *args, **kwargs):
-            return Exception("Mock SpaceONE Error")
-
-    ERROR_INVALID_PARAMETER = MockError()
-    ERROR_INVALID_PARAMETER_TYPE = MockError()
-    ERROR_REQUIRED_PARAMETER = MockError()
-
-    class BaseManager:
-        """Mock BaseManager for local development"""
-        pass
+from spaceone.core.error import (
+    ERROR_INVALID_PARAMETER,
+    ERROR_INVALID_PARAMETER_TYPE,
+    ERROR_REQUIRED_PARAMETER,
+)
+from spaceone.core.manager import BaseManager
 
 from ..conf.cost_conf import (
     BIGQUERY_TABLE_PREFIX,
@@ -48,11 +33,11 @@ REQUIRED_OPTIONS = [
 class JobManager(BaseManager):
     # 🚀 활성 프로젝트 캐시 (클래스 변수)
     _active_projects_cache = {
-        'data': [],
-        'last_updated': None,
-        'cache_duration_minutes': 30  # 30분 캐시
+        "data": [],
+        "last_updated": None,
+        "cache_duration_minutes": 30,  # 30분 캐시
     }
-    
+
     def __init__(self, *args, **kwargs):
         _LOGGER.debug(
             f"[JobManager] Initializing JobManager - Args: {args}, Kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
@@ -271,80 +256,99 @@ class JobManager(BaseManager):
                 "[JobManager._get_bigquery_tasks] Creating BigQuery SQL query"
             )
             query = self._create_google_sql(start_month)
-            
+
             # 쿼리 상세 로깅 추가
             _LOGGER.info("=" * 80)
             _LOGGER.info("🔍 [QUERY #1] JobManager - 스마트 프리필터링 프로젝트 조회")
             _LOGGER.info(f"[JobManager._get_bigquery_tasks] 조회 시작일: {start_month}")
-            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 프로젝트: {self.billing_export_project_id}")
-            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 데이터셋: {self.billing_dataset}")
-            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 테이블: {self.billing_table}")
-            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 빌링 계정: {self.billing_account_id}")
-            _LOGGER.info(f"[JobManager._get_bigquery_tasks] 필터 조건: 비용 > 0 OR 사용량 > 0")
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] 빌링 프로젝트: {self.billing_export_project_id}"
+            )
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] 빌링 데이터셋: {self.billing_dataset}"
+            )
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] 빌링 테이블: {self.billing_table}"
+            )
+            _LOGGER.info(
+                f"[JobManager._get_bigquery_tasks] 빌링 계정: {self.billing_account_id}"
+            )
+            _LOGGER.info(
+                "[JobManager._get_bigquery_tasks] 필터 조건: 비용 > 0 OR 사용량 > 0"
+            )
             _LOGGER.info("📝 [실행 쿼리]")
             _LOGGER.info(f"{query}")
             _LOGGER.info("=" * 80)
-            
+
             # 쿼리 실행 시간 측정
             import time
+
             start_time = time.time()
-            
+
             _LOGGER.info("🔄 [쿼리 실행 중] BigQuery에서 데이터 조회를 시작합니다...")
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
             execution_time = time.time() - start_time
-            
+
             _LOGGER.info("=" * 80)
             _LOGGER.info("✅ [QUERY #1 완료] 스마트 필터링 쿼리 실행 결과")
             _LOGGER.info(f"📊 조회된 프로젝트 수: {len(response_stream)}개")
             _LOGGER.info(f"⏱️ 쿼리 실행 시간: {execution_time:.2f}초")
             _LOGGER.info(f"📅 조회 기간: {start_month}-01 이후")
-            
+
             # 🎯 프로젝트 발견 및 태스크 생성 상세 로깅
             if len(response_stream) > 0:
                 project_list = [row.id for _, row in response_stream.iterrows()]
-                
+
                 # 🚨 중요: 발견된 프로젝트 수 로깅
                 actual_projects = len(project_list)
-                
-                _LOGGER.info(f"🎯 [프로젝트 발견 결과]")
-                _LOGGER.info(f"   📊 BigQuery에서 발견된 활성 프로젝트 수: {actual_projects}개")
-                _LOGGER.info(f"   🔍 필터 조건: cost > 0 OR usage.amount > 0")
+
+                _LOGGER.info("🎯 [프로젝트 발견 결과]")
+                _LOGGER.info(
+                    f"   📊 BigQuery에서 발견된 활성 프로젝트 수: {actual_projects}개"
+                )
+                _LOGGER.info("   🔍 필터 조건: cost > 0 OR usage.amount > 0")
                 _LOGGER.info(f"   📅 조회 기간: {start_month}-01 이후")
-                
+
                 if actual_projects > 0:
-                    _LOGGER.info(f"   ✅ {actual_projects}개의 활성 프로젝트가 발견되었습니다!")
+                    _LOGGER.info(
+                        f"   ✅ {actual_projects}개의 활성 프로젝트가 발견되었습니다!"
+                    )
                 else:
-                    _LOGGER.warning(f"   ⚠️  활성 프로젝트가 발견되지 않았습니다!")
-                    _LOGGER.warning(f"   💡 빌링 데이터나 필터 조건을 확인하세요.")
-                
+                    _LOGGER.warning("   ⚠️  활성 프로젝트가 발견되지 않았습니다!")
+                    _LOGGER.warning("   💡 빌링 데이터나 필터 조건을 확인하세요.")
+
                 _LOGGER.info(f"🎯 [활성 프로젝트 목록] - 총 {actual_projects}개")
                 for i, project_id in enumerate(project_list, 1):
                     _LOGGER.info(f"   {i:2d}. {project_id}")
-                
+
                 # 특정 프로젝트들이 포함되었는지 확인 (누락되기 쉬운 프로젝트들)
                 key_projects_to_check = [
-                    "mkkang-project", 
+                    "mkkang-project",
                     "dev-project-1-465407",
-                    "inventory-project-465506", 
+                    "inventory-project-465506",
                     "iron-man-2-465309",
                     "marvels-the-avengers-465309",
                     "the-incredible-hulk-465309",
-                    "thor-465309"
+                    "thor-465309",
                 ]
-                
-                _LOGGER.info(f"🔍 [핵심 프로젝트 포함 확인]")
+
+                _LOGGER.info("🔍 [핵심 프로젝트 포함 확인]")
                 for key_project in key_projects_to_check:
                     if key_project in project_list:
                         _LOGGER.info(f"   ✅ {key_project} - 포함됨")
                     else:
                         _LOGGER.warning(f"   ❌ {key_project} - 누락됨!")
-                        
+
             else:
                 _LOGGER.error("🚨 [심각] 활성 프로젝트가 전혀 발견되지 않았습니다!")
                 _LOGGER.error("   💡 문제 해결 체크리스트:")
-                _LOGGER.error("   1. 필터 조건을 확인하세요: cost > 0 OR usage.amount > 0")
+                _LOGGER.error(
+                    "   1. 필터 조건을 확인하세요: cost > 0 OR usage.amount > 0"
+                )
                 _LOGGER.error(f"   2. 조회 기간을 확인하세요: {start_month}-01 이후")
-                _LOGGER.error(f"   3. 테이블 경로를 확인하세요: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
+                _LOGGER.error(
+                    f"   3. 테이블 경로를 확인하세요: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
+                )
                 _LOGGER.error("   4. BigQuery 테이블에 데이터가 있는지 확인하세요")
                 _LOGGER.error("   5. 서비스 계정 권한을 확인하세요")
             _LOGGER.info("=" * 80)
@@ -376,37 +380,45 @@ class JobManager(BaseManager):
 
             # 🚀 태스크 생성 완료 및 검증 로깅
             total_execution_time = time.time() - start_time
-            
+
             _LOGGER.info("=" * 80)
             _LOGGER.info("🎉 [태스크 생성 완료] BigQuery 태스크 생성 최종 결과")
             _LOGGER.info(f"📋 생성된 태스크 수: {len(tasks)}개")
             _LOGGER.info(f"📅 대상 시작월: {start_month}")
             _LOGGER.info(f"⏱️ 총 실행시간: {total_execution_time:.2f}초")
             _LOGGER.info(f"🏷️ 변경된 항목 수: {len(changed)}개")
-            
+
             # 🎯 태스크 생성 완전성 검증
             actual_tasks = len(tasks)
-            discovered_projects = len(response_stream)  # BigQuery에서 실제 발견된 프로젝트 수
-            
-            _LOGGER.info(f"🔍 [태스크 생성 검증]")
+            discovered_projects = len(
+                response_stream
+            )  # BigQuery에서 실제 발견된 프로젝트 수
+
+            _LOGGER.info("🔍 [태스크 생성 검증]")
             _LOGGER.info(f"   📊 발견된 프로젝트 수: {discovered_projects}개")
             _LOGGER.info(f"   ✅ 생성된 태스크 수: {actual_tasks}개")
-            
+
             if actual_tasks == discovered_projects:
-                _LOGGER.info(f"   🎯 완벽! 발견된 모든 프로젝트에 대한 태스크가 생성되었습니다!")
+                _LOGGER.info(
+                    "   🎯 완벽! 발견된 모든 프로젝트에 대한 태스크가 생성되었습니다!"
+                )
             elif actual_tasks < discovered_projects:
                 missing_tasks = discovered_projects - actual_tasks
                 _LOGGER.warning(f"   ⚠️  {missing_tasks}개 태스크 생성 누락!")
-                _LOGGER.warning(f"   💡 프로젝트 발견과 태스크 생성 간 불일치가 있습니다.")
+                _LOGGER.warning(
+                    "   💡 프로젝트 발견과 태스크 생성 간 불일치가 있습니다."
+                )
             else:
-                _LOGGER.warning(f"   🤔 생성된 태스크가 발견된 프로젝트보다 {actual_tasks - discovered_projects}개 많습니다!")
-            
+                _LOGGER.warning(
+                    f"   🤔 생성된 태스크가 발견된 프로젝트보다 {actual_tasks - discovered_projects}개 많습니다!"
+                )
+
             # 생성된 태스크의 프로젝트 ID 목록 (검증용)
             task_project_ids = [task["task_options"]["project_id"] for task in tasks]
-            _LOGGER.info(f"📝 [생성된 태스크의 프로젝트 ID 목록]")
+            _LOGGER.info("📝 [생성된 태스크의 프로젝트 ID 목록]")
             for i, project_id in enumerate(task_project_ids, 1):
                 _LOGGER.info(f"   {i:2d}. {project_id}")
-            
+
             _LOGGER.info("=" * 80)
             _LOGGER.debug(
                 f"[JobManager._get_bigquery_tasks] Changed item: {changed_item}"
@@ -486,9 +498,13 @@ class JobManager(BaseManager):
 
     def _create_google_sql(self, start):
         """BigQuery SQL 쿼리 생성 및 로깅"""
-        _LOGGER.debug(f"[JobManager._create_google_sql] 쿼리 생성 시작 - start: {start}")
-        _LOGGER.debug(f"[JobManager._create_google_sql] 테이블 정보 - {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}")
-        
+        _LOGGER.debug(
+            f"[JobManager._create_google_sql] 쿼리 생성 시작 - start: {start}"
+        )
+        _LOGGER.debug(
+            f"[JobManager._create_google_sql] 테이블 정보 - {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
+        )
+
         # 🚀 스마트 프리필터링: 금액이 0이 아닌 프로젝트만 조회
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{start}-01')
@@ -504,35 +520,48 @@ class JobManager(BaseManager):
             ORDER BY project.id  -- 일관된 순서 보장
             ;
         """
-        
-        _LOGGER.debug(f"[JobManager._create_google_sql] WHERE 조건: {where_condition.strip()}")
-        _LOGGER.debug(f"[JobManager._create_google_sql] 생성된 쿼리 길이: {len(query)} 문자")
-        _LOGGER.debug(f"[JobManager._create_google_sql] 쿼리 생성 완료")
-        
+
+        _LOGGER.debug(
+            f"[JobManager._create_google_sql] WHERE 조건: {where_condition.strip()}"
+        )
+        _LOGGER.debug(
+            f"[JobManager._create_google_sql] 생성된 쿼리 길이: {len(query)} 문자"
+        )
+        _LOGGER.debug("[JobManager._create_google_sql] 쿼리 생성 완료")
+
         return query
 
     def _is_cache_valid(self) -> bool:
         """캐시가 유효한지 확인"""
-        if not self._active_projects_cache['last_updated']:
+        if not self._active_projects_cache["last_updated"]:
             return False
-        
+
         from datetime import timedelta
-        cache_age = datetime.now() - self._active_projects_cache['last_updated']
-        max_age = timedelta(minutes=self._active_projects_cache['cache_duration_minutes'])
-        
+
+        cache_age = datetime.now() - self._active_projects_cache["last_updated"]
+        max_age = timedelta(
+            minutes=self._active_projects_cache["cache_duration_minutes"]
+        )
+
         is_valid = cache_age < max_age
         if is_valid:
-            _LOGGER.debug(f"[캐시] ✅ 유효한 캐시 사용 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})")
+            _LOGGER.debug(
+                f"[캐시] ✅ 유효한 캐시 사용 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})"
+            )
         else:
-            _LOGGER.debug(f"[캐시] ❌ 캐시 만료 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})")
-        
+            _LOGGER.debug(
+                f"[캐시] ❌ 캐시 만료 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})"
+            )
+
         return is_valid
 
     def _update_cache(self, projects: list):
         """캐시 업데이트"""
-        self._active_projects_cache['data'] = projects
-        self._active_projects_cache['last_updated'] = datetime.now()
-        _LOGGER.info(f"[캐시] 🔄 활성 프로젝트 캐시 업데이트: {len(projects)}개 프로젝트")
+        self._active_projects_cache["data"] = projects
+        self._active_projects_cache["last_updated"] = datetime.now()
+        _LOGGER.info(
+            f"[캐시] 🔄 활성 프로젝트 캐시 업데이트: {len(projects)}개 프로젝트"
+        )
 
     def _get_http_file_tasks(
         self,
@@ -562,9 +591,7 @@ class JobManager(BaseManager):
 
             while retry_count < max_retries:
                 try:
-                    self.gcs_connector.create_session(
-                        options, secret_data, schema
-                    )
+                    self.gcs_connector.create_session(options, secret_data, schema)
                     _LOGGER.debug(
                         "[JobManager._get_http_file_tasks] HTTP file session created successfully"
                     )
@@ -917,9 +944,7 @@ class JobManager(BaseManager):
             _LOGGER.info("[JobManager._get_data_source_type] Using source=gcs -> gcs")
             return DATA_SOURCE_TYPES["gcs"]
         elif source == "http":
-            _LOGGER.info(
-                "[JobManager._get_data_source_type] Using source=http -> http"
-            )
+            _LOGGER.info("[JobManager._get_data_source_type] Using source=http -> http")
             return DATA_SOURCE_TYPES["http"]
         elif source:
             _LOGGER.warning(

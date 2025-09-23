@@ -25,10 +25,10 @@ GCS_CONFIG = {
     "supported_formats": ["csv", "json", "parquet"],
     # 지원하는 압축 형식들
     "supported_compressions": [
-        "gz",        # gzip 압축
-        "gzip",      # gzip 압축 (확장자)
-        "snappy",    # Snappy 압축 (Parquet와 함께 주로 사용)
-        "zstd",      # Zstandard 압축
+        "gz",  # gzip 압축
+        "gzip",  # gzip 압축 (확장자)
+        "snappy",  # Snappy 압축 (Parquet와 함께 주로 사용)
+        "zstd",  # Zstandard 압축
     ],
     # 기본 청크 크기 - gRPC 메시지 크기 제한을 고려하여 더욱 감소
     "default_chunk_size": 500,

@@ -196,8 +196,10 @@ class RequestDeduplicator:
 
         key_str = str(sorted(key_data.items()))
         hash_value = hashlib.md5(key_str.encode()).hexdigest()
-        
-        _LOGGER.info(f"[RequestDeduplicator] 해시 생성 - 프로젝트: {project_id}, 해시: {hash_value[:8]}...")
+
+        _LOGGER.info(
+            f"[RequestDeduplicator] 해시 생성 - 프로젝트: {project_id}, 해시: {hash_value[:8]}..."
+        )
         return hash_value
 
     def is_duplicate_request(self, request_hash: str) -> bool:
@@ -216,12 +218,16 @@ class RequestDeduplicator:
 
             # 중복 요청 확인
             if request_hash in self._requests:
-                _LOGGER.info(f"[RequestDeduplicator] 중복 요청 감지 - 해시: {request_hash[:8]}...")
+                _LOGGER.info(
+                    f"[RequestDeduplicator] 중복 요청 감지 - 해시: {request_hash[:8]}..."
+                )
                 return True
 
             # 새 요청 등록
             self._requests[request_hash] = current_time
-            _LOGGER.info(f"[RequestDeduplicator] 새 요청 등록 - 해시: {request_hash[:8]}...")
+            _LOGGER.info(
+                f"[RequestDeduplicator] 새 요청 등록 - 해시: {request_hash[:8]}..."
+            )
             return False
 
 

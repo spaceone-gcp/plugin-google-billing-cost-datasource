@@ -56,7 +56,9 @@ class ParquetParser(BaseParser):
             for batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=columns, use_pandas_metadata=True
             ):
-                batch_result = self._process_parquet_batch(batch, field_mapper, processed_count)
+                batch_result = self._process_parquet_batch(
+                    batch, field_mapper, processed_count
+                )
                 if batch_result:
                     processed_count += len(batch_result["results"])
                     yield batch_result
@@ -90,20 +92,26 @@ class ParquetParser(BaseParser):
                     if "cost" not in mapped_record:
                         # additional_info에서 cost 복구 시도
                         cost_value = 0.0
-                        if "additional_info" in mapped_record and isinstance(mapped_record["additional_info"], dict):
-                            cost_after_credits = mapped_record["additional_info"].get("Cost After Credits", 0)
+                        if "additional_info" in mapped_record and isinstance(
+                            mapped_record["additional_info"], dict
+                        ):
+                            cost_after_credits = mapped_record["additional_info"].get(
+                                "Cost After Credits", 0
+                            )
                             try:
                                 cost_value = float(cost_after_credits)
                             except (ValueError, TypeError):
                                 cost_value = 0.0
-                        
+
                         # 최상위 cost 필드 추가 (첫 번째 위치)
                         new_record = {"cost": cost_value}
                         new_record.update(mapped_record)
                         mapped_record = new_record
-                        
-                        _LOGGER.info(f"[ParquetParser] RECOVERED cost field: {cost_value}")
-                    
+
+                        _LOGGER.info(
+                            f"[ParquetParser] RECOVERED cost field: {cost_value}"
+                        )
+
                     # SpaceONE 프레임워크 호환성을 위해 data 필드 보장
                     if "data" not in mapped_record or not isinstance(
                         mapped_record["data"], dict
@@ -111,7 +119,7 @@ class ParquetParser(BaseParser):
                         # data 필드에 cost 정보 포함
                         mapped_record["data"] = {
                             "cost": str(mapped_record.get("cost", 0.0)),
-                            "list_price": str(mapped_record.get("cost", 0.0))
+                            "list_price": str(mapped_record.get("cost", 0.0)),
                         }
                     batch_records.append(mapped_record)
                     current_count += 1
@@ -129,9 +137,7 @@ class ParquetParser(BaseParser):
                     len(batch_records), current_count, "parquet_stream"
                 )
                 # 동적 청크 크기 조정
-                self._adjust_chunk_size_dynamically(
-                    len(batch_records), batch_records
-                )
+                self._adjust_chunk_size_dynamically(len(batch_records), batch_records)
                 self._log_parsing_progress(current_count, "parquet_stream")
                 return self._create_batch_result(batch_records)
 
@@ -150,38 +156,64 @@ class ParquetParser(BaseParser):
 
         # SpaceONE 빌링 필수 필드들의 데이터 타입 정의
         # 새로운 스키마 기준 필드 분류
-        float_fields = ['cost', 'currency_conversion_rate', 'cost_at_list',
-                       'cost_at_effective_price_default', 'cost_at_list_consumption_model']
+        float_fields = [
+            "cost",
+            "currency_conversion_rate",
+            "cost_at_list",
+            "cost_at_effective_price_default",
+            "cost_at_list_consumption_model",
+        ]
 
-        numeric_fields = ['effective_price', 'tier_start_amount', 'pricing_unit_quantity',
-                         'list_price', 'effective_price_default', 'list_price_consumption_model']
+        numeric_fields = [
+            "effective_price",
+            "tier_start_amount",
+            "pricing_unit_quantity",
+            "list_price",
+            "effective_price_default",
+            "list_price_consumption_model",
+        ]
 
-        usage_float_fields = ['amount', 'amount_in_pricing_units']  # usage 하위 필드
-        credits_float_fields = ['amount']  # credits 배열 내의 amount 필드
+        usage_float_fields = ["amount", "amount_in_pricing_units"]  # usage 하위 필드
+        credits_float_fields = ["amount"]  # credits 배열 내의 amount 필드
 
-        timestamp_fields = ['usage_start_time', 'usage_end_time', 'export_time']
-        string_fields = ['billing_account_id', 'currency', 'transaction_type', 'seller_name', 'cost_type']
+        timestamp_fields = ["usage_start_time", "usage_end_time", "export_time"]
+        string_fields = [
+            "billing_account_id",
+            "currency",
+            "transaction_type",
+            "seller_name",
+            "cost_type",
+        ]
 
         # 명시적으로 문자열로 처리해야 하는 필드들 (cost가 포함되어도 float가 아님)
-        explicit_string_fields = ['cost_type', 'transaction_type', 'seller_name']
+        explicit_string_fields = ["cost_type", "transaction_type", "seller_name"]
 
         # REPEATED 필드들 (배열로 처리)
-        repeated_fields = ['labels', 'system_labels', 'tags', 'credits']
+        repeated_fields = ["labels", "system_labels", "tags", "credits"]
 
         # 중첩 구조 필드들 (RECORD 타입)
-        record_fields = ['service', 'sku', 'project', 'location', 'price', 'usage',
-                        'invoice', 'adjustment_info', 'consumption_model']
+        record_fields = [
+            "service",
+            "sku",
+            "project",
+            "location",
+            "price",
+            "usage",
+            "invoice",
+            "adjustment_info",
+            "consumption_model",
+        ]
 
         field_types = {
-            'float_fields': float_fields,
-            'numeric_fields': numeric_fields,
-            'usage_float_fields': usage_float_fields,
-            'credits_float_fields': credits_float_fields,
-            'timestamp_fields': timestamp_fields,
-            'string_fields': string_fields,
-            'explicit_string_fields': explicit_string_fields,
-            'repeated_fields': repeated_fields,
-            'record_fields': record_fields
+            "float_fields": float_fields,
+            "numeric_fields": numeric_fields,
+            "usage_float_fields": usage_float_fields,
+            "credits_float_fields": credits_float_fields,
+            "timestamp_fields": timestamp_fields,
+            "string_fields": string_fields,
+            "explicit_string_fields": explicit_string_fields,
+            "repeated_fields": repeated_fields,
+            "record_fields": record_fields,
         }
 
         for key, value in row_dict.items():
@@ -212,7 +244,7 @@ class ParquetParser(BaseParser):
             return None
 
         if value.size == 0:  # 빈 배열
-            return [] if key in field_types['nested_fields'] else ""
+            return [] if key in field_types["nested_fields"] else ""
         elif value.size == 1:  # 단일 값 배열
             return value.item()  # 스칼라 값으로 변환
         else:  # 다중 값 배열
@@ -220,13 +252,23 @@ class ParquetParser(BaseParser):
 
     def _get_nan_default_value(self, key, field_types):
         """NaN 값에 대한 기본값 반환 - 새로운 스키마 기준"""
-        if (key in field_types['float_fields'] or key in field_types['numeric_fields'] or
-            key in field_types['usage_float_fields'] or key in field_types['credits_float_fields'] or
-            (any(field in key.lower() for field in ['cost', 'amount', 'price', 'rate']) and key not in field_types['explicit_string_fields'])):
+        if (
+            key in field_types["float_fields"]
+            or key in field_types["numeric_fields"]
+            or key in field_types["usage_float_fields"]
+            or key in field_types["credits_float_fields"]
+            or (
+                any(
+                    field in key.lower()
+                    for field in ["cost", "amount", "price", "rate"]
+                )
+                and key not in field_types["explicit_string_fields"]
+            )
+        ):
             return 0.0
-        elif key in field_types['repeated_fields']:
+        elif key in field_types["repeated_fields"]:
             return []
-        elif key in field_types['record_fields']:
+        elif key in field_types["record_fields"]:
             return {}
         else:
             return ""
@@ -234,33 +276,45 @@ class ParquetParser(BaseParser):
     def _convert_by_field_type(self, key, value, field_types):
         """필드 타입에 따라 값 변환 - 새로운 스키마 기준"""
         # 명시적 문자열 필드 우선 처리
-        if key in field_types['explicit_string_fields']:
+        if key in field_types["explicit_string_fields"]:
             return self._convert_to_string_safe(value)
 
         # FLOAT 타입 필드 처리 (명시적 문자열 필드 제외)
-        elif (key in field_types['float_fields'] or key in field_types['usage_float_fields'] or
-            key in field_types['credits_float_fields'] or
-            (any(field in key.lower() for field in ['cost', 'rate']) and key not in field_types['explicit_string_fields'])):
+        elif (
+            key in field_types["float_fields"]
+            or key in field_types["usage_float_fields"]
+            or key in field_types["credits_float_fields"]
+            or (
+                any(field in key.lower() for field in ["cost", "rate"])
+                and key not in field_types["explicit_string_fields"]
+            )
+        ):
             return self._convert_to_float_safe(value)
 
         # NUMERIC 타입 필드 처리 (높은 정밀도)
-        elif key in field_types['numeric_fields'] or any(field in key.lower() for field in ['price']):
+        elif key in field_types["numeric_fields"] or any(
+            field in key.lower() for field in ["price"]
+        ):
             return self._convert_to_numeric_safe(value)
 
         # TIMESTAMP 필드를 문자열로 변환
-        elif key in field_types['timestamp_fields'] or any(field in key.lower() for field in ['time']):
+        elif key in field_types["timestamp_fields"] or any(
+            field in key.lower() for field in ["time"]
+        ):
             return self._convert_to_datetime_string(value, key)
 
         # STRING 필드 처리
-        elif key in field_types['string_fields'] or any(field in key.lower() for field in ['id', 'name', 'description', 'type']):
+        elif key in field_types["string_fields"] or any(
+            field in key.lower() for field in ["id", "name", "description", "type"]
+        ):
             return self._convert_to_string_safe(value)
 
         # REPEATED 필드 처리 (배열)
-        elif key in field_types['repeated_fields']:
+        elif key in field_types["repeated_fields"]:
             return self._process_repeated_field_parquet(value)
 
         # RECORD 타입 필드 처리 (중첩 구조)
-        elif key in field_types['record_fields']:
+        elif key in field_types["record_fields"]:
             return self._normalize_nested_structure_parquet(value)
 
         # 기타 필드
@@ -269,13 +323,17 @@ class ParquetParser(BaseParser):
 
     def _get_exception_fallback_value(self, key, value, field_types):
         """예외 발생 시 안전한 기본값 반환 - 새로운 스키마 기준"""
-        if (key in field_types['float_fields'] or key in field_types['numeric_fields'] or
-            key in field_types['usage_float_fields'] or key in field_types['credits_float_fields'] or
-            key.lower() in ["cost", "usage_quantity", "amount"]):
+        if (
+            key in field_types["float_fields"]
+            or key in field_types["numeric_fields"]
+            or key in field_types["usage_float_fields"]
+            or key in field_types["credits_float_fields"]
+            or key.lower() in ["cost", "usage_quantity", "amount"]
+        ):
             return 0.0
-        elif key in field_types['repeated_fields']:
+        elif key in field_types["repeated_fields"]:
             return []
-        elif key in field_types['record_fields']:
+        elif key in field_types["record_fields"]:
             return {}
         else:
             return str(value) if value is not None else ""
@@ -291,7 +349,7 @@ class ParquetParser(BaseParser):
 
             if isinstance(value, str):
                 cleaned_value = value.strip()
-                if not cleaned_value or cleaned_value.lower() == 'nan':
+                if not cleaned_value or cleaned_value.lower() == "nan":
                     return 0.0
                 return float(cleaned_value)
 
@@ -305,7 +363,7 @@ class ParquetParser(BaseParser):
             return ""
 
         if isinstance(value, str):
-            return value.replace('nan', '') if value == 'nan' else value
+            return value.replace("nan", "") if value == "nan" else value
 
         return str(value)
 
@@ -323,18 +381,19 @@ class ParquetParser(BaseParser):
 
             # pandas Timestamp인 경우
             if isinstance(value, pd.Timestamp):
-                if 'time' in field_name.lower():
-                    return value.strftime('%Y-%m-%d %H:%M:%S')
+                if "time" in field_name.lower():
+                    return value.strftime("%Y-%m-%d %H:%M:%S")
                 else:
-                    return value.strftime('%Y-%m-%d')
+                    return value.strftime("%Y-%m-%d")
 
             # 기타 datetime 객체
             from datetime import date, datetime
+
             if isinstance(value, (datetime, date)):
-                if 'time' in field_name.lower():
-                    return value.strftime('%Y-%m-%d %H:%M:%S')
+                if "time" in field_name.lower():
+                    return value.strftime("%Y-%m-%d %H:%M:%S")
                 else:
-                    return value.strftime('%Y-%m-%d')
+                    return value.strftime("%Y-%m-%d")
 
             # 기타 타입은 문자열로 변환
             return str(value)
@@ -356,12 +415,13 @@ class ParquetParser(BaseParser):
 
             # pandas의 NaN 체크
             import pandas as pd
+
             if pd.isna(value):
                 return {}
 
             # 문자열인 경우 JSON 파싱 시도
             if isinstance(value, str):
-                if value.strip() == '' or value.lower() == 'nan':
+                if value.strip() == "" or value.lower() == "nan":
                     return {}
                 try:
                     parsed = json.loads(value)
@@ -371,7 +431,7 @@ class ParquetParser(BaseParser):
 
             # 기타 타입은 문자열로 변환 후 재시도
             str_value = str(value)
-            if str_value.lower() in ['nan', 'none', '']:
+            if str_value.lower() in ["nan", "none", ""]:
                 return {}
 
             try:
@@ -456,6 +516,7 @@ class ParquetParser(BaseParser):
 
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return 0.0
         except (TypeError, ValueError, ImportError):
@@ -465,14 +526,16 @@ class ParquetParser(BaseParser):
             if isinstance(value, (int, float)):
                 return float(value)
             elif isinstance(value, str):
-                if value.strip().lower() in ('', 'nan', 'none', 'null'):
+                if value.strip().lower() in ("", "nan", "none", "null"):
                     return 0.0
                 # 숫자가 아닌 문자열인 경우 0.0 반환 (예: 'regular', 'usage' 등)
                 stripped_value = value.strip()
                 try:
                     return float(stripped_value)
                 except ValueError:
-                    _LOGGER.debug(f"[ParquetParser] Non-numeric string in FLOAT field: '{value}', using 0.0")
+                    _LOGGER.debug(
+                        f"[ParquetParser] Non-numeric string in FLOAT field: '{value}', using 0.0"
+                    )
                     return 0.0
             else:
                 return float(value)
@@ -486,6 +549,7 @@ class ParquetParser(BaseParser):
 
         try:
             import pandas as pd
+
             if pd.isna(value):
                 return []
         except (TypeError, ValueError, ImportError):
@@ -510,6 +574,7 @@ class ParquetParser(BaseParser):
 
             try:
                 import json
+
                 parsed = json.loads(str_value)
                 if isinstance(parsed, list):
                     return self._clean_repeated_array_parquet(parsed)
@@ -538,13 +603,19 @@ class ParquetParser(BaseParser):
             # pandas NaN 체크
             try:
                 import pandas as pd
+
                 if pd.isna(item):
                     continue
             except (TypeError, ValueError, ImportError):
                 pass
 
             # 빈 문자열이나 null 값 제거
-            if isinstance(item, str) and item.strip().lower() in ("", "none", "null", "nan"):
+            if isinstance(item, str) and item.strip().lower() in (
+                "",
+                "none",
+                "null",
+                "nan",
+            ):
                 continue
 
             cleaned.append(item)
