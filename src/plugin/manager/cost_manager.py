@@ -883,20 +883,30 @@ class CostManager(BaseManager):
         return data_structure
 
     def _convert_to_numeric(self, value):
-        """🚨 ULTRA PURE DATA: 값을 절대적으로 원본 그대로 보존 (변환 없음)"""
-        # 🚨 ULTRA PURE: null 케이스도 원본 그대로 보존
-        if value is None:
-            return None  # None을 0.0으로 강제 변환하지 않음
-
-        if value == "":
-            return ""  # 빈 문자열도 그대로 보존
+        """값을 float 타입으로 변환 (data 필드용)"""
+        if value is None or value == "":
+            return 0.0
 
         if str(value).lower() in ["null", "none", "nan"]:
-            return value  # 문자열 "null", "none", "nan"도 그대로 보존
+            return 0.0
 
-        # 🚨 ULTRA PURE: 모든 값을 절대적으로 원본 그대로 반환
-        # 어떠한 변환, 정밀도 개선, 타입 변경도 하지 않음
-        return value
+        try:
+            # 이미 숫자인 경우 float로 변환
+            if isinstance(value, (int, float)):
+                return float(value)
+
+            # 문자열인 경우 숫자로 변환
+            if isinstance(value, str):
+                cleaned_value = value.strip()
+                if not cleaned_value:
+                    return 0.0
+                return float(cleaned_value)
+
+            # 기타 타입은 float로 변환 시도
+            return float(value)
+
+        except (ValueError, TypeError):
+            return 0.0
 
     def _convert_to_string(self, value):
         """값을 문자열 타입으로 안전하게 변환 (GCS 파서와 동일한 로직)"""
@@ -968,18 +978,11 @@ class CostManager(BaseManager):
             cost_value if cost_value is not None else row_dict.get("cost", None)
         )  # 🚨 ULTRA PURE: 기본값 None
 
-        # 🚨 ULTRA PURE: data 필드에서도 null을 원본 그대로 보존
+        # data 필드에 float 타입으로 변환하여 포함
         final_actual_cost = self._convert_to_numeric(actual_cost)
-        if final_actual_cost is None or str(final_actual_cost).lower() == "null":
-            _LOGGER.debug("[CostManager] Actual cost is None/null, preserving as None")
-            final_actual_cost = None
-
         final_list_price = self._convert_to_numeric(list_price)
-        if final_list_price is None or str(final_list_price).lower() == "null":
-            _LOGGER.debug("[CostManager] List price is None/null, preserving as None")
-            final_list_price = None
 
-        # data 필드에 cost와 list_price 모두 포함
+        # data 필드에 cost와 list_price 모두 포함 (모두 float 타입)
         data_structure = {
             "cost": final_actual_cost,
             "list_price": final_list_price,
@@ -1371,10 +1374,10 @@ class CostManager(BaseManager):
                     ),
                 },
                 "data": {
-                    "cost": str(cost_value),
-                    "list_price": str(
+                    "cost": self._convert_to_numeric(cost_value),
+                    "list_price": self._convert_to_numeric(
                         getattr(row, "cost_at_list", cost_value)
-                    ),  # 🚨 PURE DATA: 원본 데이터 보존
+                    ),  # 🚨 PURE DATA: 원본 데이터를 float로 보존
                 },
                 "billed_date": self._extract_billed_date(row),
             }
