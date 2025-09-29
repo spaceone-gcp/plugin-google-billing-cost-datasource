@@ -589,17 +589,6 @@ _DEFAULT_METADATA_ADDITIONAL_INFO = {
             "searchable": False,
         },
     },
-    # 누락된 필드들 추가
-    "Ancestry Numbers": {
-        "name": "Ancestry Numbers",
-        "key": "Ancestry Numbers",
-        "type": "str",
-        "options": {
-            "is_optional": False,
-            "group_by": False,  # 고유값이 많아 그룹화에 부적합
-            "searchable": True,
-        },
-    },
     "Price Tier Start Amount": {
         "name": "Price Tier Start Amount",
         "key": "Price Tier Start Amount",

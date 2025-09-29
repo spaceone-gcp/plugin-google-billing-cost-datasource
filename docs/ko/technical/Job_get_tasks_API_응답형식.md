@@ -177,6 +177,98 @@ BigQuery 모드에서는 다음과 같은 로직으로 작업을 생성합니다
 - **검증**: 미래 날짜나 너무 과거 날짜는 자동 조정
 - **제한**: `changed.start` 필드는 최대 7자까지만 허용
 
+### 4.4. Start Time 결정 로직
+
+Job.get_tasks API에서 비용 데이터 수집의 시작 시점을 결정하는 로직은 다음과 같은 우선순위를 가집니다:
+
+#### 우선순위 체계
+
+1. **start 파라미터 우선 (최우선)**
+   - **조건**: `start` 파라미터가 존재하는 경우
+   - **동작**: `start` 값을 그대로 시작 시점으로 사용
+   - **목적**: 사용자가 명시적으로 지정한 시작 시점 존중
+
+2. **last_synchronized_at 기반 (2순위)**
+   - **조건**: `start`가 없고 `last_synchronized_at`가 존재하는 경우  
+   - **동작**: `last_synchronized_at`에서 10일 이전을 시작 시점으로 설정
+   - **목적**: 중복 수집을 통한 데이터 누락 방지 및 안전한 동기화
+
+3. **기본값 - 1년 전 (최후 순위)**
+   - **조건**: `start`와 `last_synchronized_at` 모두 없는 경우
+   - **동작**: 현재 시점에서 12개월(1년) 이전을 시작 시점으로 설정
+   - **목적**: 최초 비용 연동 시 충분한 히스토리 데이터 수집
+
+#### 구현 함수: _get_start_month
+
+```python
+def _get_start_month(self, start, last_synchronized_at=None):
+    """
+    비용 데이터 수집의 시작 월을 결정합니다.
+    
+    우선순위:
+    1. start 파라미터가 있으면 start를 기준으로
+    2. start가 없고 last_synchronized_at가 있으면 last_synchronized_at에서 10일 이전
+    3. 둘 다 없으면 현재에서 12개월 이전
+    """
+    if start:
+        # 1순위: 사용자 지정 start 시점 사용
+        start_time: datetime = self._parse_start_time(start)
+    elif last_synchronized_at:
+        # 2순위: 마지막 동기화에서 10일 이전 (데이터 누락 방지)
+        start_time: datetime = last_synchronized_at - timedelta(days=10)
+    else:
+        # 3순위: 현재에서 12개월 이전 (최초 연동)
+        current_utc = datetime.utcnow()
+        start_time: datetime = current_utc - relativedelta(months=12)
+        start_time = start_time.replace(day=1)
+    
+    # 시간 정보 정규화 (월 단위로 처리하기 위해)
+    start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    return start_time.strftime("%Y-%m")
+```
+
+#### 시나리오별 동작 예시
+
+**시나리오 1: start 파라미터 지정**
+```python
+# 입력
+start = "2025-09"
+last_synchronized_at = datetime(2025, 8, 15)
+
+# 결과
+start_time = "2025-09"  # start 값 그대로 사용
+```
+
+**시나리오 2: last_synchronized_at만 있는 경우**
+```python
+# 입력  
+start = None
+last_synchronized_at = datetime(2025, 9, 15)  # 2025-09-15
+
+# 결과 (10일 버퍼 적용)
+start_time = "2025-09"  # 10일 이전 → 2025-09-05 → 2025-09월
+
+# 월이 바뀌는 경우 예시
+last_synchronized_at = datetime(2025, 9, 5)  # 2025-09-05
+start_time = "2025-08"  # 10일 이전 → 2025-08-26 → 2025-08월
+```
+
+**시나리오 3: 둘 다 없는 경우 (최초 연동)**
+```python
+# 입력 (현재 시점: 2025-09-29)
+start = None
+last_synchronized_at = None
+
+# 결과
+start_time = "2024-09"  # 12개월 이전
+```
+
+#### 중요 정책
+
+- **10일 버퍼 정책**: Google Cloud Billing 데이터는 최대 3-5일 지연 가능하므로 데이터 누락 방지를 위해 10일 버퍼 적용
+- **12개월 히스토리 정책**: 최초 연동 시 연간 비용 트렌드 분석을 위한 충분한 데이터 제공
+- **BigQuery와 GCS 공통 적용**: 모든 데이터 소스 타입에서 동일한 로직 사용
+
 ## 에러 처리
 
 ### 5.1. 응답 검증

@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 
+from dateutil.relativedelta import relativedelta
 from spaceone.core.error import (
     ERROR_INVALID_PARAMETER,
     ERROR_INVALID_PARAMETER_TYPE,
@@ -433,30 +434,55 @@ class JobManager(BaseManager):
             raise
 
     def _get_start_month(self, start, last_synchronized_at=None):
+        """
+        비용 데이터 수집의 시작 월을 결정합니다.
+
+        우선순위:
+        1. start 파라미터가 있으면 start를 기준으로
+        2. start가 없고 last_synchronized_at가 있으면 last_synchronized_at에서 10일 이전
+        3. 둘 다 없으면 현재에서 12개월 이전
+
+        Args:
+            start: 사용자 지정 시작 시점 (YYYY-MM 형식)
+            last_synchronized_at: 마지막 동기화 시점
+
+        Returns:
+            str: 시작 월 (YYYY-MM 형식)
+        """
         _LOGGER.debug(
             f"[JobManager._get_start_month] Input parameters - start: {start}, last_synchronized_at: {last_synchronized_at}"
         )
 
         if start:
+            # 1순위: 사용자 지정 start 시점 사용
             start_time: datetime = self._parse_start_time(start)
             _LOGGER.debug(
                 f"[JobManager._get_start_month] Using provided start parameter: {start}"
             )
+        elif last_synchronized_at:
+            # 2순위: 마지막 동기화에서 10일 이전 (데이터 누락 방지)
+            start_time: datetime = last_synchronized_at - timedelta(days=10)
+            _LOGGER.info(
+                f"[JobManager._get_start_month] Using last_synchronized_at with 10-day buffer: "
+                f"{last_synchronized_at.strftime('%Y-%m-%d')} → {start_time.strftime('%Y-%m-%d')}"
+            )
         else:
-            # start 파라미터가 없으면 무조건 현재 날짜 기준 1년 전의 연월 사용
+            # 3순위: 현재에서 12개월 이전 (최초 연동)
             current_utc = datetime.utcnow()
-            start_time: datetime = current_utc - timedelta(days=365)
+            start_time: datetime = current_utc - relativedelta(months=12)
             start_time = start_time.replace(day=1)
-            _LOGGER.debug(
-                f"[JobManager._get_start_month] Using default (1 year ago) - current: {current_utc.strftime('%Y-%m-%d')}, calculated: {start_time.strftime('%Y-%m-%d')}"
+            _LOGGER.info(
+                f"[JobManager._get_start_month] Using default (12 months ago) - "
+                f"current: {current_utc.strftime('%Y-%m-%d')}, calculated: {start_time.strftime('%Y-%m-%d')}"
             )
 
+        # 시간 정보 정규화 (월 단위로 처리하기 위해)
         start_time = start_time.replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=None
         )
 
         result = start_time.strftime("%Y-%m")
-        _LOGGER.debug(f"[JobManager._get_start_month] Final result: {result}")
+        _LOGGER.info(f"[JobManager._get_start_month] Final start month: {result}")
         return result
 
     @staticmethod

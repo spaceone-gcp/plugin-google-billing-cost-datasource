@@ -133,7 +133,7 @@ pytest --cov=src
 | 문서 | 설명 |
 |------|------|
 | **[SpaceONE_표준_준수_additional_info_구조화_가이드.md](technical/SpaceONE_표준_준수_additional_info_구조화_가이드.md)** | SpaceONE 표준 준수 가이드 |
-| **[Job_get_tasks_API_응답형식.md](technical/Job_get_tasks_API_응답형식.md)** | Job API 응답 형식 |
+| **[Job_get_tasks_API_응답형식.md](technical/Job_get_tasks_API_응답형식.md)** | Job API 응답 형식 및 start time 결정 로직 |
 
 ---
 
