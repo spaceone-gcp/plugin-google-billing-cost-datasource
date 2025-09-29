@@ -65,33 +65,9 @@ class FieldMapper:
             SpaceONE 형식으로 변환된 데이터
         """
         try:
-            # 디버깅 로깅 (첫 번째 레코드만)
-            self._log_debug_info_once(source_data)
-
-            # 특정 필드들의 존재 여부 확인
-            if not hasattr(self, "_debug_once_done"):
-                _LOGGER.error(
-                    f"[DEBUG] Sample source_data keys: {list(source_data.keys())[:20]}"
-                )
-                for key in ["adjustment_info", "project_ancestry_numbers"]:
-                    if key in source_data:
-                        _LOGGER.error(f"[DEBUG] Found {key}: {source_data[key]}")
-                # project 중첩 구조 확인
-                if "project" in source_data:
-                    project_data = source_data["project"]
-                    if (
-                        isinstance(project_data, dict)
-                        and "ancestry_numbers" in project_data
-                    ):
-                        _LOGGER.error(
-                            f"[DEBUG] Found project.ancestry_numbers: {project_data['ancestry_numbers']}"
-                        )
-                self._debug_once_done = True
-
-            # 기본 필드 매핑 (null cost를 0으로 처리)
+            # 기본 필드 매핑
             cost_value = self._get_cost_by_option(source_data)
-            # null 값을 강제로 0으로 처리 (여러 단계 체크)
-            # cost 값 원본 보존 (0으로 강제 변환 제거)
+            # cost 값 원본 보존
             if (
                 cost_value is None
                 or cost_value == ""
@@ -138,7 +114,12 @@ class FieldMapper:
                 "resource": mapped_fields["resource"],
                 "billed_date": billed_date_value,
                 "tags": self._map_tags_field(source_data),
-                "additional_info": final_additional_info,
+                "additional_info": self._get_metadata_additional_info(source_data),
+                "data": self._create_spaceone_billing_data(
+                    source_data,
+                    {"additional_info": final_additional_info},
+                    self._get_list_price_from_source(source_data),
+                ),
             }
 
             # SpaceONE 응답 형식 보장 - Decimal을 float로 변환
@@ -192,6 +173,13 @@ class FieldMapper:
 
         except Exception as e:
             _LOGGER.error(f"[FieldMapper] Failed to map record: {e}")
+            _LOGGER.error(
+                f"[FieldMapper] Source data keys: {list(source_data.keys()) if isinstance(source_data, dict) else 'Not a dict'}"
+            )
+            _LOGGER.error(f"[FieldMapper] Error type: {type(e).__name__}")
+            import traceback
+
+            _LOGGER.error(f"[FieldMapper] Full traceback: {traceback.format_exc()}")
             raise ERROR_INVALID_ARGUMENT(key=f"field_mapper_error: {str(e)}") from e
 
     def _ensure_spaceone_response_types(self, data: dict) -> dict:
@@ -585,12 +573,7 @@ class FieldMapper:
                 "[FieldMapper] Cost field is None in mapped_data, preserving None value"
             )
 
-        # SpaceONE 프레임워크 요구사항 준수
-        # data 필드에 SpaceONE 빌링 표준에 맞는 정보 추가
-        list_price = self._get_list_price_from_source(source_data)
-        mapped_data["data"] = self._create_spaceone_billing_data(
-            source_data, mapped_data, list_price
-        )
+        # data 필드는 이미 위에서 생성됨 (중복 제거)
 
         # 일별 카운트 추적
         self._track_daily_count(mapped_data.get("billed_date", "unknown"))
@@ -662,17 +645,196 @@ class FieldMapper:
     def _create_spaceone_billing_data(
         self, source_data: dict, mapped_data: dict, list_price
     ) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 list_price 포함)"""
-        # cost 값을 mapped_data에서 가져오기
-        cost_value = mapped_data.get("cost", 0.0)
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (4개 핵심 필드 포함)"""
 
+        # 핵심 4개 필드 추출
         data_structure = {
-            "cost": self._convert_to_numeric(cost_value),
-            "list_price": self._convert_to_numeric(list_price),
+            "List Price": self._convert_to_numeric(list_price),
+            "Credits Total Amount": self._get_credits_total_amount(
+                source_data, mapped_data
+            ),
+            "Usage Amount": self._get_usage_amount(source_data, mapped_data),
+            "Usage Amount in Pricing Units": self._get_usage_amount_in_pricing_units(
+                source_data, mapped_data
+            ),
         }
 
-        # SpaceONE 응답 형식 보장 - data 필드도 Decimal을 float로 변환
-        return self._ensure_spaceone_response_types(data_structure)
+        # null 값 제거 및 SpaceONE 응답 형식 보장
+        cleaned_structure = {k: v for k, v in data_structure.items() if v is not None}
+        return self._ensure_spaceone_response_types(cleaned_structure)
+
+    def _get_credits_total_amount(self, source_data: dict, mapped_data: dict):
+        """크레딧 총합 금액 추출"""
+        # additional_info에서 Credits Total Amount 찾기
+        additional_info = mapped_data.get("additional_info", {})
+        credits_total = additional_info.get("Credits Total Amount")
+
+        if credits_total is not None:
+            return self._convert_to_numeric(credits_total)
+
+        # credits 배열에서 계산
+        credits_detail = additional_info.get("Credits Detail", [])
+        if credits_detail and isinstance(credits_detail, list):
+            total = sum(
+                credit.get("amount", 0)
+                for credit in credits_detail
+                if isinstance(credit, dict)
+            )
+            return self._convert_to_numeric(total) if total != 0 else None
+
+        return None
+
+    def _get_usage_amount(self, source_data: dict, mapped_data: dict):
+        """사용량 추출"""
+        # additional_info에서 Usage Amount 찾기
+        additional_info = mapped_data.get("additional_info", {})
+        usage_amount = additional_info.get("Usage Amount")
+
+        if usage_amount is not None:
+            return self._convert_to_numeric(usage_amount)
+
+        # 소스 데이터에서 직접 찾기
+        if "usage" in source_data and isinstance(source_data["usage"], dict):
+            amount = source_data["usage"].get("amount")
+            if amount is not None:
+                return self._convert_to_numeric(amount)
+
+        return None
+
+    def _get_usage_amount_in_pricing_units(self, source_data: dict, mapped_data: dict):
+        """가격 단위 사용량 추출"""
+        # additional_info에서 Usage Amount in Pricing Units 찾기
+        additional_info = mapped_data.get("additional_info", {})
+        usage_pricing_amount = additional_info.get("Usage Amount in Pricing Units")
+
+        if usage_pricing_amount is not None:
+            return self._convert_to_numeric(usage_pricing_amount)
+
+        # 소스 데이터에서 직접 찾기
+        if "usage" in source_data and isinstance(source_data["usage"], dict):
+            amount_in_pricing_units = source_data["usage"].get(
+                "amount_in_pricing_units"
+            )
+            if amount_in_pricing_units is not None:
+                return self._convert_to_numeric(amount_in_pricing_units)
+
+        return None
+
+    def _get_metadata_additional_info(self, source_data: dict) -> dict:
+        """메타데이터 필드만 포함하는 additional_info 생성 (33개 필드 완전 구현)
+
+        Cost_Management_플러그인_호환성_적용_가이드.md의 33개 메타데이터 필드 구성에 따라
+        빈 값도 <NA>로 처리하여 모든 필드를 포함
+        """
+        # 33개 필드 완전 구현 (문서 순서대로)
+        metadata_fields = {
+            # SpaceONE UI 기본 필수 항목 (6개)
+            "Project": source_data.get("project_name", ""),
+            "Provider": "Google Cloud",  # 고정값
+            "Service Account": source_data.get("billing_account_id", ""),
+            "Product": source_data.get("service_description", ""),
+            "Region": source_data.get("region_code", ""),
+            "Usage Type": source_data.get("sku_description", ""),
+            # 조정 정보 (4개)
+            "Adjustment Info Description": self._get_adjustment_info_field(
+                source_data, "description"
+            ),
+            "Adjustment Info ID": self._get_adjustment_info_field(source_data, "id"),
+            "Adjustment Info Mode": self._get_adjustment_info_field(
+                source_data, "mode"
+            ),
+            "Adjustment Info Type": self._get_adjustment_info_field(
+                source_data, "type"
+            ),
+            # 청구 관련 정보 (2개)
+            "Billing Account ID": source_data.get("billing_account_id", ""),
+            "Invoice Month": self._get_invoice_month(source_data),
+            # 소비 모델 정보 (2개)
+            "Consumption Model Description": self._get_consumption_model_field(
+                source_data, "description"
+            ),
+            "Consumption Model ID": self._get_consumption_model_field(
+                source_data, "id"
+            ),
+            # 기술적 메타데이터 (4개)
+            "Cost Type": source_data.get("cost_type", ""),
+            "Currency": source_data.get("currency", ""),
+            "Transaction Type": source_data.get("transaction_type", ""),
+            "Seller Name": source_data.get("seller_name", ""),
+            # 지역 관련 정보 (4개)
+            "Location Country": source_data.get("location_country", ""),
+            "Location Location": source_data.get("location_location", ""),
+            "Location Region": source_data.get("location_region", ""),
+            "Location Zone": source_data.get("location_zone", ""),
+            # 가격 정보 (2개)
+            "Price Unit": self._get_price_field(source_data, "unit"),
+            "Pricing Unit": self._get_pricing_unit_field(source_data),
+            # 프로젝트 세부 정보 (3개)
+            "Project ID": source_data.get("project_id", ""),
+            "Project Name": source_data.get("project_name", ""),
+            "Project Number": source_data.get("project_number", ""),
+            # 발행자 정보 (1개)
+            "Publisher Type": self._get_publisher_type(source_data),
+            # 서비스 세부 정보 (4개)
+            "SKU Description": source_data.get("sku_description", ""),
+            "SKU ID": source_data.get("sku_id", ""),
+            "Service Description": source_data.get("service_description", ""),
+            "Service ID": source_data.get("service_id", ""),
+            # 사용량 정보 (1개)
+            "Usage Unit": source_data.get("usage_unit", ""),
+        }
+
+        # 실제 데이터가 있는 필드만 포함 (빈 값과 <NA> 제거)
+        cleaned_metadata = {}
+        for k, v in metadata_fields.items():
+            # None, 빈 문자열, "<NA>" 값인 경우 제외
+            if v is not None and v != "" and v != "<NA>":
+                cleaned_metadata[k] = str(v).strip()
+
+        return cleaned_metadata
+
+    def _get_invoice_month(self, source_data: dict) -> str:
+        """청구서 월 추출"""
+        invoice = source_data.get("invoice", {})
+        if isinstance(invoice, dict):
+            return invoice.get("month", "")
+        return ""
+
+    def _get_publisher_type(self, source_data: dict) -> str:
+        """발행자 유형 추출"""
+        invoice = source_data.get("invoice", {})
+        if isinstance(invoice, dict):
+            return invoice.get("publisher_type", "")
+        return ""
+
+    def _get_adjustment_info_field(self, source_data: dict, field: str) -> str:
+        """조정 정보 필드 추출"""
+        adjustment_info = source_data.get("adjustment_info", {})
+        if isinstance(adjustment_info, dict):
+            return adjustment_info.get(field, "")
+        return ""
+
+    def _get_consumption_model_field(self, source_data: dict, field: str) -> str:
+        """소비 모델 필드 추출"""
+        consumption_model = source_data.get("consumption_model", {})
+        if isinstance(consumption_model, dict):
+            return consumption_model.get(field, "")
+        return ""
+
+    def _get_price_field(self, source_data: dict, field: str) -> str:
+        """가격 필드 추출"""
+        price = source_data.get("price", {})
+        if isinstance(price, dict):
+            return price.get(field, "")
+        return ""
+
+    def _get_pricing_unit_field(self, source_data: dict) -> str:
+        """가격 책정 단위 필드 추출"""
+        # usage.pricing_unit에서 추출
+        usage = source_data.get("usage", {})
+        if isinstance(usage, dict):
+            return usage.get("pricing_unit", "")
+        return ""
 
     def _convert_to_numeric(self, value):
         """값을 적절한 숫자 타입으로 변환 (부동소수점 정밀도 개선 포함)"""
@@ -1149,6 +1311,66 @@ class FieldMapper:
             _LOGGER.warning(f"[FieldMapper] Failed to process labels array: {e}")
             return {}
 
+    def _process_system_labels_data(self, system_labels_data) -> dict:
+        """System Labels 데이터를 구조적 딕셔너리로 변환 (labels와 동일한 로직 사용)"""
+        # labels와 동일한 처리 로직 적용
+        if isinstance(system_labels_data, list):
+            return self._process_labels_array(system_labels_data)
+        elif isinstance(system_labels_data, dict):
+            return system_labels_data
+        else:
+            _LOGGER.warning(
+                f"[FieldMapper] Unexpected system_labels data type: {type(system_labels_data)}"
+            )
+            return {}
+
+    def _process_ancestors_data(self, ancestors_data) -> list:
+        """Project Ancestors 데이터를 리스트로 처리"""
+        try:
+            if not ancestors_data:
+                return []
+
+            if isinstance(ancestors_data, list):
+                # 이미 리스트인 경우 그대로 반환
+                return ancestors_data
+            elif isinstance(ancestors_data, str):
+                # 문자열인 경우 쉼표로 분리
+                return [
+                    item.strip() for item in ancestors_data.split(",") if item.strip()
+                ]
+            else:
+                _LOGGER.warning(
+                    f"[FieldMapper] Unexpected ancestors data type: {type(ancestors_data)}"
+                )
+                return []
+        except Exception as e:
+            _LOGGER.warning(f"[FieldMapper] Failed to process ancestors data: {e}")
+            return []
+
+    def _process_tags_data(self, tags_data) -> dict:
+        """Tags 데이터를 구조적 딕셔너리로 변환 (labels와 유사한 로직 사용)"""
+        try:
+            if not tags_data:
+                return {}
+
+            if isinstance(tags_data, list):
+                # 리스트인 경우 labels와 같은 방식으로 처리
+                return self._process_labels_array(tags_data)
+            elif isinstance(tags_data, dict):
+                # 이미 딕셔너리인 경우 그대로 반환
+                return tags_data
+            elif isinstance(tags_data, str):
+                # 문자열인 경우 기존 문자열 처리 메서드 사용
+                return self._process_tags_string(tags_data)
+            else:
+                _LOGGER.warning(
+                    f"[FieldMapper] Unexpected tags data type: {type(tags_data)}"
+                )
+                return {}
+        except Exception as e:
+            _LOGGER.warning(f"[FieldMapper] Failed to process tags data: {e}")
+            return {}
+
     def _process_tags_string(self, tags_value: str) -> dict:
         """문자열 형태의 tags를 딕셔너리로 변환"""
         # 이미 처리한 잘린 문자열인지 캐시 확인 (성능 최적화)
@@ -1399,13 +1621,6 @@ class FieldMapper:
 
         def map_dict_fields(data, rules=mapping_rule):
             result = {}
-            # 디버깅: 첫 번째 레코드에서만 로그 출력
-            if not hasattr(self, "_debug_dict_mapping_logged"):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: map_dict_fields called with data keys: {list(data.keys())}"
-                )
-                _LOGGER.info(f"[FieldMapper] DEBUG: mapping rules: {rules}")
-                self._debug_dict_mapping_logged = True
 
             for target_field, source_config in rules.items():
                 result[target_field] = self._process_dict_field_mapping(

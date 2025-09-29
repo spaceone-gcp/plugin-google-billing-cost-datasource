@@ -871,16 +871,54 @@ class CostManager(BaseManager):
         return ""
 
     def _create_spaceone_billing_data(self, record: dict, list_price) -> dict:
-        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 list_price 포함)"""
-        # cost 값을 record에서 가져오기
-        cost_value = record.get("cost", None)  # 🚨 ULTRA PURE: 기본값 None
+        """SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (4개 핵심 필드 포함)"""
 
+        # 핵심 4개 필드 추출
         data_structure = {
-            "cost": self._convert_to_numeric(cost_value),
-            "list_price": self._convert_to_numeric(list_price),
+            "List Price": self._convert_to_numeric(list_price),
+            "Credits Total Amount": self._get_credits_total_from_record(record),
+            "Usage Amount": self._get_usage_amount_from_record(record),
+            "Usage Amount in Pricing Units": self._get_usage_pricing_amount_from_record(
+                record
+            ),
         }
 
-        return data_structure
+        # null 값 제거
+        cleaned_structure = {k: v for k, v in data_structure.items() if v is not None}
+        return cleaned_structure
+
+    def _get_credits_total_from_record(self, record: dict):
+        """레코드에서 크레딧 총합 금액 추출"""
+        # additional_info에서 Credits Total Amount 찾기
+        additional_info = record.get("additional_info", {})
+        credits_total = additional_info.get("Credits Total Amount")
+
+        if credits_total is not None:
+            return self._convert_to_numeric(credits_total)
+
+        return None
+
+    def _get_usage_amount_from_record(self, record: dict):
+        """레코드에서 사용량 추출"""
+        # additional_info에서 Usage Amount 찾기
+        additional_info = record.get("additional_info", {})
+        usage_amount = additional_info.get("Usage Amount")
+
+        if usage_amount is not None:
+            return self._convert_to_numeric(usage_amount)
+
+        return None
+
+    def _get_usage_pricing_amount_from_record(self, record: dict):
+        """레코드에서 가격 단위 사용량 추출"""
+        # additional_info에서 Usage Amount in Pricing Units 찾기
+        additional_info = record.get("additional_info", {})
+        usage_pricing_amount = additional_info.get("Usage Amount in Pricing Units")
+
+        if usage_pricing_amount is not None:
+            return self._convert_to_numeric(usage_pricing_amount)
+
+        return None
 
     def _convert_to_numeric(self, value):
         """값을 float 타입으로 변환 (data 필드용)"""
@@ -972,23 +1010,175 @@ class CostManager(BaseManager):
     def _create_spaceone_billing_data_from_bigquery(
         self, row_dict: dict, list_price, cost_value=None
     ) -> dict:
-        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (cost와 list_price 포함)"""
-        # cost_value가 전달되면 사용, 아니면 row_dict에서 가져옴
-        actual_cost = (
-            cost_value if cost_value is not None else row_dict.get("cost", None)
-        )  # 🚨 ULTRA PURE: 기본값 None
+        """BigQuery 데이터로부터 SpaceONE 빌링 표준에 맞는 data 필드 구조 생성 (4개 핵심 필드 포함)"""
 
-        # data 필드에 float 타입으로 변환하여 포함
-        final_actual_cost = self._convert_to_numeric(actual_cost)
-        final_list_price = self._convert_to_numeric(list_price)
-
-        # data 필드에 cost와 list_price 모두 포함 (모두 float 타입)
+        # 핵심 4개 필드 추출
         data_structure = {
-            "cost": final_actual_cost,
-            "list_price": final_list_price,
+            "List Price": self._convert_to_numeric(list_price),
+            "Credits Total Amount": self._get_credits_total_from_bigquery_row(row_dict),
+            "Usage Amount": self._get_usage_amount_from_bigquery_row(row_dict),
+            "Usage Amount in Pricing Units": self._get_usage_pricing_amount_from_bigquery_row(
+                row_dict
+            ),
         }
 
-        return self._ensure_spaceone_response_types(data_structure)
+        # null 값 제거
+        cleaned_structure = {k: v for k, v in data_structure.items() if v is not None}
+        return self._ensure_spaceone_response_types(cleaned_structure)
+
+    def _get_credits_total_from_bigquery_row(self, row_dict: dict):
+        """빅쿼리 로우에서 크레딧 총합 금액 추출"""
+        # BigQuery 쿼리에서 이미 집계된 credits_total_amount 사용
+        if "credits_total_amount" in row_dict:
+            credits_total = row_dict["credits_total_amount"]
+            if credits_total is not None and credits_total != 0:
+                return self._convert_to_numeric(credits_total)
+
+        # 백업: credits 배열에서 계산 (credits_detail JSON에서)
+        credits = row_dict.get("credits", [])
+        if credits and isinstance(credits, list):
+            total = sum(
+                credit.get("amount", 0)
+                for credit in credits
+                if isinstance(credit, dict)
+            )
+            return self._convert_to_numeric(total) if total != 0 else None
+        return None
+
+    def _get_usage_amount_from_bigquery_row(self, row_dict: dict):
+        """빅쿼리 로우에서 사용량 추출"""
+        usage = row_dict.get("usage", {})
+        if isinstance(usage, dict):
+            amount = usage.get("amount")
+            if amount is not None:
+                return self._convert_to_numeric(amount)
+        return None
+
+    def _get_usage_pricing_amount_from_bigquery_row(self, row_dict: dict):
+        """빅쿼리 로우에서 가격 단위 사용량 추출"""
+        usage = row_dict.get("usage", {})
+        if isinstance(usage, dict):
+            amount_in_pricing_units = usage.get("amount_in_pricing_units")
+            if amount_in_pricing_units is not None:
+                return self._convert_to_numeric(amount_in_pricing_units)
+        return None
+
+    def _row_to_dict(self, row) -> dict:
+        """빅쿼리 로우 객체를 딕셔너리로 변환"""
+        row_dict = {}
+
+        # 기본 필드들 (BigQuery 집계 결과 포함)
+        for field in [
+            "cost",
+            "cost_at_list",
+            "usage_amount",
+            "usage_unit",
+            "currency",
+            "credits_total_amount",
+        ]:
+            if hasattr(row, field):
+                row_dict[field] = getattr(row, field)
+
+        # credits 배열 처리 - BigQuery 결과에서는 credits_detail (JSON)과 credits_total_amount (집계값) 사용
+        if hasattr(row, "credits_detail"):
+            credits_data = getattr(row, "credits_detail")
+            if credits_data:
+                try:
+                    import json
+
+                    if isinstance(credits_data, str):
+                        row_dict["credits"] = json.loads(credits_data)
+                    else:
+                        row_dict["credits"] = credits_data
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    row_dict["credits"] = []
+            else:
+                row_dict["credits"] = []
+
+        # usage 중첩 구조 처리 - BigQuery 별칭에 맞춰 수정
+        usage_dict = {}
+        if hasattr(row, "usage_amount"):
+            usage_dict["amount"] = getattr(row, "usage_amount")
+        # BigQuery에서 usage_quantity로 별칭 지정된 필드 사용
+        if hasattr(row, "usage_quantity"):
+            usage_dict["amount_in_pricing_units"] = getattr(row, "usage_quantity")
+        if usage_dict:
+            row_dict["usage"] = usage_dict
+
+        return row_dict
+
+    def _create_metadata_additional_info_from_row(self, row) -> dict:
+        """빅쿼리 로우에서 메타데이터 additional_info 생성 (Cost Management 가이드 33개 필드만)"""
+        # Cost Management 플러그인 호환성 가이드에 정의된 33개 메타데이터 필드만 포함
+        metadata_fields = {
+            # SpaceONE UI 기본 필수 항목 (6개)
+            "Project": str(getattr(row, "project_name", "")).strip(),
+            "Provider": "Google Cloud",
+            "Service Account": str(getattr(row, "billing_account_id", "")).strip(),
+            "Product": str(getattr(row, "service_description", "")).strip(),
+            "Region": str(getattr(row, "region_code", "")).strip(),
+            "Usage Type": str(getattr(row, "sku_description", "")).strip(),
+            # 조정 정보 (4개)
+            "Adjustment Info Description": self._extract_nested_field(
+                row, "adjustment_info", "description"
+            ),
+            "Adjustment Info ID": self._extract_nested_field(
+                row, "adjustment_info", "id"
+            ),
+            "Adjustment Info Mode": self._extract_nested_field(
+                row, "adjustment_info", "mode"
+            ),
+            "Adjustment Info Type": self._extract_nested_field(
+                row, "adjustment_info", "type"
+            ),
+            # 청구 관련 정보 (2개)
+            "Billing Account ID": str(getattr(row, "billing_account_id", "")).strip(),
+            "Invoice Month": self._extract_nested_field(row, "invoice", "month"),
+            # 소비 모델 정보 (2개)
+            "Consumption Model Description": self._extract_nested_field(
+                row, "consumption_model", "description"
+            ),
+            "Consumption Model ID": self._extract_nested_field(
+                row, "consumption_model", "id"
+            ),
+            # 기술적 메타데이터 (4개)
+            "Cost Type": str(getattr(row, "cost_type", "regular")).strip(),
+            "Currency": str(getattr(row, "currency", "USD")).strip(),
+            "Transaction Type": str(getattr(row, "transaction_type", "")).strip(),
+            "Seller Name": str(getattr(row, "seller_name", "")).strip(),
+            # 지역 관련 정보 (4개)
+            "Location Country": str(getattr(row, "location_country", "")).strip(),
+            "Location Location": str(getattr(row, "location_location", "")).strip(),
+            "Location Region": str(getattr(row, "location_region", "")).strip(),
+            "Location Zone": str(getattr(row, "location_zone", "")).strip(),
+            # 가격 정보 (2개)
+            "Price Unit": self._extract_nested_field(row, "price", "unit"),
+            "Pricing Unit": self._extract_nested_field(row, "usage", "pricing_unit"),
+            # 프로젝트 세부 정보 (3개)
+            "Project ID": str(getattr(row, "project_id", "")).strip(),
+            "Project Name": str(getattr(row, "project_name", "")).strip(),
+            "Project Number": str(getattr(row, "project_number", "")).strip(),
+            # 발행자 정보 (1개)
+            "Publisher Type": self._extract_nested_field(
+                row, "invoice", "publisher_type"
+            ),
+            # 서비스 세부 정보 (4개)
+            "SKU Description": str(getattr(row, "sku_description", "")).strip(),
+            "SKU ID": str(getattr(row, "sku_id", "")).strip(),
+            "Service Description": str(getattr(row, "service_description", "")).strip(),
+            "Service ID": str(getattr(row, "service_id", "")).strip(),
+            # 사용량 정보 (1개)
+            "Usage Unit": str(getattr(row, "usage_unit", "")).strip(),
+        }
+
+        # 실제 데이터가 있는 필드만 포함 (빈 값과 <NA> 제거)
+        cleaned_metadata = {}
+        for k, v in metadata_fields.items():
+            # None, 빈 문자열, "<NA>" 값인 경우 제외
+            if v is not None and v != "" and v != "<NA>":
+                cleaned_metadata[k] = str(v).strip()
+
+        return cleaned_metadata
 
     def _convert_keys_to_title_case(self, data: dict) -> dict:
         """딕셔너리의 모든 키를 Title Case로 변환 (재귀적 처리)"""
@@ -1126,9 +1316,6 @@ class CostManager(BaseManager):
             # cost 필드 존재 확인
             if "cost" not in result:
                 result["cost"] = None
-                _LOGGER.warning(
-                    "[CostManager] cost field was missing after type conversion, added None"
-                )
 
             # 모든 값을 원본 그대로 보존 (극소값도 보존)
             for k, v in result.items():
@@ -1241,144 +1428,10 @@ class CostManager(BaseManager):
                 # 🎯 화면 표시용: 프로젝트 이름 또는 커스텀 형식 사용
                 "resource": self._format_project_display_name(row),
                 "tags": {},
-                "additional_info": {
-                    # 기존 필수 필드들
-                    "Billing Account ID": str(
-                        getattr(row, "billing_account_id", "")
-                    ).strip(),
-                    # 🚨 SCHEMA FIX: cost_after_credits는 스키마에 없음 - 계산 필드로 처리
-                    "Cost After Credits": self._calculate_cost_after_credits(row),
-                    "Cost At List": getattr(
-                        row, "cost_at_list", cost_value
-                    ),  # 🚨 PURE DATA: 원본 데이터 보존
-                    "Cost Type": str(getattr(row, "cost_type", "regular")).strip(),
-                    "Credits Detail": self._process_credits_detail(row),
-                    "Invoice Month": self._extract_nested_field(
-                        row, "invoice", "month"
-                    ),  # 🚨 SCHEMA FIX: invoice.month 중첩 구조 처리
-                    "Project ID": str(getattr(row, "project_id", "")).strip(),
-                    "Project Name": str(getattr(row, "project_name", "")).strip(),
-                    "Resource Tags": {},
-                    # 추가 Google Cloud 빌링 필드들
-                    "Service ID": str(getattr(row, "service_id", "")).strip(),
-                    "Service Description": str(
-                        getattr(row, "service_description", "")
-                    ).strip(),
-                    "SKU ID": str(getattr(row, "sku_id", "")).strip(),
-                    "SKU Description": str(getattr(row, "sku_description", "")).strip(),
-                    "Project Number": str(getattr(row, "project_number", "")).strip(),
-                    "Location Country": str(
-                        getattr(row, "location_country", "")
-                    ).strip(),
-                    "Location Zone": str(getattr(row, "location_zone", "")).strip(),
-                    "Currency": str(getattr(row, "currency", "USD")).strip(),
-                    "Transaction Type": str(
-                        getattr(row, "transaction_type", "")
-                    ).strip(),
-                    "Seller Name": str(getattr(row, "seller_name", "")).strip(),
-                    "Publisher Type": self._extract_nested_field(
-                        row, "invoice", "publisher_type"
-                    ),  # 🚨 SCHEMA FIX: invoice.publisher_type 중첩 구조
-                    "Usage Unit": str(
-                        getattr(row, "usage_unit", "")
-                    ).strip(),  # ✅ 스키마 존재
-                    "Pricing Unit": self._extract_nested_field(
-                        row, "usage", "pricing_unit"
-                    ),  # 🚨 SCHEMA FIX: usage.pricing_unit 중첩 구조
-                    # 추가 비용 정보
-                    "Cost at Effective Price Default": getattr(
-                        row, "cost_at_effective_price_default", None
-                    ),  # 🚨 ULTRA PURE: 기본값 None
-                    "Cost at List Consumption Model": getattr(
-                        row, "cost_at_list_consumption_model", None
-                    ),  # 🚨 ULTRA PURE: 기본값 None
-                    "Currency Conversion Rate": getattr(
-                        row, "currency_conversion_rate", None
-                    ),  # 🚨 ULTRA PURE: 기본값 None (1.0 제거)
-                    "Usage Amount": getattr(
-                        row, "usage_amount", None
-                    ),  # 🚨 ULTRA PURE: 기본값 None
-                    # 🚨 SCHEMA FIX: credits_total_amount는 스키마에 없음 - 계산 필드로 처리
-                    "Credits Total Amount": self._calculate_credits_total(row),
-                    # 🚨 SCHEMA FIX: cost_with_credits는 스키마에 없음 - 계산 필드로 처리
-                    "Cost with Credits": self._calculate_cost_with_credits(
-                        row, cost_value
-                    ),
-                    # 라벨 및 태그 정보 (구조적 데이터로 저장)
-                    "Labels": self._process_labels_data(getattr(row, "labels", "[]")),
-                    # 🚨 SCHEMA FIX: system_labels_json -> system_labels (스키마에는 system_labels만 존재)
-                    "System Labels": self._process_system_labels_data(
-                        getattr(row, "system_labels", "[]")
-                    ),
-                    "Ancestry Numbers": str(
-                        getattr(row, "ancestry_numbers", "")
-                    ).strip(),
-                    # 🚨 누락된 스키마 필드들 추가 (BigQuery 스키마 완전 준수)
-                    "Usage Start Time": str(
-                        getattr(row, "usage_start_time", "")
-                    ).strip(),
-                    "Usage End Time": str(getattr(row, "usage_end_time", "")).strip(),
-                    "Export Time": str(getattr(row, "export_time", "")).strip(),
-                    "Location Region": str(getattr(row, "location_region", "")).strip(),
-                    "Location Location": str(
-                        getattr(row, "location_location", "")
-                    ).strip(),
-                    "Usage Amount in Pricing Units": getattr(
-                        row, "usage_amount_in_pricing_units", None
-                    ),  # 🚨 ULTRA PURE: 기본값 None
-                    # Price 중첩 구조 필드들
-                    "Price Effective Price": self._extract_nested_field(
-                        row, "price", "effective_price"
-                    ),
-                    "Price Tier Start Amount": self._extract_nested_field(
-                        row, "price", "tier_start_amount"
-                    ),
-                    "Price Unit": self._extract_nested_field(row, "price", "unit"),
-                    "Price Pricing Unit Quantity": self._extract_nested_field(
-                        row, "price", "pricing_unit_quantity"
-                    ),
-                    "Price List Price": self._extract_nested_field(
-                        row, "price", "list_price"
-                    ),
-                    "Price Effective Price Default": self._extract_nested_field(
-                        row, "price", "effective_price_default"
-                    ),
-                    "Price List Price Consumption Model": self._extract_nested_field(
-                        row, "price", "list_price_consumption_model"
-                    ),
-                    # Consumption Model 중첩 구조 필드들
-                    "Consumption Model ID": self._extract_nested_field(
-                        row, "consumption_model", "id"
-                    ),
-                    "Consumption Model Description": self._extract_nested_field(
-                        row, "consumption_model", "description"
-                    ),
-                    # Adjustment Info 중첩 구조 필드들
-                    "Adjustment Info ID": self._extract_nested_field(
-                        row, "adjustment_info", "id"
-                    ),
-                    "Adjustment Info Description": self._extract_nested_field(
-                        row, "adjustment_info", "description"
-                    ),
-                    "Adjustment Info Mode": self._extract_nested_field(
-                        row, "adjustment_info", "mode"
-                    ),
-                    "Adjustment Info Type": self._extract_nested_field(
-                        row, "adjustment_info", "type"
-                    ),
-                    # Tags 중첩 구조 필드들 (기본 구조만)
-                    "Tags": self._process_tags_data(getattr(row, "tags", "[]")),
-                    # Project Ancestors 중첩 구조
-                    "Project Ancestors": self._process_ancestors_data(
-                        getattr(row, "ancestors", "[]")
-                    ),
-                },
-                "data": {
-                    "cost": self._convert_to_numeric(cost_value),
-                    "list_price": self._convert_to_numeric(
-                        getattr(row, "cost_at_list", cost_value)
-                    ),  # 🚨 PURE DATA: 원본 데이터를 float로 보존
-                },
+                "additional_info": self._create_metadata_additional_info_from_row(row),
+                "data": self._create_spaceone_billing_data_from_bigquery(
+                    self._row_to_dict(row), getattr(row, "cost_at_list", cost_value)
+                ),
                 "billed_date": self._extract_billed_date(row),
             }
 

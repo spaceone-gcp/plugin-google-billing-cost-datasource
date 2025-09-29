@@ -8,6 +8,53 @@ SpaceONE Google Cloud Billing Cost Datasource 플러그인에서 **SpaceONE 플�
 
 **기반 데이터**: 2025년 9월 11일 v2.0 업데이트 (A+ 등급)
 
+## 🔧 Cost Management 표준 패턴 적용
+
+### SpaceONE 표준 구현 방식
+
+SpaceONE Cost Management 플러그인의 표준 패턴을 적용하여 일관성을 확보했습니다:
+
+```python
+import copy
+
+# 상수 딕셔너리 방식 (SpaceONE 표준)
+_DEFAULT_METADATA_ADDITIONAL_INFO = {
+    # SpaceONE UI 기본 필수 항목 (6개)
+    "Project": {
+        "name": "Project",
+        "key": "Project", 
+        "type": "str",
+        "options": {
+            "is_optional": False,
+            "is_required": True
+        }
+    },
+    "Provider": {
+        "name": "Provider",
+        "key": "Provider",
+        "type": "str",
+        "options": {
+            "is_optional": False,
+            "is_required": True
+        }
+    },
+    # ... 기타 필드들
+}
+
+# init_response에서 사용
+def init(self, options: dict) -> dict:
+    return {
+        "additional_info_keys": copy.deepcopy(_DEFAULT_METADATA_ADDITIONAL_INFO),
+        # ... 기타 응답 필드들
+    }
+```
+
+### 주요 개선사항
+
+1. **함수 → 상수**: 성능 향상 및 메모리 효율성
+2. **deepcopy 사용**: 데이터 안전성 확보
+3. **표준 구조**: SpaceONE 프레임워크 일관성
+
 ---
 
 ## 🎯 SpaceONE 응답 데이터 필수 요구사항

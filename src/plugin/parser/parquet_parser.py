@@ -244,7 +244,7 @@ class ParquetParser(BaseParser):
             return None
 
         if value.size == 0:  # 빈 배열
-            return [] if key in field_types["nested_fields"] else ""
+            return [] if key in field_types["repeated_fields"] else ""
         elif value.size == 1:  # 단일 값 배열
             return value.item()  # 스칼라 값으로 변환
         else:  # 다중 값 배열

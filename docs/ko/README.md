@@ -4,8 +4,9 @@
 
 이 프로젝트는 **SpaceONE 플랫폼**에서 Google Cloud Billing 데이터를 수집하고 처리하는 Cost Analysis Plugin입니다.
 
-**프로젝트 상태**: ✅ **A+ 등급** (2025년 9월 11일 최신 업데이트)
+**프로젝트 상태**: ✅ **A+ 등급** (2025년 1월 28일 최신 업데이트)
 - SpaceONE 플랫폼과 100% 호환
+- SpaceONE Cost Management 표준 패턴 적용 완료 🆕
 - 부동소수점 정밀도 개선 완료
 - Decimal 타입 완전 제거 (float 타입 보장)
 - 견고한 에러 처리 및 데이터 변환
@@ -123,14 +124,16 @@ pytest --cov=src
 | 문서 | 설명 | 중요도 |
 |------|------|--------|
 | **[code-maintenance-guide.md](development/code-maintenance-guide.md)** | 코드 유지보수 절차 | ⭐⭐⭐ |
+| **[통합_테스트_가이드.md](development/통합_테스트_가이드.md)** | gRPC 테스트 전략 및 모범사례 (통합 테스트 가이드) | ⭐⭐⭐ |
+| **[서버_실행_체크리스트.md](development/서버_실행_체크리스트.md)** | 서버 실행 및 포트 관리 가이드 | ⭐⭐ |
+| **[조건부_additional_info_필터링_PRD.md](development/조건부_additional_info_필터링_PRD.md)** | 조건부 additional_info 필터링 PRD | ⭐⭐ |
 | **[logging_standard.md](development/logging_standard.md)** | 로깅 표준 및 규칙 | ⭐⭐ |
 
 ### 📖 기술 문서
 | 문서 | 설명 |
 |------|------|
-| **[technical/architecture.md](technical/architecture.md)** | 시스템 아키텍처 |
-| **[technical/api-specifications.md](technical/api-specifications.md)** | API 명세서 |
-| **[technical/data-models.md](technical/data-models.md)** | 데이터 모델 정의 |
+| **[SpaceONE_표준_준수_additional_info_구조화_가이드.md](technical/SpaceONE_표준_준수_additional_info_구조화_가이드.md)** | SpaceONE 표준 준수 가이드 |
+| **[Job_get_tasks_API_응답형식.md](technical/Job_get_tasks_API_응답형식.md)** | Job API 응답 형식 |
 
 ---
 
@@ -350,6 +353,6 @@ python test/grpc/test_grpcurl_batch.py
 
 ---
 
-**마지막 업데이트**: 2025-09-10  
-**프로젝트 상태**: A+ 등급 (SpaceONE 완전 호환)  
+**마지막 업데이트**: 2025-01-28  
+**프로젝트 상태**: A+ 등급 (SpaceONE 완전 호환 + Cost Management 표준 패턴)  
 **메인테이너**: SpaceONE Team
