@@ -40,15 +40,12 @@ class JobManager(BaseManager):
     }
 
     def __init__(self, *args, **kwargs):
-        _LOGGER.debug(
-            f"[JobManager] Initializing JobManager - Args: {args}, Kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
-        )
+        # JobManager 초기화 DEBUG 로그 제거: 정상 동작시 로깅 불필요
         super().__init__(*args, **kwargs)
 
-        _LOGGER.debug("[JobManager] Creating connector instances")
+        # 커넥터 생성 DEBUG 로그 제거: 정상 동작시 로깅 불필요
         self.bigquery_connector = BigqueryConnector()
         self.gcs_connector = GcsConnector()
-        _LOGGER.debug("[JobManager] Connector instances created successfully")
 
         # 인스턴스 변수 초기화
         self.billing_export_project_id = None
@@ -57,10 +54,7 @@ class JobManager(BaseManager):
         self.billing_account_id = None
 
         _LOGGER.info("[JobManager] JobManager initialized successfully")
-        _LOGGER.debug(
-            f"[JobManager] Available connectors: BigQuery={type(self.bigquery_connector).__name__}, "
-            f"GCS={type(self.gcs_connector).__name__}"
-        )
+        # 커넥터 타입 DEBUG 로그 제거: 불필요한 정보
 
     def get_tasks(
         self,
@@ -75,11 +69,7 @@ class JobManager(BaseManager):
         _LOGGER.info(
             f"[JobManager.get_tasks] Starting task generation process for domain: {domain_id}"
         )
-        _LOGGER.debug(
-            f"[JobManager.get_tasks] Input parameters - "
-            f"Schema: {schema}, Start: {start}, Last sync: {last_synchronized_at}"
-        )
-        _LOGGER.debug(f"[JobManager.get_tasks] Options keys: {list(options.keys())}")
+        # 입력 파라미터 DEBUG 로그 제거: 불필요한 정보
 
         # filed_mapper 오타 사용 시 경고 (하위 호환성은 유지하지만 경고)
         if "filed_mapper" in options and "field_mapper" not in options:
@@ -88,12 +78,9 @@ class JobManager(BaseManager):
                 "Please use 'field_mapper' instead for better compatibility."
             )
 
-        _LOGGER.debug(
-            f"[JobManager.get_tasks] Secret data keys: {list(secret_data.keys()) if secret_data else 'None'}"
-        )
+        # Secret data keys DEBUG 로그 제거: 보안상 불필요
 
-        # 데이터 소스 타입 결정
-        _LOGGER.debug("[JobManager.get_tasks] Determining data source type")
+        # 데이터 소스 타입 결정 DEBUG 로그 제거
         data_source_type = self._get_data_source_type(options)
         _LOGGER.info(
             f"[JobManager.get_tasks] Data source type determined: {data_source_type}"

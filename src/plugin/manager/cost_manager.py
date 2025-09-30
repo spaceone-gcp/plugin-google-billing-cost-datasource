@@ -251,7 +251,7 @@ class CostManager(BaseManager):
 
             # 배치 처리를 위한 리스트 - gRPC 메시지 크기 제한 대응 (긴급 감소)
             batch_records = []
-            batch_size = 3  # Pod 중복 실행 시 안정성을 위해 더 작은 배치로 조정
+            batch_size = 1000  # 성능 최적화를 위해 배치 크기 증가
 
             for _, row in response_stream.iterrows():
                 row_count += 1
@@ -1318,21 +1318,14 @@ class CostManager(BaseManager):
                 result["cost"] = None
 
             # 모든 값을 원본 그대로 보존 (극소값도 보존)
-            for k, v in result.items():
-                if isinstance(v, float):
-                    # 극소값도 포함하여 모든 값을 원본 그대로 보존
-                    _LOGGER.debug(
-                        f"[CostManager] Preserving original float value for {k}: {v}"
-                    )
-                    # 반올림 제거하여 원본 정확도 유지
+            # DEBUG 로그 제거: float 값 보존은 정상 동작이므로 로깅 불필요
 
             # cost 필드 값 확인 (원본 보존)
             if "cost" in result and (
                 result["cost"] is None or str(result["cost"]).lower() == "null"
             ):
-                _LOGGER.debug(
-                    "[CostManager] Cost field is None/null, preserving as None"
-                )
+                # DEBUG 로그 제거: None/null 값도 정상적인 데이터이므로 로깅 불필요
+                pass
             elif "cost" not in result:
                 # cost 필드가 아예 없는 경우 None으로 설정
                 result["cost"] = None

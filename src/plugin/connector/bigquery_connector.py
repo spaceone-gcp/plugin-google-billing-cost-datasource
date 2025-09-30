@@ -3,9 +3,7 @@ import logging
 import google.oauth2.service_account
 import pandas_gbq
 from googleapiclient.discovery import build
-
 from spaceone.core.connector import BaseConnector
-
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -23,7 +21,7 @@ class BigqueryConnector(BaseConnector):
             return
 
         self.project_id = secret_data.get("project_id")
-        _LOGGER.info(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
+        # 프로젝트 ID 로그 제거: 매번 출력할 필요 없음
 
         # private_key 처리 (프론트엔드에서 이미 검증됨)
         processed_secret_data = secret_data.copy()
@@ -40,10 +38,10 @@ class BigqueryConnector(BaseConnector):
                     processed_secret_data
                 )
             )
-            _LOGGER.info("[BigqueryConnector] Google 서비스 계정 인증 정보 생성 성공")
+            # 인증 성공 로그 제거: 정상 동작시 로깅 불필요
 
             self.google_client = build("bigquery", "v2", credentials=self.credentials)
-            _LOGGER.info("[BigqueryConnector] BigQuery 클라이언트 생성 성공")
+            # 클라이언트 생성 성공 로그 제거: 정상 동작시 로깅 불필요
 
         except Exception as e:
             error_msg = f"Google 인증 정보 생성 실패: {str(e)}"
