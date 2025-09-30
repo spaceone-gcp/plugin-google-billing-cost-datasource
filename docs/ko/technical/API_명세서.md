@@ -2,13 +2,13 @@
 
 Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 업데이트로 통합된 source 파라미터, Credits Detail 기능, 그리고 향상된 성능 최적화를 포함합니다.
 
-## 🚨 SpaceONE JSON 응답 형식 제약사항
+##  SpaceONE JSON 응답 형식 제약사항
 
 ### 과학적 표기법 사용 금지 **[CRITICAL]**
 
 모든 API 응답에서 **과학적 표기법은 절대 사용할 수 없습니다**. SpaceONE 플랫폼은 JSON 응답에서 과학적 표기법을 지원하지 않습니다.
 
-#### ❌ 금지된 표기법
+####  금지된 표기법
 ```json
 {
   "cost": 1.23e-6,        // 과학적 표기법 금지
@@ -17,10 +17,10 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
 }
 ```
 
-#### ✅ 허용된 표기법
+####  허용된 표기법
 ```json
 {
-  "cost": 0.00000123,         // 🚨 CRITICAL: 최상위 필드, 절대 누락 금지
+  "cost": 0.00000123,         //  CRITICAL: 최상위 필드, 절대 누락 금지
   "usage_quantity": 4560.0,   // 정수도 소수점 포함 권장
   "data": {
     "cost": 0.00000123,       // data 필드 내의 cost (별도)
@@ -31,7 +31,7 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
 
 #### SpaceONE 빌링 응답 필수 구조 요구사항
 
-**🚨 CRITICAL: 최상위 `cost` 필드는 SpaceONE 빌링 응답의 필수 항목입니다.**
+** CRITICAL: 최상위 `cost` 필드는 SpaceONE 빌링 응답의 필수 항목입니다.**
 
 모든 빌링 응답에서 다음 구조를 **반드시** 준수해야 합니다:
 
@@ -39,20 +39,20 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
 {
   "results": [
     {
-      "cost": 123.45,                    // 🚨 CRITICAL: 최상위 필수 필드, 절대 누락 금지
+      "cost": 123.45,                    //  CRITICAL: 최상위 필수 필드, 절대 누락 금지
       "usage_quantity": 1000.0,          // 필수: 사용량
       "provider": "google_cloud",        // 필수: 프로바이더
       "region_code": "us-central1",      // 필수: 리전 코드
       "product": "BigQuery",             // 필수: 제품명
       "usage_type": "Active Storage",    // 필수: 사용 유형
       "resource": "project-123",         // 필수: 리소스 식별자
-      "currency": "KRW",                 // 🆕 필수: 통화 (최상위 필드)
+      "currency": "KRW",                 //  필수: 통화 (최상위 필드)
       "billed_date": "2025-09-10",       // 필수: 청구 날짜 (YYYY-MM-DD)
       "tags": {},                        // 필수: 태그 (빈 객체 허용)
       "additional_info": {},             // 필수: 추가 정보 (빈 객체 허용)
       "data": {                          // 필수: SpaceONE 프레임워크 요구사항 (cost, list_price만 포함)
-        "cost": 123.45,                  // 🚨 CRITICAL: 실제 비용 (최상위와 동일)
-        "list_price": 150.00           // 🚨 CRITICAL: 정가 정보 (할인 전 가격)
+        "cost": 123.45,                  //  CRITICAL: 실제 비용 (최상위와 동일)
+        "list_price": 150.00           //  CRITICAL: 정가 정보 (할인 전 가격)
       }
     }
   ]
@@ -67,7 +67,7 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
 {
   "results": [
     {
-      "cost": 0.0,                       // 🚨 CRITICAL: 최상위 필수 필드
+      "cost": 0.0,                       //  CRITICAL: 최상위 필수 필드
       "usage_unit": "hour",
       "usage_quantity": 0.0,
       "provider": "google_cloud",
@@ -89,8 +89,8 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
         "Resource Tags": {}
       },
       "data": {
-        "cost": 0.0,                     // 🚨 CRITICAL: 실제 비용 (숫자 타입)
-        "list_price": 0.0              // 🚨 CRITICAL: 정가 정보 (숫자 타입)
+        "cost": 0.0,                     //  CRITICAL: 실제 비용 (숫자 타입)
+        "list_price": 0.0              //  CRITICAL: 정가 정보 (숫자 타입)
       },
       "billed_date": "2025-09-15"
     }
@@ -106,7 +106,7 @@ Google Cloud Billing 플러그인의 상세 API 명세를 설명합니다. v2.0 
 - [ ] `1e-15` 미만 값은 `0.0`으로 처리
 - [ ] JSON 직렬화 전 완전한 과학적 표기법 제거
 
-## 통합 Source 파라미터 API (v2.0) ⭐ **NEW**
+## 통합 Source 파라미터 API (v2.0) **NEW**
 
 ### Source 기반 데이터 조회
 ```python
@@ -152,7 +152,7 @@ def _get_source_value(self, options: dict) -> str:
     """
 ```
 
-## Credits Detail API (v2.0) ⭐ **NEW**
+## Credits Detail API (v2.0) **NEW**
 
 ### Credits Detail 모드
 ```python
@@ -733,7 +733,7 @@ logger.info(
 )
 ```
 
-## GCS Connector API (v2.0) ⭐ **NEW**
+## GCS Connector API (v2.0) **NEW**
 
 ### GCS 버킷 데이터 조회
 ```python
@@ -790,7 +790,7 @@ def _get_gcs_file_list(
     """
 ```
 
-## HTTP File Connector API (v2.0) ⭐ **UPDATED**
+## HTTP File Connector API (v2.0) **UPDATED**
 
 ### HTTP URL 데이터 조회
 ```python
@@ -819,39 +819,39 @@ def _get_data_from_http(
     """
 ```
 
-## 📋 최근 업데이트 (v2.0)
+##  최근 업데이트 (v2.0)
 
-### 통합 Source 파라미터 ⭐ **NEW**
+### 통합 Source 파라미터 **NEW**
 - **기능**: 단일 `source` 파라미터로 모든 데이터 소스 통합
 - **값**: `"bigquery"`, `"gcs"`, `"http"`
 - **장점**: 설정 단순화, 명확한 데이터 소스 식별
 
-### Credits Detail 기능 ⭐ **NEW**
+### Credits Detail 기능 **NEW**
 - **기능**: 개별 크레딧 정보의 완전한 세부사항 제공
 - **모드**: `credits_detail_mode: true`로 활성화
 - **성능**: Credits가 있는 레코드만 선택적 조회
 
-### gRPC 최적화 ⭐ **NEW**
+### gRPC 최적화 **NEW**
 - **문제**: ResourceExhausted 오류 (4MB 제한)
 - **해결**: 스마트 청킹 시스템 (배치 크기 자동 조정)
 - **성능**: 대용량 데이터셋 안정적 전송
 
-### Cost 필드 보장 시스템 ⭐ **NEW**
+### Cost 필드 보장 시스템 **NEW**
 - **기능**: 100% cost 필드 커버리지
 - **지원**: 과학적 표기법 (9.6e-05) 완벽 처리
 - **안정성**: 5단계 보장 시스템으로 누락 방지
 
-### 현대적 Python 지원 ⭐ **NEW**
+### 현대적 Python 지원 **NEW**
 - **설정**: pyproject.toml 기반 프로젝트 구성
 - **요구사항**: Python 3.9+ 지원
 - **도구**: Ruff, mypy 통합 개발 환경
 
-### BigQuery SQL 최적화 ⭐ **NEW**
+### BigQuery SQL 최적화 **NEW**
 - **집계**: GROUP BY 최적화로 성능 향상
 - **필드**: 모든 BigQuery 스키마 필드 완전 지원
 - **중첩**: 중첩 구조 필드 정확한 처리
 
-## 📅 날짜 범위 처리 (v2.0.1) ⭐ **UPDATED**
+##  날짜 범위 처리 (v2.0.1) **UPDATED**
 
 ### 종료일 자동 설정 기능
 종료일(`end`)이 제공되지 않은 경우, 시스템이 자동으로 현재월로 설정합니다.

@@ -32,7 +32,7 @@ REQUIRED_OPTIONS = [
 
 
 class JobManager(BaseManager):
-    # 🚀 활성 프로젝트 캐시 (클래스 변수)
+    # 활성 프로젝트 캐시 (클래스 변수)
     _active_projects_cache = {
         "data": [],
         "last_updated": None,
@@ -247,7 +247,7 @@ class JobManager(BaseManager):
 
             # 쿼리 상세 로깅 추가
             _LOGGER.info("=" * 80)
-            _LOGGER.info("🔍 [QUERY #1] JobManager - 스마트 프리필터링 프로젝트 조회")
+            _LOGGER.info("[QUERY #1] JobManager - 스마트 프리필터링 프로젝트 조회")
             _LOGGER.info(f"[JobManager._get_bigquery_tasks] 조회 시작일: {start_month}")
             _LOGGER.info(
                 f"[JobManager._get_bigquery_tasks] 빌링 프로젝트: {self.billing_export_project_id}"
@@ -264,7 +264,7 @@ class JobManager(BaseManager):
             _LOGGER.info(
                 "[JobManager._get_bigquery_tasks] 필터 조건: 비용 > 0 OR 사용량 > 0"
             )
-            _LOGGER.info("📝 [실행 쿼리]")
+            _LOGGER.info(" [실행 쿼리]")
             _LOGGER.info(f"{query}")
             _LOGGER.info("=" * 80)
 
@@ -273,39 +273,38 @@ class JobManager(BaseManager):
 
             start_time = time.time()
 
-            _LOGGER.info("🔄 [쿼리 실행 중] BigQuery에서 데이터 조회를 시작합니다...")
+            _LOGGER.info("[쿼리 실행 중] BigQuery에서 데이터 조회를 시작합니다...")
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
             execution_time = time.time() - start_time
 
             _LOGGER.info("=" * 80)
-            _LOGGER.info("✅ [QUERY #1 완료] 스마트 필터링 쿼리 실행 결과")
-            _LOGGER.info(f"📊 조회된 프로젝트 수: {len(response_stream)}개")
+            _LOGGER.info("[QUERY #1 완료] 스마트 필터링 쿼리 실행 결과")
+            _LOGGER.info(f"조회된 프로젝트 수: {len(response_stream)}개")
             _LOGGER.info(f"⏱️ 쿼리 실행 시간: {execution_time:.2f}초")
-            _LOGGER.info(f"📅 조회 기간: {start_month}-01 이후")
+            _LOGGER.info(f" 조회 기간: {start_month}-01 이후")
 
-            # 🎯 프로젝트 발견 및 태스크 생성 상세 로깅
+            # 프로젝트 발견 및 태스크 생성 상세 로깅
             if len(response_stream) > 0:
                 project_list = [row.id for _, row in response_stream.iterrows()]
 
-                # 🚨 중요: 발견된 프로젝트 수 로깅
                 actual_projects = len(project_list)
 
-                _LOGGER.info("🎯 [프로젝트 발견 결과]")
+                _LOGGER.info("[프로젝트 발견 결과]")
                 _LOGGER.info(
-                    f"   📊 BigQuery에서 발견된 활성 프로젝트 수: {actual_projects}개"
+                    f"   BigQuery에서 발견된 활성 프로젝트 수: {actual_projects}개"
                 )
-                _LOGGER.info("   🔍 필터 조건: cost > 0 OR usage.amount > 0")
-                _LOGGER.info(f"   📅 조회 기간: {start_month}-01 이후")
+                _LOGGER.info("   필터 조건: cost > 0 OR usage.amount > 0")
+                _LOGGER.info(f"    조회 기간: {start_month}-01 이후")
 
                 if actual_projects > 0:
                     _LOGGER.info(
-                        f"   ✅ {actual_projects}개의 활성 프로젝트가 발견되었습니다!"
+                        f"   {actual_projects}개의 활성 프로젝트가 발견되었습니다!"
                     )
                 else:
-                    _LOGGER.warning("   ⚠️  활성 프로젝트가 발견되지 않았습니다!")
-                    _LOGGER.warning("   💡 빌링 데이터나 필터 조건을 확인하세요.")
+                    _LOGGER.warning("   활성 프로젝트가 발견되지 않았습니다!")
+                    _LOGGER.warning("   빌링 데이터나 필터 조건을 확인하세요.")
 
-                _LOGGER.info(f"🎯 [활성 프로젝트 목록] - 총 {actual_projects}개")
+                _LOGGER.info(f"[활성 프로젝트 목록] - 총 {actual_projects}개")
                 for i, project_id in enumerate(project_list, 1):
                     _LOGGER.info(f"   {i:2d}. {project_id}")
 
@@ -320,16 +319,16 @@ class JobManager(BaseManager):
                     "thor-465309",
                 ]
 
-                _LOGGER.info("🔍 [핵심 프로젝트 포함 확인]")
+                _LOGGER.info("[핵심 프로젝트 포함 확인]")
                 for key_project in key_projects_to_check:
                     if key_project in project_list:
-                        _LOGGER.info(f"   ✅ {key_project} - 포함됨")
+                        _LOGGER.info(f"   {key_project} - 포함됨")
                     else:
-                        _LOGGER.warning(f"   ❌ {key_project} - 누락됨!")
+                        _LOGGER.warning(f"    {key_project} - 누락됨!")
 
             else:
-                _LOGGER.error("🚨 [심각] 활성 프로젝트가 전혀 발견되지 않았습니다!")
-                _LOGGER.error("   💡 문제 해결 체크리스트:")
+                _LOGGER.error("[심각] 활성 프로젝트가 전혀 발견되지 않았습니다!")
+                _LOGGER.error("   문제 해결 체크리스트:")
                 _LOGGER.error(
                     "   1. 필터 조건을 확인하세요: cost > 0 OR usage.amount > 0"
                 )
@@ -366,44 +365,42 @@ class JobManager(BaseManager):
             changed_item = {"start": start_month}
             changed.append(changed_item)
 
-            # 🚀 태스크 생성 완료 및 검증 로깅
+            # 태스크 생성 완료 및 검증 로깅
             total_execution_time = time.time() - start_time
 
             _LOGGER.info("=" * 80)
-            _LOGGER.info("🎉 [태스크 생성 완료] BigQuery 태스크 생성 최종 결과")
-            _LOGGER.info(f"📋 생성된 태스크 수: {len(tasks)}개")
-            _LOGGER.info(f"📅 대상 시작월: {start_month}")
+            _LOGGER.info("[태스크 생성 완료] BigQuery 태스크 생성 최종 결과")
+            _LOGGER.info(f" 생성된 태스크 수: {len(tasks)}개")
+            _LOGGER.info(f" 대상 시작월: {start_month}")
             _LOGGER.info(f"⏱️ 총 실행시간: {total_execution_time:.2f}초")
-            _LOGGER.info(f"🏷️ 변경된 항목 수: {len(changed)}개")
+            _LOGGER.info(f"️ 변경된 항목 수: {len(changed)}개")
 
-            # 🎯 태스크 생성 완전성 검증
+            # 태스크 생성 완전성 검증
             actual_tasks = len(tasks)
             discovered_projects = len(
                 response_stream
             )  # BigQuery에서 실제 발견된 프로젝트 수
 
-            _LOGGER.info("🔍 [태스크 생성 검증]")
-            _LOGGER.info(f"   📊 발견된 프로젝트 수: {discovered_projects}개")
-            _LOGGER.info(f"   ✅ 생성된 태스크 수: {actual_tasks}개")
+            _LOGGER.info("[태스크 생성 검증]")
+            _LOGGER.info(f"   발견된 프로젝트 수: {discovered_projects}개")
+            _LOGGER.info(f"   생성된 태스크 수: {actual_tasks}개")
 
             if actual_tasks == discovered_projects:
                 _LOGGER.info(
-                    "   🎯 완벽! 발견된 모든 프로젝트에 대한 태스크가 생성되었습니다!"
+                    "   완벽! 발견된 모든 프로젝트에 대한 태스크가 생성되었습니다!"
                 )
             elif actual_tasks < discovered_projects:
                 missing_tasks = discovered_projects - actual_tasks
-                _LOGGER.warning(f"   ⚠️  {missing_tasks}개 태스크 생성 누락!")
-                _LOGGER.warning(
-                    "   💡 프로젝트 발견과 태스크 생성 간 불일치가 있습니다."
-                )
+                _LOGGER.warning(f"   {missing_tasks}개 태스크 생성 누락!")
+                _LOGGER.warning("   프로젝트 발견과 태스크 생성 간 불일치가 있습니다.")
             else:
                 _LOGGER.warning(
-                    f"   🤔 생성된 태스크가 발견된 프로젝트보다 {actual_tasks - discovered_projects}개 많습니다!"
+                    f"    생성된 태스크가 발견된 프로젝트보다 {actual_tasks - discovered_projects}개 많습니다!"
                 )
 
             # 생성된 태스크의 프로젝트 ID 목록 (검증용)
             task_project_ids = [task["task_options"]["project_id"] for task in tasks]
-            _LOGGER.info("📝 [생성된 태스크의 프로젝트 ID 목록]")
+            _LOGGER.info(" [생성된 태스크의 프로젝트 ID 목록]")
             for i, project_id in enumerate(task_project_ids, 1):
                 _LOGGER.info(f"   {i:2d}. {project_id}")
 
@@ -518,7 +515,7 @@ class JobManager(BaseManager):
             f"[JobManager._create_google_sql] 테이블 정보 - {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
         )
 
-        # 🚀 스마트 프리필터링: 금액이 0이 아닌 프로젝트만 조회
+        # 스마트 프리필터링: 금액이 0이 아닌 프로젝트만 조회
         where_condition = f"""
         WHERE usage_start_time >= TIMESTAMP('{start}-01')
           AND cost > 0  -- 금액이 0이 아닌 데이터만
@@ -559,11 +556,11 @@ class JobManager(BaseManager):
         is_valid = cache_age < max_age
         if is_valid:
             _LOGGER.debug(
-                f"[캐시] ✅ 유효한 캐시 사용 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})"
+                f"[캐시] 유효한 캐시 사용 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})"
             )
         else:
             _LOGGER.debug(
-                f"[캐시] ❌ 캐시 만료 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})"
+                f"[캐시]  캐시 만료 (생성시간: {self._active_projects_cache['last_updated']}, 나이: {cache_age})"
             )
 
         return is_valid
@@ -572,9 +569,7 @@ class JobManager(BaseManager):
         """캐시 업데이트"""
         self._active_projects_cache["data"] = projects
         self._active_projects_cache["last_updated"] = datetime.now()
-        _LOGGER.info(
-            f"[캐시] 🔄 활성 프로젝트 캐시 업데이트: {len(projects)}개 프로젝트"
-        )
+        _LOGGER.info(f"[캐시] 활성 프로젝트 캐시 업데이트: {len(projects)}개 프로젝트")
 
     def _get_http_file_tasks(
         self,
@@ -1078,7 +1073,7 @@ class JobManager(BaseManager):
 
             if len(path_parts) < 4:  # 최소 4개 부분이 필요 (project/year/month/file)
                 _LOGGER.debug(
-                    f"[_filter_files_by_project_id] ❌ Invalid path structure: {file_path}"
+                    f"[_filter_files_by_project_id]  Invalid path structure: {file_path}"
                 )
                 continue
 
@@ -1090,7 +1085,7 @@ class JobManager(BaseManager):
                 # 매칭된 파일은 처음 3개만 로깅 (스팸 방지)
                 if len(filtered_files) <= 3:
                     _LOGGER.debug(
-                        f"[_filter_files_by_project_id] ✅ Matched file: {file_path} (project_id={project_id})"
+                        f"[_filter_files_by_project_id] Matched file: {file_path} (project_id={project_id})"
                     )
             # 스킵된 파일은 로깅하지 않음 (스팸 방지) - 요약 정보만 INFO 레벨로 출력
 
@@ -1136,7 +1131,7 @@ class JobManager(BaseManager):
                     len(path_parts) < 4
                 ):  # 최소 4개 부분이 필요 (project/year/month/file)
                     _LOGGER.debug(
-                        f"[_filter_files_by_date] ❌ Invalid path structure: {file_path}"
+                        f"[_filter_files_by_date]  Invalid path structure: {file_path}"
                     )
                     continue
 
@@ -1147,14 +1142,14 @@ class JobManager(BaseManager):
                 # 월 형식 검증: 정확히 2자리 숫자여야 함 (09-backup 등 방지)
                 if not (file_month.isdigit() and len(file_month) == 2):
                     _LOGGER.debug(
-                        f"[_filter_files_by_date] ❌ Invalid month format: {file_month} in {file_path}"
+                        f"[_filter_files_by_date]  Invalid month format: {file_month} in {file_path}"
                     )
                     continue
 
                 # 년도 형식 검증: 정확히 4자리 숫자여야 함
                 if not (file_year.isdigit() and len(file_year) == 4):
                     _LOGGER.debug(
-                        f"[_filter_files_by_date] ❌ Invalid year format: {file_year} in {file_path}"
+                        f"[_filter_files_by_date]  Invalid year format: {file_year} in {file_path}"
                     )
                     continue
 
@@ -1175,7 +1170,7 @@ class JobManager(BaseManager):
                         if project_id:
                             filter_reason += f", project_id={project_id}"
                         _LOGGER.debug(
-                            f"[_filter_files_by_date] ✅ Matched file: {file_path} ({filter_reason})"
+                            f"[_filter_files_by_date] Matched file: {file_path} ({filter_reason})"
                         )
                 # 스킵된 파일은 로깅하지 않음 (스팸 방지) - 요약 정보만 INFO 레벨로 출력
 

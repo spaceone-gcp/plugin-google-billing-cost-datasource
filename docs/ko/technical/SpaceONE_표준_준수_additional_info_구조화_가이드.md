@@ -5,7 +5,7 @@
 SpaceONE Cost Analysis 플러그인에서 `data` 필드는 **Google Cloud Billing 필드들을 포함**해야 합니다 (`cost` 제외). 
 이 문서는 Google Cloud Billing의 모든 금액 관련 정보를 `data` 필드 내에서 체계적으로 구조화하는 방안을 제시합니다.
 
-## 🚨 SpaceONE 표준 제약사항
+##  SpaceONE 표준 제약사항
 
 ### 필수 준수 사항
 - **`data` 필드**: Google Cloud Billing 필드들 포함 (`cost` 제외)
@@ -16,7 +16,7 @@ SpaceONE Cost Analysis 플러그인에서 `data` 필드는 **Google Cloud Billin
 ### 표준 준수 구조
 ```json
 {
-  "cost": 5.986984,                    // 🚨 CRITICAL: 최상위 필수 필드
+  "cost": 5.986984,                    //  CRITICAL: 최상위 필수 필드
   "data": {
     // Google Cloud Billing 필드들을 data 하위에 포함
     "List Price": 6.200000,
@@ -37,11 +37,11 @@ SpaceONE Cost Analysis 플러그인에서 `data` 필드는 **Google Cloud Billin
 
 | 분류 | UI 필드명 | 매핑 필드명 | 설명 | 산식 | 데이터 타입 | 예시 값 | 특징 |
 |------|------------------|-------------|------|------|-------------|---------|------|
-| **기본 비용** | `Cost` | `cost` | 총 비용 (최상위 필드) | 직접 제공값 (계산 없음) | `number` | `5.986984` | ✅ 실제 존재하는 필드 (BigQuery 기본 필드) |
-| **기본 비용** | `List Price` | `cost_at_list` | Google Cloud 공식 정가 (할인 적용 전) | 직접 제공값 (계산 없음) | `number` | `6.200000` | ✅ 실제 존재하는 필드 |
-| **크레딧** | `Credits Total Amount` | **집계 필드** | 적용된 모든 크래딧의 총합 | `SUM(credits.amount)` | `number\|null` | `null` (크래딧 없음) / `-0.213016` (크래딧 적용) | ⚠️ credits 배열의 합계 |
-| **사용량** | `Usage Amount` | `usage.amount` | 실제 측정된 리소스 사용량 | 직접 측정값 (계산 없음) | `number` | `91697551769600` | ✅ 중첩 구조 필드 (usage.amount) |
-| **사용량** | `Usage Amount in Pricing Units` | `usage.amount_in_pricing_units` | 가격 책정을 위해 변환된 사용량 | 직접 제공값 (계산 없음) | `number\|null` | `null` (변환 불필요) / `1000.5` (변환된 값) | ✅ 중첩 구조 필드 (usage.amount_in_pricing_units) |
+| **기본 비용** | `Cost` | `cost` | 총 비용 (최상위 필드) | 직접 제공값 (계산 없음) | `number` | `5.986984` |  실제 존재하는 필드 (BigQuery 기본 필드) |
+| **기본 비용** | `List Price` | `cost_at_list` | Google Cloud 공식 정가 (할인 적용 전) | 직접 제공값 (계산 없음) | `number` | `6.200000` |  실제 존재하는 필드 |
+| **크레딧** | `Credits Total Amount` | **집계 필드** | 적용된 모든 크래딧의 총합 | `SUM(credits.amount)` | `number\|null` | `null` (크래딧 없음) / `-0.213016` (크래딧 적용) |  credits 배열의 합계 |
+| **사용량** | `Usage Amount` | `usage.amount` | 실제 측정된 리소스 사용량 | 직접 측정값 (계산 없음) | `number` | `91697551769600` |  중첩 구조 필드 (usage.amount) |
+| **사용량** | `Usage Amount in Pricing Units` | `usage.amount_in_pricing_units` | 가격 책정을 위해 변환된 사용량 | 직접 제공값 (계산 없음) | `number\|null` | `null` (변환 불필요) / `1000.5` (변환된 값) |  중첩 구조 필드 (usage.amount_in_pricing_units) |
 
 ## BigQuery 및 GCS 호환성 검증
 
@@ -49,10 +49,10 @@ SpaceONE Cost Analysis 플러그인에서 `data` 필드는 **Google Cloud Billin
 
 | 필드명 | BigQuery 지원 | GCS 지원 | 데이터 소스 | 비고 |
 |---------|------------|----------|-------------|------|
-| `cost` | ✅ 지원 | ✅ 지원 | BigQuery 기본 필드 | 모든 데이터 소스에서 지원 |
-| `cost_at_list` | ✅ 지원 | ✅ 지원 | BigQuery 기본 필드 | 모든 데이터 소스에서 지원 |
-| `usage.amount` | ✅ 지원 | ✅ 지원 | RECORD 구조 | 중첩 객체로 직렬화 |
-| `usage.amount_in_pricing_units` | ✅ 지원 | ✅ 지원 | RECORD 구조 | null 값 허용 |
+| `cost` |  지원 |  지원 | BigQuery 기본 필드 | 모든 데이터 소스에서 지원 |
+| `cost_at_list` |  지원 |  지원 | BigQuery 기본 필드 | 모든 데이터 소스에서 지원 |
+| `usage.amount` |  지원 |  지원 | RECORD 구조 | 중첩 객체로 직렬화 |
+| `usage.amount_in_pricing_units` |  지원 |  지원 | RECORD 구조 | null 값 허용 |
 
 ### 데이터 소스별 처리 방식
 
@@ -78,10 +78,10 @@ record["usage"]["amount_in_pricing_units"]  # 중첩 객체
 
 | 파서 | 중첩 구조 | 배열 구조 | null 처리 | 비고 |
 |------|----------|----------|----------|------|
-| **BigQuery** | ✅ 지원 | ✅ 지원 | ✅ 지원 | 네이티브 지원 |
-| **JSON** | ✅ 지원 | ✅ 지원 | ✅ 지원 | JSON 표준 지원 |
-| **Parquet** | ✅ 지원 | ✅ 지원 | ✅ 지원 | 스키마 기반 지원 |
-| **CSV** | ⚠️ 제한적 | ⚠️ 제한적 | ✅ 지원 | 플랫 구조로 변환 필요 |
+| **BigQuery** |  지원 |  지원 |  지원 | 네이티브 지원 |
+| **JSON** |  지원 |  지원 |  지원 | JSON 표준 지원 |
+| **Parquet** |  지원 |  지원 |  지원 | 스키마 기반 지원 |
+| **CSV** |  제한적 |  제한적 |  지원 | 플랫 구조로 변환 필요 |
 
 ### 실제 코드 기반 호환성 검증
 
@@ -89,12 +89,12 @@ record["usage"]["amount_in_pricing_units"]  # 중첩 객체
 ```python
 # src/plugin/connector/bigquery_connector.py
 float_fields = [
-    "cost",                           # ✅ 지원
-    "cost_at_list",                  # ✅ 지원
+    "cost",                           #  지원
+    "cost_at_list",                  #  지원
 ]
 
 record_fields = [
-    "usage",                          # ✅ 지원 (RECORD)
+    "usage",                          #  지원 (RECORD)
 ]
 ```
 
@@ -102,17 +102,17 @@ record_fields = [
 ```python
 # src/plugin/parser/parquet_parser.py
 float_fields = [
-    "cost",                           # ✅ 지원
-    "cost_at_list",                  # ✅ 지원
+    "cost",                           #  지원
+    "cost_at_list",                  #  지원
 ]
 
 usage_float_fields = [
-    "amount",                         # ✅ 지원 (usage.amount)
-    "amount_in_pricing_units"         # ✅ 지원 (usage.amount_in_pricing_units)
+    "amount",                         #  지원 (usage.amount)
+    "amount_in_pricing_units"         #  지원 (usage.amount_in_pricing_units)
 ]
 
 record_fields = [
-    "usage",                          # ✅ 지원
+    "usage",                          #  지원
 ]
 ```
 
@@ -121,22 +121,22 @@ record_fields = [
 // grpcurl_bigquery_get_data_result.json
 {
   "additional_info": {
-    "Credits Total Amount": null,           // ✅ 집계 필드
-    "Usage Amount": 2537530050286,         // ✅ usage.amount
-    "Usage Amount in Pricing Units": null  // ✅ usage.amount_in_pricing_units
+    "Credits Total Amount": null,           //  집계 필드
+    "Usage Amount": 2537530050286,         //  usage.amount
+    "Usage Amount in Pricing Units": null  //  usage.amount_in_pricing_units
   }
 }
 ```
 
 ### 호환성 결과 요약
 
-✅ **완전 호환**: 모든 필드가 BigQuery와 GCS 모두에서 지원됩니다.
+ **완전 호환**: 모든 필드가 BigQuery와 GCS 모두에서 지원됩니다.
 
 | 분류 | BigQuery | GCS | 상태 |
 |------|----------|-----|------|
-| **기본 비용** | ✅ | ✅ | ✅ 호환 |
-| **크레딧** | ✅ | ✅ | ✅ 호환 |
-| **사용량** | ✅ | ✅ | ✅ 호환 |
+| **기본 비용** |  |  |  호환 |
+| **크레딧** |  |  |  호환 |
+| **사용량** |  |  |  호환 |
 
 ### 필드 간 관계도
 
@@ -155,19 +155,19 @@ graph TD
 
 | 순위 | 필드명 | 용도 | 신뢰도 |
 |------|--------|------|--------|
-| 1 | `Cost` | 최종 청구 비용 (BigQuery 기본 필드) | ⭐⭐⭐⭐⭐ |
-| 2 | `List Price` | 정가 기준 분석 (Google Cloud 원본 필드) | ⭐⭐⭐⭐⭐ |
-| 3 | `Credits Total Amount` | 크레딧 혜택 분석 | ⭐⭐⭐ |
-| 4 | `Usage Amount` | 사용량 기반 분석 | ⭐⭐⭐⭐ |
-| 5 | `Usage Amount in Pricing Units` | 가격 단위 사용량 분석 | ⭐⭐⭐ |
+| 1 | `Cost` | 최종 청구 비용 (BigQuery 기본 필드) |  |
+| 2 | `List Price` | 정가 기준 분석 (Google Cloud 원본 필드) |  |
+| 3 | `Credits Total Amount` | 크레딧 혜택 분석 |  |
+| 4 | `Usage Amount` | 사용량 기반 분석 |  |
+| 5 | `Usage Amount in Pricing Units` | 가격 단위 사용량 분석 |  |
 
 ### 데이터 검증 체크리스트
 
 | 검증 항목 | 공식 | 허용 오차 | 중요도 |
 |----------|------|-----------|--------|
-| 데이터 일관성 검증 | 모든 필드가 직접 제공값과 일치하는지 확인 | 정확히 일치 | ⚠️ High |
-| 환율 적용 검증 | `krw_amount = usd_amount × conversion_rate` | ±0.1 | ℹ️ Medium |
-| 크레딧 일관성 | `cost_after_credits = cost_at_list + credits_total_amount` | ±0.01 | ⚠️ High |
+| 데이터 일관성 검증 | 모든 필드가 직접 제공값과 일치하는지 확인 | 정확히 일치 |  High |
+| 환율 적용 검증 | `krw_amount = usd_amount × conversion_rate` | ±0.1 |  Medium |
+| 크레딧 일관성 | `cost_after_credits = cost_at_list + credits_total_amount` | ±0.01 |  High |
 
 ## 비용 계산 관계식 및 검증 공식
 

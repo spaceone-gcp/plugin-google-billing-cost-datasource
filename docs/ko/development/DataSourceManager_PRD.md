@@ -1,40 +1,40 @@
 # PRD: DataSourceManager 플러그인 메타데이터 관리 기능
 
-## 📋 문서 정보
+##  문서 정보
 - **작성일**: 2025-09-29
 - **버전**: v2.0
 - **작성자**: AI Assistant
 - **검토자**: -
 - **승인자**: -
-- **🚨 중요**: **SpaceONE 표준 준수** - 모든 API 파라미터 및 구현은 SpaceONE Framework 표준을 엄격히 준수
-- **📖 참조**: [SpaceONE Cost Management Plugin](https://github.com/spaceone-dev/plugin-google-cloud-cost-datasource) 표준 기반
+- ** 중요**: **SpaceONE 표준 준수** - 모든 API 파라미터 및 구현은 SpaceONE Framework 표준을 엄격히 준수
+- ** 참조**: [SpaceONE Cost Management Plugin](https://github.com/spaceone-dev/plugin-google-cloud-cost-datasource) 표준 기반
 
 ---
 
-## ⚠️ **SpaceONE 표준 준수 가이드라인**
+##  **SpaceONE 표준 준수 가이드라인**
 
-### 📌 **필수 준수 사항**
+###  **필수 준수 사항**
 본 PRD는 다음 SpaceONE Framework 표준을 **반드시** 준수합니다:
 
 #### **1. 플러그인 메타데이터 구조**
-- ✅ **data_source_rules**: 데이터 소스 매칭 규칙 정의
-- ✅ **supported_secret_types**: 지원하는 인증 방식 명시
-- ✅ **additional_info**: UI 표시용 필드 메타데이터 정의
-- ✅ **currency**: 통화 정보 (KRW 고정)
+-  **data_source_rules**: 데이터 소스 매칭 규칙 정의
+-  **supported_secret_types**: 지원하는 인증 방식 명시
+-  **additional_info**: UI 표시용 필드 메타데이터 정의
+-  **currency**: 통화 정보 (KRW 고정)
 
 #### **2. 메타데이터 구조 표준**
-- ✅ **name**: 필드 표시명 (Title Case)
-- ✅ **visible**: UI 표시 여부 (true/false)
-- ✅ **enums**: 열거형 값 목록 (해당하는 경우)
+-  **name**: 필드 표시명 (Title Case)
+-  **visible**: UI 표시 여부 (true/false)
+-  **enums**: 열거형 값 목록 (해당하는 경우)
 
 #### **3. 하위 호환성**
-- ✅ **기본값 보장**: 모든 메타데이터는 안전한 기본값 제공
-- ✅ **점진적 도입**: 기존 플러그인 동작에 영향 없음
-- ✅ **Fallback 메커니즘**: 오류 시 안전한 기본 응답 보장
+-  **기본값 보장**: 모든 메타데이터는 안전한 기본값 제공
+-  **점진적 도입**: 기존 플러그인 동작에 영향 없음
+-  **Fallback 메커니즘**: 오류 시 안전한 기본 응답 보장
 
 ---
 
-## 🎯 1. 개요
+##  1. 개요
 
 ### 1.1 배경 및 목적
 
@@ -67,7 +67,7 @@ SpaceONE Cost Management 플러그인에서 **플러그인 초기화 시 메타�
 
 ---
 
-## 🔍 2. 요구사항 분석
+##  2. 요구사항 분석
 
 ### 2.1 핵심 요구사항
 
@@ -172,7 +172,7 @@ plugin_metadata = {
 
 ---
 
-## 🏗️ 3. 시스템 설계
+##  3. 시스템 설계
 
 ### 3.1 아키텍처 개요
 
@@ -254,7 +254,7 @@ _DEFAULT_METADATA_ADDITIONAL_INFO = {
 
 ---
 
-## 🔧 4. 구현 방안
+##  4. 구현 방안
 
 ### 4.1 핵심 구현 로직
 
@@ -330,7 +330,7 @@ def init_response(options: dict, domain_id: Optional[str] = None) -> dict:
 
 ---
 
-## 📊 5. 테스트 전략
+##  5. 테스트 전략
 
 ### 5.1 단위 테스트
 
@@ -397,7 +397,7 @@ def test_performance():
 
 ---
 
-## 🚀 6. 배포 및 운영
+##  6. 배포 및 운영
 
 ### 6.1 배포 전 체크리스트
 
@@ -438,7 +438,7 @@ def test_performance():
 
 ---
 
-## 📚 7. 관련 문서
+##  7. 관련 문서
 
 ### 7.1 참조 문서
 - [조건부_additional_info_필터링_PRD.md](./조건부_additional_info_필터링_PRD.md) - 33개 필드 정의
@@ -455,7 +455,7 @@ def test_performance():
 
 ---
 
-## 📝 8. 변경 이력
+##  8. 변경 이력
 
 ### v2.0 (2025-09-29)
 - **신규 작성**: DataSourceManager PRD 문서 최초 작성

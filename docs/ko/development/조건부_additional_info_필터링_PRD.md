@@ -1,39 +1,39 @@
 # PRD: 조건부 additional_info 필터링 기능
 
-## 📋 문서 정보
+##  문서 정보
 - **작성일**: 2025-09-24
 - **버전**: v2.0
 - **작성자**: AI Assistant
 - **검토자**: -
 - **승인자**: -
-- **🚨 중요**: **SpaceONE 표준 준수** - 모든 API 파라미터 및 구현은 SpaceONE Framework 표준을 엄격히 준수
-- **📖 참조**: [Google Cloud Billing Reports](https://cloud.google.com/billing/docs/how-to/reports#group-by) 공식 문서 기반
+- ** 중요**: **SpaceONE 표준 준수** - 모든 API 파라미터 및 구현은 SpaceONE Framework 표준을 엄격히 준수
+- ** 참조**: [Google Cloud Billing Reports](https://cloud.google.com/billing/docs/how-to/reports#group-by) 공식 문서 기반
 
 ---
 
-## ⚠️ **SpaceONE 표준 준수 가이드라인**
+##  **SpaceONE 표준 준수 가이드라인**
 
-### 📌 **필수 준수 사항**
+###  **필수 준수 사항**
 본 PRD는 다음 SpaceONE Framework 표준을 **반드시** 준수합니다:
 
 #### **1. API 파라미터 구조**
-- ✅ **options**: 전역 설정 (모든 작업에 적용)
-- ✅ **task_options**: 작업별 설정 (해당 작업만 적용, options 오버라이드)
-- ✅ **우선순위**: `task_options` > `options` > `기본값`
+-  **options**: 전역 설정 (모든 작업에 적용)
+-  **task_options**: 작업별 설정 (해당 작업만 적용, options 오버라이드)
+-  **우선순위**: `task_options` > `options` > `기본값`
 
 #### **2. 파라미터 명명 규칙**
-- ✅ **snake_case**: 모든 파라미터명은 snake_case 사용
-- ✅ **기존 패턴 준수**: `select_cost`, `include_raw_data` 등과 동일한 네이밍 패턴
-- ✅ **직관적 명명**: 기능을 명확히 표현하는 이름 사용
+-  **snake_case**: 모든 파라미터명은 snake_case 사용
+-  **기존 패턴 준수**: `select_cost`, `include_raw_data` 등과 동일한 네이밍 패턴
+-  **직관적 명명**: 기능을 명확히 표현하는 이름 사용
 
 #### **3. 하위 호환성**
-- ✅ **기본값 보장**: 새 파라미터는 기존 동작을 기본값으로 설정
-- ✅ **점진적 도입**: 기존 API 호출이 영향받지 않도록 구현
-- ✅ **Fallback 메커니즘**: 오류 시 안전한 기본 동작 보장
+-  **기본값 보장**: 새 파라미터는 기존 동작을 기본값으로 설정
+-  **점진적 도입**: 기존 API 호출이 영향받지 않도록 구현
+-  **Fallback 메커니즘**: 오류 시 안전한 기본 동작 보장
 
 ---
 
-## 🎯 1. 개요
+##  1. 개요
 
 ### 1.1 배경 및 목적
 
@@ -82,13 +82,13 @@ Google Cloud는 다음과 같은 분석 질문들을 해결할 수 있도록 설
 
 **Google Cloud Billing Reports의 데이터 구조를 참조**하여, SpaceONE 플러그인에서 사용자가 필요한 `additional_info` 필드만 선택적으로 응답받을 수 있는 조건부 필터링 기능을 구현합니다.
 
-**🚨 CRITICAL**: **SpaceONE 빌링 응답의 최상위 `cost` 필드는 절대 필수 항목**입니다. 모든 필터링 로직은 이 요구사항을 준수해야 합니다.
+** CRITICAL**: **SpaceONE 빌링 응답의 최상위 `cost` 필드는 절대 필수 항목**입니다. 모든 필터링 로직은 이 요구사항을 준수해야 합니다.
 
-**⚠️ 중요**: 본 PRD는 **Google Cloud Billing Reports의 데이터 구조만을 참조**하며, 별도의 새로운 API 파라미터 구현 없이 기존 `additional_info` 필드 구조를 최적화합니다.
+** 중요**: 본 PRD는 **Google Cloud Billing Reports의 데이터 구조만을 참조**하며, 별도의 새로운 API 파라미터 구현 없이 기존 `additional_info` 필드 구조를 최적화합니다.
 
 ---
 
-## 🔍 2. 요구사항 분석 (Google Cloud 데이터 구조 참조)
+##  2. 요구사항 분석 (Google Cloud 데이터 구조 참조)
 
 ### 2.1 핵심 요구사항
 
@@ -108,69 +108,69 @@ SpaceONE UI에서 항상 표시되는 **필수 고정 항목**:
 
 Google Cloud Billing Reports에서 제공하는 데이터를 기반으로 **카테고리별 선택적 필드** 분류:
 
-##### **📊 비용 분석 카테고리 (Cost Analysis)**
-비용 관련 데이터 (**⚠️ 주의**: Group By 작업에 부적합, 상세 분석 전용):
+##### ** 비용 분석 카테고리 (Cost Analysis)**
+비용 관련 데이터 (** 주의**: Group By 작업에 부적합, 상세 분석 전용):
 
 | **필드명** | **설명** | **Group By 적합성** | **예시값** |
 |-----------|----------|-------------------|------------|
-| `Credits Detail` | 크레딧 상세 내역 (배열 형태)<br/>• **용도**: 크레딧 유형별 상세 분석 | ⚠️ **구조적 데이터** | `[{"type": "PROMOTION", "amount": -1.0}]` |
+| `Credits Detail` | 크레딧 상세 내역 (배열 형태)<br/>• **용도**: 크레딧 유형별 상세 분석 |  **구조적 데이터** | `[{"type": "PROMOTION", "amount": -1.0}]` |
 
-##### **🏢 프로젝트 계층 카테고리 (Project Hierarchy)**
-프로젝트 계층 데이터 (**✅ Group By 친화적**, 2022년 1월부터 지원):
-
-| **필드명** | **설명** | **Group By 적합성** | **예시값** |
-|-----------|----------|-------------------|------------|
-| `Project Name` | 프로젝트 이름 | ✅ **카테고리형** | `My Kang Project` |
-| `Project Number` | 프로젝트 번호 | ⚠️ **고유 ID** | `123456789012` |
-| `Ancestry Numbers` | 프로젝트 계층 구조 (2022년 1월부터) | ✅ **계층형** | `organizations/123456789/folders/987654321` |
-| `Project Ancestors` | 프로젝트 상위 계층 (2022년 1월부터) | ⚠️ **배열 구조** | `["organizations/123456789", "folders/987654321"]` |
-
-##### **📍 위치 정보 카테고리 (Location Data)**
-지역/멀티리전 데이터 (**✅ Group By 매우 친화적**):
+##### ** 프로젝트 계층 카테고리 (Project Hierarchy)**
+프로젝트 계층 데이터 (** Group By 친화적**, 2022년 1월부터 지원):
 
 | **필드명** | **설명** | **Group By 적합성** | **예시값** |
 |-----------|----------|-------------------|------------|
-| `Location Country` | 국가 | ✅ **매우 제한적** | `KR` |
-| `Location Region` | 리전 | ✅ **제한적** | `asia-northeast3` |
-| `Location Zone` | 존 | ✅ **제한적** | `asia-northeast3-a` |
-| `Location Location` | 위치 | ✅ **제한적** | `asia-northeast3` |
+| `Project Name` | 프로젝트 이름 |  **카테고리형** | `My Kang Project` |
+| `Project Number` | 프로젝트 번호 |  **고유 ID** | `123456789012` |
+| `Ancestry Numbers` | 프로젝트 계층 구조 (2022년 1월부터) |  **계층형** | `organizations/123456789/folders/987654321` |
+| `Project Ancestors` | 프로젝트 상위 계층 (2022년 1월부터) |  **배열 구조** | `["organizations/123456789", "folders/987654321"]` |
 
-##### **⚙️ 사용량 분석 카테고리 (Usage Analysis)**
-사용량 관련 데이터 (**✅ Group By 친화적**):
-
-| **필드명** | **설명** | **Group By 적합성** | **예시값** |
-|-----------|----------|-------------------|------------|
-| `Usage Unit` | 사용량 단위 (측정 기준) | ✅ **카테고리형** | `byte-seconds` |
-
-##### **🔧 서비스 메타데이터 카테고리 (Service Metadata)**
-서비스 관련 메타데이터 (**✅ Group By 친화적**):
+##### ** 위치 정보 카테고리 (Location Data)**
+지역/멀티리전 데이터 (** Group By 매우 친화적**):
 
 | **필드명** | **설명** | **Group By 적합성** | **예시값** |
 |-----------|----------|-------------------|------------|
-| `Service Description` | 서비스 설명 | ✅ **카테고리형** | `Cloud SQL` |
-| `Service ID` | 서비스 ID | ⚠️ **고유 ID** | `9662-B51E-5089` |
-| `SKU Description` | SKU 설명 | ✅ **카테고리형** | `Cloud SQL for MySQL: Zonal - Standard storage` |
-| `SKU ID` | SKU ID | ⚠️ **고유 ID** | `6F81-5844-456A` |
-| `Consumption Model Description` | 소비 모델 설명 | ✅ **매우 제한적** | `OnDemand` |
-| `Consumption Model ID` | 소비 모델 ID | ✅ **매우 제한적** | `1` |
+| `Location Country` | 국가 |  **매우 제한적** | `KR` |
+| `Location Region` | 리전 |  **제한적** | `asia-northeast3` |
+| `Location Zone` | 존 |  **제한적** | `asia-northeast3-a` |
+| `Location Location` | 위치 |  **제한적** | `asia-northeast3` |
 
-##### **💰 가격 정보 카테고리 (Pricing Information)**
-가격 관련 데이터 (**✅ Group By 친화적**):
+##### ** 사용량 분석 카테고리 (Usage Analysis)**
+사용량 관련 데이터 (** Group By 친화적**):
 
 | **필드명** | **설명** | **Group By 적합성** | **예시값** |
 |-----------|----------|-------------------|------------|
-| `Price Unit` | 가격 단위 (과금 기준 단위) | ✅ **카테고리형** | `byte-second` |
-| `Pricing Unit` | 가격 책정 단위 (표시 기준 단위) | ✅ **카테고리형** | `gibibyte month` |
+| `Usage Unit` | 사용량 단위 (측정 기준) |  **카테고리형** | `byte-seconds` |
 
-##### **📋 청구 조정 카테고리 (Billing Adjustments)**
-계정 레벨 조정 (**✅ Group By 친화적**, 2019년 5월부터 지원):
+##### ** 서비스 메타데이터 카테고리 (Service Metadata)**
+서비스 관련 메타데이터 (** Group By 친화적**):
 
 | **필드명** | **설명** | **Group By 적합성** | **예시값** |
 |-----------|----------|-------------------|------------|
-| `Adjustment Info Description` | 조정 사항 설명 | ✅ **카테고리형** | `Credit adjustment` |
-| `Adjustment Info ID` | 조정 사항 ID | ⚠️ **고유 ID** | `ADJ-123456` |
-| `Adjustment Info Mode` | 조정 모드 | ✅ **매우 제한적** | `AUTOMATIC` |
-| `Adjustment Info Type` | 조정 유형 | ✅ **매우 제한적** | `CREDIT` |
+| `Service Description` | 서비스 설명 |  **카테고리형** | `Cloud SQL` |
+| `Service ID` | 서비스 ID |  **고유 ID** | `9662-B51E-5089` |
+| `SKU Description` | SKU 설명 |  **카테고리형** | `Cloud SQL for MySQL: Zonal - Standard storage` |
+| `SKU ID` | SKU ID |  **고유 ID** | `6F81-5844-456A` |
+| `Consumption Model Description` | 소비 모델 설명 |  **매우 제한적** | `OnDemand` |
+| `Consumption Model ID` | 소비 모델 ID |  **매우 제한적** | `1` |
+
+##### ** 가격 정보 카테고리 (Pricing Information)**
+가격 관련 데이터 (** Group By 친화적**):
+
+| **필드명** | **설명** | **Group By 적합성** | **예시값** |
+|-----------|----------|-------------------|------------|
+| `Price Unit` | 가격 단위 (과금 기준 단위) |  **카테고리형** | `byte-second` |
+| `Pricing Unit` | 가격 책정 단위 (표시 기준 단위) |  **카테고리형** | `gibibyte month` |
+
+##### ** 청구 조정 카테고리 (Billing Adjustments)**
+계정 레벨 조정 (** Group By 친화적**, 2019년 5월부터 지원):
+
+| **필드명** | **설명** | **Group By 적합성** | **예시값** |
+|-----------|----------|-------------------|------------|
+| `Adjustment Info Description` | 조정 사항 설명 |  **카테고리형** | `Credit adjustment` |
+| `Adjustment Info ID` | 조정 사항 ID |  **고유 ID** | `ADJ-123456` |
+| `Adjustment Info Mode` | 조정 모드 |  **매우 제한적** | `AUTOMATIC` |
+| `Adjustment Info Type` | 조정 유형 |  **매우 제한적** | `CREDIT` |
 
 ### 2.2 기능 요구사항
 
@@ -240,7 +240,7 @@ Google Cloud Reports의 성능 특성을 참조한 목표:
 
 ---
 
-## 🏗️ 3. 시스템 설계 (Google Cloud Reports 아키텍처 기반)
+##  3. 시스템 설계 (Google Cloud Reports 아키텍처 기반)
 
 ### 3.1 아키텍처 개요
 
@@ -289,7 +289,7 @@ Optimized Response
 
 ---
 
-## 📊 4. 사용 시나리오
+##  4. 사용 시나리오
 
 ### 4.1 시나리오 1: Group By 친화적 대시보드
 **요구사항**: 프로젝트별, 지역별 비용 집계
@@ -357,7 +357,7 @@ Optimized Response
 
 ---
 
-## 🔧 5. 구현 세부사항 (Google Cloud Reports 호환)
+##  5. 구현 세부사항 (Google Cloud Reports 호환)
 
 ### 5.1 Google Cloud Reports 기반 핵심 구현
 
@@ -365,12 +365,12 @@ Optimized Response
 
 | **분류** | **필드명** | **Group By 적합성** | **사용 목적** |
 |---------|-----------|-------------------|-------------|
-| **🏷️ 카테고리형** | `Project Name`, `Service Description`, `SKU Description` | ✅ **매우 친화적** | 그룹 집계, 대시보드 |
-| **📍 위치 코드** | `Location Country`, `Location Region`, `Location Zone` | ✅ **매우 친화적** | 지역별 분석 |
-| **⚙️ 단위 유형** | `Usage Unit`, `Price Unit`, `Pricing Unit` | ✅ **친화적** | 단위별 집계 |
-| **📋 조정 유형** | `Adjustment Info Description/Mode/Type` | ✅ **친화적** | 청구 조정 분석 |
-| **🔗 구조적 데이터** | `Credits Detail`, `Project Ancestors` | ⚠️ **상세 분석 전용** | 개별 레코드 분석 |
-| **🧮 연산 필드** | `Cost After Credits`, `Usage Amount` 등 | ❌ **제거됨** | Group By 성능 저하 |
+| ** 카테고리형** | `Project Name`, `Service Description`, `SKU Description` |  **매우 친화적** | 그룹 집계, 대시보드 |
+| ** 위치 코드** | `Location Country`, `Location Region`, `Location Zone` |  **매우 친화적** | 지역별 분석 |
+| ** 단위 유형** | `Usage Unit`, `Price Unit`, `Pricing Unit` |  **친화적** | 단위별 집계 |
+| ** 조정 유형** | `Adjustment Info Description/Mode/Type` |  **친화적** | 청구 조정 분석 |
+| ** 구조적 데이터** | `Credits Detail`, `Project Ancestors` |  **상세 분석 전용** | 개별 레코드 분석 |
+| ** 연산 필드** | `Cost After Credits`, `Usage Amount` 등 |  **제거됨** | Group By 성능 저하 |
 
 #### 5.1.2 `additional_info` 최적화 로직
 
@@ -424,7 +424,7 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 
 #### 5.1.3 Group By 부적합 필드 제거 근거
 
-**❌ 제거된 연산 필드들 (Group By 성능 저하 요인)**
+** 제거된 연산 필드들 (Group By 성능 저하 요인)**
 
 | **제거된 필드** | **제거 이유** | **Group By 문제점** |
 |---------------|-------------|-------------------|
@@ -435,7 +435,7 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 | `Project Number`, `Service ID`, `SKU ID` | 고유 식별자 | ID 특성상 그룹핑 효과 제한적 |
 | `Project Ancestors` | 배열 구조 | 복잡한 데이터 구조 |
 
-**✅ 유지된 Group By 친화적 필드들**
+** 유지된 Group By 친화적 필드들**
 
 | **카테고리** | **유지된 필드** | **Group By 장점** |
 |-------------|----------------|-----------------|
@@ -459,7 +459,7 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 
 ---
 
-## 🎯 6. 성공 지표 (Google Cloud Reports 벤치마크)
+##  6. 성공 지표 (Google Cloud Reports 벤치마크)
 
 ### 6.1 정량적 지표 (Google Cloud Reports 기준)
 
@@ -479,7 +479,7 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 
 ---
 
-## ⚠️ 7. 위험 요소 및 대응 방안 (Google Cloud Reports 기반)
+##  7. 위험 요소 및 대응 방안 (Google Cloud Reports 기반)
 
 ### 7.1 Google Cloud Reports 호환성 위험
 
@@ -499,7 +499,7 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 
 ---
 
-## 📅 8. 개발 계획 (Google Cloud Reports 호환성 중심)
+##  8. 개발 계획 (Google Cloud Reports 호환성 중심)
 
 ### 8.1 개발 단계
 
@@ -528,7 +528,7 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 
 ---
 
-## 📚 9. 참고 자료 (Google Cloud Reports 공식 문서)
+##  9. 참고 자료 (Google Cloud Reports 공식 문서)
 
 ### 9.1 Google Cloud 공식 문서
 - **[Google Cloud Billing Reports](https://cloud.google.com/billing/docs/how-to/reports#group-by)** - 그룹화 및 필터링 방식
@@ -548,9 +548,9 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 
 ---
 
-## ✅ 10. SpaceONE 표준 준수 확인서 (Google Cloud Reports 호환성 포함)
+##  10. SpaceONE 표준 준수 확인서 (Google Cloud Reports 호환성 포함)
 
-### 📋 **표준 준수 체크리스트**
+###  **표준 준수 체크리스트**
 - [x] 기존 API 파라미터 구조 완전 유지 (새로운 파라미터 없음)
 - [x] SpaceONE 표준 응답 구조 준수
 - [x] 하위 호환성 100% 보장 (기존 동작 완전 유지)
@@ -559,15 +559,15 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 - [x] Group By 성능 최적화 달성
 - [x] [PRD 작성 표준 가이드라인](prd_writing_standards.md) 준수
 
-### 🌐 **Google Cloud Reports 호환성 서약**
+###  **Google Cloud Reports 호환성 서약**
 본 PRD는 **Google Cloud Billing Reports의 그룹화 및 필터링 방식을 완전히 준수**하며, Google Cloud 사용자가 익숙한 분석 패턴을 SpaceONE에서도 동일하게 제공합니다.
 
-### ⚠️ **SpaceONE 표준 준수 서약**
+###  **SpaceONE 표준 준수 서약**
 본 PRD는 **SpaceONE Framework 표준을 100% 준수**하여 작성되었으며, 모든 구현은 기존 시스템과의 완벽한 호환성을 보장합니다.
 
 ---
 
-## ✅ 11. 승인 및 검토
+##  11. 승인 및 검토
 
 | 역할 | 이름 | 승인일 | 서명 | SpaceONE 표준 검토 | Google Cloud 호환성 검토 |
 |-----|------|--------|------|--------------------|-----------------------|
@@ -581,5 +581,5 @@ def optimize_additional_info(data: dict, analysis_type: str = "group_by") -> dic
 **마지막 업데이트**: 2025년 9월 29일  
 **버전**: v2.0  
 **주요 기능**: 조건부 additional_info 필터링 PRD  
-**🚨 SpaceONE 표준 준수**: ✅ **완전 준수**  
-**🌐 Google Cloud Reports 호환성**: ✅ **완전 호환**
+** SpaceONE 표준 준수**:  **완전 준수**  
+** Google Cloud Reports 호환성**:  **완전 호환**

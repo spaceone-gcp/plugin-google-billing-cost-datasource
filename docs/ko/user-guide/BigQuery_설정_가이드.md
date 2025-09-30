@@ -1,6 +1,6 @@
 # BigQuery 빌링 데이터 설정 완전 가이드
 
-## 📋 개요
+##  개요
 
 Google Cloud Billing 데이터를 BigQuery로 내보내고 SpaceONE 플랫폼에서 활용하기 위한 완전 가이드입니다.
 
@@ -8,7 +8,7 @@ Google Cloud Billing 데이터를 BigQuery로 내보내고 SpaceONE 플랫폼에
 
 ---
 
-## 🚀 1단계: Cloud Billing 데이터 내보내기 설정
+##  1단계: Cloud Billing 데이터 내보내기 설정
 
 ### 1.1 BigQuery 데이터세트 생성
 
@@ -54,7 +54,7 @@ bq mk --dataset --location=US your-project-id:billing_export
 
 ---
 
-## 📊 2단계: BigQuery 테이블 구조 이해
+##  2단계: BigQuery 테이블 구조 이해
 
 ### 2.1 표준 데이터 내보내기 스키마
 
@@ -155,7 +155,7 @@ tiered_rates ARRAY<STRUCT<
 
 ---
 
-## 🔍 3단계: 실용적인 쿼리 예시
+##  3단계: 실용적인 쿼리 예시
 
 ### 3.1 기본 비용 분석 쿼리
 
@@ -265,7 +265,7 @@ ORDER BY month DESC, total_cost DESC
 
 ---
 
-## ⚙️ 4단계: SpaceONE 플러그인 설정
+##  4단계: SpaceONE 플러그인 설정
 
 ### 4.1 BigQuery 연동 설정
 
@@ -335,7 +335,7 @@ field_mapper:
 
 ---
 
-## 🔧 5단계: 권한 및 보안 설정
+##  5단계: 권한 및 보안 설정
 
 ### 5.1 필요한 IAM 권한
 
@@ -372,7 +372,7 @@ gcloud iam service-accounts keys create spaceone-key.json \
 
 ---
 
-## 📊 6단계: 데이터 검증 및 모니터링
+##  6단계: 데이터 검증 및 모니터링
 
 ### 6.1 데이터 품질 확인
 
@@ -420,7 +420,7 @@ grpcurl -plaintext -d '{
 
 ---
 
-## ❓ 7단계: 문제 해결 및 FAQ
+##  7단계: 문제 해결 및 FAQ
 
 ### 7.1 자주 발생하는 문제
 
@@ -467,7 +467,7 @@ GROUP BY project.id
 
 ---
 
-## 🎯 결론
+##  결론
 
 이 가이드를 통해 Google Cloud Billing 데이터를 BigQuery로 내보내고 SpaceONE 플랫폼에서 효과적으로 활용할 수 있습니다.
 

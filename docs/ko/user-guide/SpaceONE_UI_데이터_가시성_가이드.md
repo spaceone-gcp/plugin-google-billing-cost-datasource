@@ -1,6 +1,6 @@
 # SpaceONE UI 데이터 가시성 가이드
 
-## 📋 개요
+##  개요
 
 이 문서는 SpaceONE Cost Analysis UI에서 **mkkang-project 데이터가 보이지 않는 문제**를 해결하기 위한 단계별 가이드입니다.
 
@@ -10,19 +10,19 @@
 
 ---
 
-## 🎉 **NEW**: Usage 데이터 타입 지원 (v2.1)
+##  **NEW**: Usage 데이터 타입 지원 (v2.1)
 
 ### **SpaceONE UI Data Type 선택 가이드**
 
 SpaceONE Cost Analysis는 이제 **두 가지 데이터 타입**을 완전 지원합니다:
 
-#### **🔸 Cost 데이터 타입 (비용 기반 분석)**
+#### ** Cost 데이터 타입 (비용 기반 분석)**
 - **설정 방법**: Data Type → "Cost" 선택
 - **표시 조건**: `cost > 0`인 데이터만 표시
 - **용도**: 비용 최적화, 예산 관리, ROI 분석
 - **예시 데이터**: $2.61, $5.59, $8.23 등
 
-#### **🔹 Usage 데이터 타입 (사용량 기반 분석)** ⭐ **NEW**
+#### ** Usage 데이터 타입 (사용량 기반 분석)** ⭐ **NEW**
 - **설정 방법**: Data Type → "Usage" 선택  
 - **표시 조건**: `usage_quantity > 0`인 데이터만 표시
 - **용도**: 리소스 사용량 최적화, 효율성 분석
@@ -31,7 +31,7 @@ SpaceONE Cost Analysis는 이제 **두 가지 데이터 타입**을 완전 지�
   - Compute Engine: `6.889e+12 byte-seconds`, `3.152e+14 byte-seconds`
   - Storage: `81GB PD 스토리지 = 315조 byte-seconds`
 
-#### **🎯 사용 시나리오별 권장사항**
+#### ** 사용 시나리오별 권장사항**
 
 | **분석 목적** | **권장 Data Type** | **이유** |
 |---------------|-------------------|----------|
@@ -59,7 +59,7 @@ usage_unit: byte-seconds
 
 ---
 
-## 🚨 **즉시 해결 방법 (UI 설정)**
+##  **즉시 해결 방법 (UI 설정)**
 
 ### **1단계: 필터 설정 확인**
 
@@ -67,9 +67,9 @@ usage_unit: byte-seconds
 ```
 1. SpaceONE Cost Analysis 화면에서 "Filters" 버튼 클릭
 2. 현재 활성화된 필터 확인:
-   - ❌ "Cost > 0" 필터가 있다면 → 제거 또는 "Cost >= 0"으로 변경
-   - ❌ "Hide zero cost items" 옵션이 활성화되어 있다면 → 비활성화
-   - ❌ 프로젝트 필터에서 "mkkang-project"가 제외되어 있다면 → 포함시키기
+   -  "Cost > 0" 필터가 있다면 → 제거 또는 "Cost >= 0"으로 변경
+   -  "Hide zero cost items" 옵션이 활성화되어 있다면 → 비활성화
+   -  프로젝트 필터에서 "mkkang-project"가 제외되어 있다면 → 포함시키기
 ```
 
 #### **권장 필터 설정:**
@@ -96,7 +96,7 @@ End Date: 2025-09-30
 
 ---
 
-## 📊 **예상 결과 데이터**
+##  **예상 결과 데이터**
 
 설정이 올바르게 되면 다음 mkkang-project 데이터가 표시되어야 합니다:
 
@@ -118,7 +118,7 @@ End Date: 2025-09-30
 
 ---
 
-## 🔧 **고급 해결 방법**
+##  **고급 해결 방법**
 
 ### **UI에서 여전히 안 보이는 경우:**
 
@@ -146,7 +146,7 @@ console.log("Data source:", window.spaceone?.dataSource);
 
 ---
 
-## 📈 **데이터 검증 방법**
+##  **데이터 검증 방법**
 
 ### **1. 원시 데이터 확인**
 ```
@@ -163,7 +163,7 @@ console.log("Data source:", window.spaceone?.dataSource);
 
 ---
 
-## 🎯 **최종 체크리스트**
+##  **최종 체크리스트**
 
 ### **UI 설정 체크리스트:**
 - [ ] Filters에서 "Cost >= 0" 설정
@@ -181,7 +181,7 @@ console.log("Data source:", window.spaceone?.dataSource);
 
 ---
 
-## 🚨 **여전히 문제가 있다면**
+##  **여전히 문제가 있다면**
 
 ### **즉시 연락:**
 1. **로그 확인**: 플러그인 로그에서 "ULTIMATE" 키워드 검색
@@ -191,4 +191,4 @@ console.log("Data source:", window.spaceone?.dataSource);
    - 브라우저 개발자 도구 콘솔 로그
    - 예상 데이터와 실제 표시 데이터 비교
 
-**이 가이드를 따르면 mkkang-project 데이터가 SpaceONE UI에 정상적으로 표시될 것입니다!** 🎉
+**이 가이드를 따르면 mkkang-project 데이터가 SpaceONE UI에 정상적으로 표시될 것입니다!** 

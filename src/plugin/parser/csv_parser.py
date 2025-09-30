@@ -62,7 +62,6 @@ class CSVParser(BaseParser):
                     try:
                         mapped_record = field_mapper.map_record(row)
 
-                        # 🚨 CRITICAL: cost 필드 보장 (field_mapper 결과 검증)
                         if "cost" not in mapped_record:
                             # additional_info에서 cost 복구 시도
                             cost_value = 0.0
@@ -127,7 +126,6 @@ class CSVParser(BaseParser):
 
                         mapped_record = field_mapper.map_record(row_dict)
 
-                        # 🚨 CRITICAL: cost 필드 보장 (field_mapper 결과 검증)
                         if "cost" not in mapped_record:
                             # additional_info에서 cost 복구 시도
                             cost_value = 0.0

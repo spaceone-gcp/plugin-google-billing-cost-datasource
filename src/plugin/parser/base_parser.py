@@ -85,7 +85,6 @@ class BaseParser(ABC):
         # 궁극적 보장 시스템 적용 - cost 필드 최종 검증
         response = {"results": final_results}
 
-        # 🚨 CRITICAL: 모든 레코드에 cost 필드가 최상위에 있는지 최종 확인
         for record in response["results"]:
             if isinstance(record, dict):
                 if "cost" not in record:
@@ -100,7 +99,7 @@ class BaseParser(ABC):
                 record["cost"] = cost_value  # 첫 번째 위치에 cost 필드 배치
                 record.update(record_copy)
 
-        # 🆕 최종 응답에서 data.cost 제거 (내부 연산은 유지됨)
+        #  최종 응답에서 data.cost 제거 (내부 연산은 유지됨)
         response = self._remove_data_cost_from_response(response)
         return response
 

@@ -1,12 +1,12 @@
 # SpaceONE Google Cloud Billing Cost Datasource 개발 가이드
 
-## 📋 프로젝트 개요
+##  프로젝트 개요
 
 이 프로젝트는 **SpaceONE 플랫폼**에서 Google Cloud Billing 데이터를 수집하고 처리하는 Cost Analysis Plugin입니다.
 
-**프로젝트 상태**: ✅ **A+ 등급** (2025년 1월 28일 최신 업데이트)
+**프로젝트 상태**:  **A+ 등급** (2025년 1월 28일 최신 업데이트)
 - SpaceONE 플랫폼과 100% 호환
-- SpaceONE Cost Management 표준 패턴 적용 완료 🆕
+- SpaceONE Cost Management 표준 패턴 적용 완료 
 - 부동소수점 정밀도 개선 완료
 - Decimal 타입 완전 제거 (float 타입 보장)
 - 견고한 에러 처리 및 데이터 변환
@@ -15,7 +15,7 @@
 
 ---
 
-## 🎯 핵심 기능
+##  핵심 기능
 
 ### 1. 다중 데이터 소스 지원
 - **BigQuery**: Google Cloud Billing Export 테이블
@@ -30,10 +30,10 @@
 
 ### 3. SpaceONE 완벽 호환
 
-**🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 `cost` 필드는 필수 항목입니다.**
+** CRITICAL: SpaceONE 빌링 응답의 최상위 `cost` 필드는 필수 항목입니다.**
 
 - **표준 응답 구조**: `{"results": [...]}` 형식 준수
-- **최상위 cost 필드 보장**: 절대 누락 금지 (🚨 CRITICAL)
+- **최상위 cost 필드 보장**: 절대 누락 금지 ( CRITICAL)
 - **필수 필드 완전 지원**: cost, usage_quantity, provider, region_code, product, usage_type, resource, billed_date, currency, tags, additional_info, data
 - **JSON 직렬화 보장**: 과학적 표기법 완전 제거
 - **타입 안전성 확보**: Decimal → float 자동 변환
@@ -45,14 +45,14 @@
 
 ---
 
-## 📚 문서 관리 시스템
+##  문서 관리 시스템
 
 이 프로젝트는 체계적인 문서 관리 시스템을 제공합니다:
 
-- **📑 [문서 인덱스](DOCUMENTATION_INDEX.md)** - 모든 문서의 체계적 정리
-- **📚 [문서 관리 가이드](DOCUMENTATION_MANAGEMENT_GUIDE.md)** - 상세한 문서 관리 방법
-- **📝 [빠른 문서 가이드](README_DOC_MANAGEMENT.md)** - 문서 작성 및 관리 요약
-- **🛠️ 자동화 도구**: `scripts/create_doc.sh`, `scripts/doc_maintenance.sh`
+- ** [문서 인덱스](DOCUMENTATION_INDEX.md)** - 모든 문서의 체계적 정리
+- ** [문서 관리 가이드](DOCUMENTATION_MANAGEMENT_GUIDE.md)** - 상세한 문서 관리 방법
+- ** [빠른 문서 가이드](README_DOC_MANAGEMENT.md)** - 문서 작성 및 관리 요약
+- ** 자동화 도구**: `scripts/create_doc.sh`, `scripts/doc_maintenance.sh`
 
 ### 새 문서 생성
 ```bash
@@ -65,7 +65,7 @@
 
 ---
 
-## 🚀 빠른 시작
+##  빠른 시작
 
 ### 1. 환경 설정
 
@@ -110,26 +110,26 @@ pytest --cov=src
 
 ---
 
-## 📚 개발 가이드 문서
+##  개발 가이드 문서
 
-### 🔧 코드 작성 가이드
+###  코드 작성 가이드
 | 문서 | 설명 | 중요도 |
 |------|------|--------|
-| **[project-quality-checklist.md](development/project-quality-checklist.md)** | 코드 수정 시 필수 확인 사항 | ⭐⭐⭐ |
-| **[spaceone-response-quality-guide.md](development/spaceone-response-quality-guide.md)** | SpaceONE 응답 데이터 품질 기준 | ⭐⭐⭐ |
-| **[field-mapping-best-practices.md](development/field-mapping-best-practices.md)** | 필드 매핑 시스템 베스트 프랙티스 | ⭐⭐ |
-| **[error-handling-patterns.md](development/error-handling-patterns.md)** | 에러 처리 패턴 가이드 | ⭐⭐ |
+| **[project-quality-checklist.md](development/project-quality-checklist.md)** | 코드 수정 시 필수 확인 사항 | ⭐⭐|
+| **[spaceone-response-quality-guide.md](development/spaceone-response-quality-guide.md)** | SpaceONE 응답 데이터 품질 기준 | ⭐⭐|
+| **[field-mapping-best-practices.md](development/field-mapping-best-practices.md)** | 필드 매핑 시스템 베스트 프랙티스 | ⭐|
+| **[error-handling-patterns.md](development/error-handling-patterns.md)** | 에러 처리 패턴 가이드 | ⭐|
 
-### 🛠️ 유지보수 가이드
+###  유지보수 가이드
 | 문서 | 설명 | 중요도 |
 |------|------|--------|
-| **[code-maintenance-guide.md](development/code-maintenance-guide.md)** | 코드 유지보수 절차 | ⭐⭐⭐ |
-| **[통합_테스트_가이드.md](development/통합_테스트_가이드.md)** | gRPC 테스트 전략 및 모범사례 (통합 테스트 가이드) | ⭐⭐⭐ |
-| **[서버_실행_체크리스트.md](development/서버_실행_체크리스트.md)** | 서버 실행 및 포트 관리 가이드 | ⭐⭐ |
-| **[조건부_additional_info_필터링_PRD.md](development/조건부_additional_info_필터링_PRD.md)** | 조건부 additional_info 필터링 PRD | ⭐⭐ |
-| **[logging_standard.md](development/logging_standard.md)** | 로깅 표준 및 규칙 | ⭐⭐ |
+| **[code-maintenance-guide.md](development/code-maintenance-guide.md)** | 코드 유지보수 절차 | ⭐⭐|
+| **[통합_테스트_가이드.md](development/통합_테스트_가이드.md)** | gRPC 테스트 전략 및 모범사례 (통합 테스트 가이드) | ⭐⭐|
+| **[서버_실행_체크리스트.md](development/서버_실행_체크리스트.md)** | 서버 실행 및 포트 관리 가이드 | ⭐|
+| **[조건부_additional_info_필터링_PRD.md](development/조건부_additional_info_필터링_PRD.md)** | 조건부 additional_info 필터링 PRD | ⭐|
+| **[logging_standard.md](development/logging_standard.md)** | 로깅 표준 및 규칙 | ⭐|
 
-### 📖 기술 문서
+###  기술 문서
 | 문서 | 설명 |
 |------|------|
 | **[SpaceONE_표준_준수_additional_info_구조화_가이드.md](technical/SpaceONE_표준_준수_additional_info_구조화_가이드.md)** | SpaceONE 표준 준수 가이드 |
@@ -137,7 +137,7 @@ pytest --cov=src
 
 ---
 
-## 🔧 개발 워크플로우
+##  개발 워크플로우
 
 ### 1. 새로운 기능 개발
 
@@ -205,25 +205,25 @@ pytest --cov=src
 
 ---
 
-## 📊 프로젝트 품질 메트릭
+##  프로젝트 품질 메트릭
 
 ### 현재 상태 (2025-09-10 기준)
 
 | 항목 | 상태 | 점수 |
 |------|------|------|
-| **SpaceONE 호환성** | ✅ 완전 준수 | A+ |
-| **코드 품질** | ✅ Ruff 규칙 준수 | A+ |
-| **에러 처리** | ✅ 견고한 구현 | A+ |
-| **테스트 커버리지** | ✅ 핵심 로직 100% | A+ |
-| **문서화** | ✅ 포괄적 가이드 | A+ |
-| **성능** | ✅ 메모리 효율적 | A+ |
+| **SpaceONE 호환성** |  완전 준수 | A+ |
+| **코드 품질** |  Ruff 규칙 준수 | A+ |
+| **에러 처리** |  견고한 구현 | A+ |
+| **테스트 커버리지** |  핵심 로직 100% | A+ |
+| **문서화** |  포괄적 가이드 | A+ |
+| **성능** |  메모리 효율적 | A+ |
 
 ### 지속적 모니터링 지표
 
 ```bash
 # 품질 지표 확인 스크립트
 #!/bin/bash
-echo "📊 프로젝트 품질 지표..."
+echo " 프로젝트 품질 지표..."
 
 # 1. 코드 품질
 echo "1. Ruff 검사 결과:"
@@ -237,12 +237,12 @@ pytest --cov=src --cov-report=term-missing --quiet
 echo "3. 복잡도 분석:"
 ruff check src/ --select C90 --statistics
 
-echo "✅ 품질 지표 확인 완료"
+echo " 품질 지표 확인 완료"
 ```
 
 ---
 
-## 🛠️ 문제 해결 가이드
+##  문제 해결 가이드
 
 ### 1. 자주 발생하는 문제
 
@@ -291,7 +291,7 @@ python test/grpc/test_grpcurl_batch.py
 
 ---
 
-## 🎯 향후 개선 계획
+##  향후 개선 계획
 
 ### 1. 단기 목표 (1-2개월)
 - [ ] 추가 클라우드 프로바이더 지원 (AWS, Azure)
@@ -310,7 +310,7 @@ python test/grpc/test_grpcurl_batch.py
 
 ---
 
-## 🤝 기여 가이드
+##  기여 가이드
 
 ### 1. 코드 기여
 1. 이슈 생성 또는 기존 이슈 선택
@@ -333,7 +333,7 @@ python test/grpc/test_grpcurl_batch.py
 
 ---
 
-## 📞 지원 및 연락처
+##  지원 및 연락처
 
 ### 1. 문서 리소스
 - **개발 가이드**: `docs/ko/development/`
@@ -347,7 +347,7 @@ python test/grpc/test_grpcurl_batch.py
 
 ---
 
-## 📄 라이선스
+##  라이선스
 
 이 프로젝트는 Apache License 2.0 하에 배포됩니다. 자세한 내용은 [LICENSE](../LICENSE) 파일을 참조하세요.
 

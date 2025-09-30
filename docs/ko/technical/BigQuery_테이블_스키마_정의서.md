@@ -4,7 +4,7 @@
 
 이 문서는 `mkkang-project.multi_region_billing_data.gcp_billing_export_v1_01FD8E_B4DDC1_EAB69F` 테이블의 스키마 구조와 각 필드에 대한 상세 정보를 제공합니다.
 
-## 🚨 ABSOLUTE PERFECT ULTRA PURE DATA 원칙
+##  ABSOLUTE PERFECT ULTRA PURE DATA 원칙
 
 ### 데이터 순수성 보장
 - **모든 NULL 값 보존**: BigQuery에서 NULL인 값은 절대 기본값으로 변환하지 않음

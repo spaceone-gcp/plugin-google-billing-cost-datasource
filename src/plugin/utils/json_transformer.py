@@ -60,7 +60,7 @@ class JsonTransformer:
             # JSON 직렬화 전 cost 필드 최종 보장 및 data.cost 제거
             if isinstance(value, dict) and "results" in value:
                 value = self._ensure_cost_fields_in_response(value)
-                # 🆕 JSON 직렬화 직전에 data.cost 제거
+                #  JSON 직렬화 직전에 data.cost 제거
                 value = self._remove_data_cost_from_response(value)
 
             # 소수점 표기법만 사용

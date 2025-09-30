@@ -11,7 +11,7 @@ _LOGGER = logging.getLogger("spaceone")
 class FieldMapper:
     """SpaceONE 비용 데이터 형식으로 필드 매핑을 수행하는 클래스
 
-    🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
+    CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
 
     모든 매핑 결과는 SpaceONE 표준 응답 구조를 준수해야 합니다:
     - cost: 최상위 필수 필드, 절대 누락 금지
@@ -156,7 +156,6 @@ class FieldMapper:
                             f"[DEBUG] Post-processed Project Ancestry Numbers: {result['additional_info']['Project Ancestry Numbers']}"
                         )
 
-            # 🚨 CRITICAL: 최종 결과 검증 및 디버깅
             if "cost" not in result:
                 _LOGGER.warning(
                     f"[FieldMapper] Cost field missing from result! Keys: {list(result.keys())}"
@@ -216,7 +215,7 @@ class FieldMapper:
     def _ensure_required_fields(self, data: dict) -> dict:
         """SpaceONE 필수 필드가 누락되지 않도록 보장
 
-        🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
+        CRITICAL: SpaceONE 빌링 응답의 최상위 cost 필드는 필수 항목입니다.
 
         Args:
             data: 변환된 데이터
@@ -227,7 +226,7 @@ class FieldMapper:
         # SpaceONE 빌링 응답 표준 구조의 모든 필수 필드들
         # 문서 가이드라인에 따른 완전한 필수 필드 목록
         required_fields = {
-            "cost": 0.0,  # 🚨 최상위 필수 필드, 절대 누락 금지
+            "cost": 0.0,
             "usage_quantity": 0.0,  # 필수: 사용량 (기본값 0.0)
             "usage_unit": "",  # 선택적: 사용량 단위
             "provider": self.provider,  # 필수: 프로바이더
@@ -235,7 +234,7 @@ class FieldMapper:
             "product": "",  # 필수: 제품명
             "usage_type": "",  # 필수: 사용 유형
             "resource": "",  # 필수: 리소스 식별자
-            "currency": "USD",  # 🆕 필수: 통화 (최상위 필드로 승격)
+            "currency": "USD",  #  필수: 통화 (최상위 필드로 승격)
             "billed_date": None,  # 필수: 청구 날짜 (YYYY-MM-DD 형식, 데이터 없으면 None)
             "tags": {},  # 필수: 태그 (빈 딕셔너리 허용)
             "additional_info": {},  # 필수: 추가 정보 (빈 딕셔너리 허용)
@@ -520,16 +519,12 @@ class FieldMapper:
         usage_type_value = self._map_field("usage_type", source_data, "")
         resource_value = self._map_field("resource", source_data, "")
 
-        # 디버깅: 매핑 결과 확인 (첫 번째 레코드만)
+        # 첫 번째 레코드만 매핑 결과 확인 (간소화)
         if not hasattr(self, "_debug_mapping_logged"):
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: product mapping result: {repr(product_value)}"
-            )
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: usage_type mapping result: {repr(usage_type_value)}"
-            )
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: resource mapping result: {repr(resource_value)}"
+            _LOGGER.debug(
+                f"[FieldMapper] Mapping results - product: {product_value[:50] if product_value else 'None'}..., "
+                f"usage_type: {usage_type_value[:50] if usage_type_value else 'None'}..., "
+                f"resource: {resource_value[:50] if resource_value else 'None'}..."
             )
             self._debug_mapping_logged = True
 
@@ -1107,7 +1102,7 @@ class FieldMapper:
         Returns:
             usage_quantity 값 (없으면 0)
         """
-        # 🎯 1단계: GCP additional_info에서 Usage Amount 추출 (최우선)
+        # 1단계: GCP additional_info에서 Usage Amount 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
         # _LOGGER.debug(f"[FieldMapper] DEBUG: additional_info type: {type(additional_info)}, keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
 
@@ -1135,7 +1130,7 @@ class FieldMapper:
                 except (ValueError, TypeError):
                     # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
                     pass
-        # 🎯 2단계: 기존 usage_quantity 필드 확인 (fallback)
+        # 2단계: 기존 usage_quantity 필드 확인 (fallback)
         usage_quantity = source_data.get("usage_quantity")
         if (
             usage_quantity is not None
@@ -1149,7 +1144,7 @@ class FieldMapper:
             except (ValueError, TypeError):
                 # _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}")
                 pass
-        # 🎯 3단계: usage_amount 필드 확인 (추가 fallback)
+        # 3단계: usage_amount 필드 확인 (추가 fallback)
         usage_amount_field = source_data.get("usage_amount")
         if usage_amount_field is not None and usage_amount_field != "":
             try:
@@ -1160,7 +1155,7 @@ class FieldMapper:
             except (ValueError, TypeError):
                 # _LOGGER.warning(f"[FieldMapper] Invalid usage_amount value: {usage_amount_field}")
                 pass
-        # 🎯 4단계: 최후의 수단 - 전체 source_data에서 Usage Amount 검색
+        # 4단계: 최후의 수단 - 전체 source_data에서 Usage Amount 검색
         # _LOGGER.debug("[FieldMapper] DEBUG: Searching entire source_data for Usage Amount patterns")
 
         # 전체 데이터를 문자열로 변환해서 Usage Amount 찾기
@@ -1182,7 +1177,7 @@ class FieldMapper:
             except Exception:
                 # _LOGGER.error(f"[FieldMapper] Emergency search failed: {e}")
                 pass
-        # 🎯 5단계: 모든 방법이 실패한 경우 0 반환
+        # 5단계: 모든 방법이 실패한 경우 0 반환
         # _LOGGER.debug("[FieldMapper] No valid usage quantity found, returning 0")
         return 0
 
@@ -1198,7 +1193,7 @@ class FieldMapper:
         Returns:
             usage_unit 값 (없으면 빈 문자열)
         """
-        # 🎯 1단계: GCP additional_info에서 Usage Unit 추출 (최우선)
+        # 1단계: GCP additional_info에서 Usage Unit 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
         # _LOGGER.debug(f"[FieldMapper] DEBUG: usage_unit additional_info keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
 
@@ -1218,19 +1213,19 @@ class FieldMapper:
                 # _LOGGER.debug(f"[FieldMapper] Found Usage Pricing Unit: {usage_pricing_unit}")
                 return str(usage_pricing_unit)
 
-        # 🎯 2단계: 기존 usage_unit 필드 확인 (fallback)
+        # 2단계: 기존 usage_unit 필드 확인 (fallback)
         usage_unit_field = source_data.get("usage_unit")
         if usage_unit_field is not None and usage_unit_field != "":
             # _LOGGER.debug(f"[FieldMapper] Found usage_unit field: {usage_unit_field}")
             return str(usage_unit_field)
 
-        # 🎯 3단계: pricing_unit 필드 확인 (추가 fallback)
+        # 3단계: pricing_unit 필드 확인 (추가 fallback)
         pricing_unit = source_data.get("pricing_unit")
         if pricing_unit is not None and pricing_unit != "":
             # _LOGGER.debug(f"[FieldMapper] Found pricing_unit field: {pricing_unit}")
             return str(pricing_unit)
 
-        # 🎯 4단계: 모든 방법이 실패한 경우 빈 문자열 반환
+        # 4단계: 모든 방법이 실패한 경우 빈 문자열 반환
         # _LOGGER.debug("[FieldMapper] No valid usage unit found, returning empty string")
         return ""
 
@@ -1668,13 +1663,11 @@ class FieldMapper:
             try:
                 result = self.compiled_mappings[field_name](source_data)
 
-                # billed_date 필드에 대한 특별 디버깅
+                # billed_date 필드에 대한 특별 디버깅 (간소화)
                 if field_name == "billed_date" and not hasattr(
                     self, "_debug_billed_date_mapping_logged"
                 ):
-                    _LOGGER.info(
-                        f"[FieldMapper] DEBUG: billed_date compiled mapping result: {repr(result)}"
-                    )
+                    _LOGGER.debug(f"[FieldMapper] billed_date mapping: {result}")
                     self._debug_billed_date_mapping_logged = True
 
                 # 결과가 빈 문자열이고 default_value가 있으면 default_value 사용
@@ -1695,12 +1688,7 @@ class FieldMapper:
         if field_name == "billed_date" and not hasattr(
             self, "_debug_billed_date_fallback_logged"
         ):
-            _LOGGER.warning(
-                "[FieldMapper] DEBUG: billed_date not in compiled_mappings, using fallback"
-            )
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: available compiled mappings: {list(self.compiled_mappings.keys())}"
-            )
+            _LOGGER.debug("[FieldMapper] billed_date fallback mapping used")
             self._debug_billed_date_fallback_logged = True
 
         return self._get_nested_value(source_data, field_name, default_value)
@@ -1818,9 +1806,7 @@ class FieldMapper:
         if path in important_paths:
             log_key = f"_nested_log_{path.replace('.', '_')}"
             if not hasattr(self, log_key):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: Nested path '{path}' resolved to: {repr(result)}"
-                )
+                _LOGGER.debug(f"[FieldMapper] Nested '{path}': {str(result)[:100]}...")
                 setattr(self, log_key, True)
 
     def _apply_transform(self, value: Any, transform: Optional[str]) -> Any:
@@ -2296,7 +2282,7 @@ class FieldMapper:
                 },
                 "tags": {"field": "labels", "transform": "json_parse"},
                 "additional_info": {
-                    # 💰 비용 관련 필드들 (BigQuery 스타일) - Title Case 유지
+                    #  비용 관련 필드들 (BigQuery 스타일) - Title Case 유지
                     "Cost At List": "Cost At List",
                     "Cost After Credits": "Cost After Credits",
                     "Cost At Effective Price Default": "Cost At Effective Price Default",
@@ -2308,7 +2294,7 @@ class FieldMapper:
                         "output_key": "Credits Detail",
                     },
                     "Currency Conversion Rate": "Currency Conversion Rate",
-                    # 🏢 계정 및 청구 정보 - Title Case 유지
+                    #  계정 및 청구 정보 - Title Case 유지
                     "Billing Account ID": "Billing Account ID",
                     "Invoice Month": {
                         "field": "invoice.month",
@@ -2323,7 +2309,7 @@ class FieldMapper:
                     "Cost Type": "Cost Type",
                     "Transaction Type": "Transaction Type",
                     "Seller Name": "Seller Name",
-                    # 🏗️ 프로젝트 정보 (BigQuery 중첩 구조) - Title Case 유지
+                    # ️ 프로젝트 정보 (BigQuery 중첩 구조) - Title Case 유지
                     "Project ID": {
                         "field": "project.id",
                         "fallback": "project_id",
@@ -2356,7 +2342,7 @@ class FieldMapper:
                         "fallback": "service_description",
                         "output_key": "Service Description",
                     },
-                    # 📦 SKU 정보 (BigQuery 중첩 구조) - Title Case 유지
+                    #  SKU 정보 (BigQuery 중첩 구조) - Title Case 유지
                     "SKU ID": {
                         "field": "sku.id",
                         "fallback": "sku_id",
@@ -2367,7 +2353,7 @@ class FieldMapper:
                         "fallback": "sku_description",
                         "output_key": "SKU Description",
                     },
-                    # 🌍 위치 정보 (BigQuery 중첩 구조)
+                    #  위치 정보 (BigQuery 중첩 구조)
                     "Location": {
                         "field": "location.location",
                         "fallback": "location_location",
@@ -2384,7 +2370,7 @@ class FieldMapper:
                         "field": "location.zone",
                         "fallback": "location_zone",
                     },
-                    # 📊 사용량 정보 (BigQuery 중첩 구조)
+                    # 사용량 정보 (BigQuery 중첩 구조)
                     "Usage Start Time": "usage_start_time",
                     "Usage End Time": "usage_end_time",
                     "Usage Amount": {
@@ -2403,7 +2389,7 @@ class FieldMapper:
                         "field": "usage.pricing_unit",
                         "fallback": "usage_pricing_unit",
                     },
-                    # 💲 가격 정보 (BigQuery price 중첩 구조)
+                    #  가격 정보 (BigQuery price 중첩 구조)
                     "Price Effective Price": {
                         "field": "price.effective_price",
                         "fallback": "price_effective_price",
@@ -2432,13 +2418,13 @@ class FieldMapper:
                         "field": "price.list_price_consumption_model",
                         "fallback": "price_list_price_consumption_model",
                     },
-                    # 🏷️ 라벨 및 태그 (BigQuery 배열 구조)
+                    # ️ 라벨 및 태그 (BigQuery 배열 구조)
                     "System Labels": {
                         "field": "system_labels",
                         "transform": "json_parse",
                     },
                     "Resource Tags": {"field": "tags", "transform": "json_parse"},
-                    # 📈 소비 모델 정보
+                    # 소비 모델 정보
                     "Consumption Model ID": {
                         "field": "consumption_model.id",
                         "fallback": "consumption_model_id",
@@ -2447,13 +2433,13 @@ class FieldMapper:
                         "field": "consumption_model.description",
                         "fallback": "consumption_model_description",
                     },
-                    # 🔍 메타데이터
+                    # 메타데이터
                     "Export Time": "export_time",
                     "Adjustment Info": {
                         "field": "adjustment_info",
                         "transform": "json_parse",
                     },
-                    # 🆕 리소스 식별 필드 (상세 사용량 데이터용)
+                    #  리소스 식별 필드 (상세 사용량 데이터용)
                     "Resource Name": "resource_name",
                     "Resource Global Name": "resource_global_name",
                 },
@@ -2538,17 +2524,15 @@ class FieldMapper:
 
     def log_final_daily_count_summary(self):
         """최종 일별 카운트 요약 로깅 (외부에서 호출 가능)"""
-        _LOGGER.info("[FieldMapper] 🎯 === 최종 일별 카운트 요약 ===")
-        _LOGGER.info(
-            f"[FieldMapper] 📊 총 처리 레코드: {self.total_processed_count:,}개"
-        )
+        _LOGGER.info("[FieldMapper] === 최종 일별 카운트 요약 ===")
+        _LOGGER.info(f"[FieldMapper] 총 처리 레코드: {self.total_processed_count:,}개")
 
         if self.daily_count_tracker:
             _LOGGER.info(
-                f"[FieldMapper] 📅 처리 기간: {min(self.daily_count_tracker.keys())} ~ {max(self.daily_count_tracker.keys())}"
+                f"[FieldMapper] 처리 기간: {min(self.daily_count_tracker.keys())} ~ {max(self.daily_count_tracker.keys())}"
             )
             _LOGGER.info(
-                f"[FieldMapper] 🗓️ 고유 날짜 수: {len(self.daily_count_tracker)}개"
+                f"[FieldMapper] 고유 날짜 수: {len(self.daily_count_tracker)}개"
             )
 
             # 날짜별 상세 정보
@@ -2556,22 +2540,12 @@ class FieldMapper:
             for date, count in sorted_dates:
                 percentage = (count / self.total_processed_count) * 100
                 _LOGGER.info(
-                    f"[FieldMapper]   📅 {date}: {count:,}개 레코드 ({percentage:.2f}%)"
+                    f"[FieldMapper] {date}: {count:,}개 레코드 ({percentage:.2f}%)"
                 )
-
-            # 최다/최소 처리 날짜
-            max_date = max(self.daily_count_tracker.items(), key=lambda x: x[1])
-            min_date = min(self.daily_count_tracker.items(), key=lambda x: x[1])
-            _LOGGER.info(
-                f"[FieldMapper] 🥇 최다 처리: {max_date[0]} ({max_date[1]:,}개)"
-            )
-            _LOGGER.info(
-                f"[FieldMapper] 🥉 최소 처리: {min_date[0]} ({min_date[1]:,}개)"
-            )
         else:
-            _LOGGER.warning("[FieldMapper] ⚠️ 처리된 데이터가 없습니다")
+            _LOGGER.warning("[FieldMapper] 처리된 데이터가 없습니다")
 
-        _LOGGER.info("[FieldMapper] 🎯 === 일별 카운트 요약 완료 ===")
+        _LOGGER.info("[FieldMapper] === 일별 카운트 요약 완료 ===")
 
     def reset_daily_count_tracker(self):
         """일별 카운트 추적기 초기화"""

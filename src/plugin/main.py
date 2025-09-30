@@ -70,7 +70,7 @@ setup_logging()
 
 _LOGGER = logging.getLogger("spaceone")
 
-# 🎯 전역 프로젝트 처리 추적 시스템
+# 전역 프로젝트 처리 추적 시스템
 _processed_projects: Set[str] = set()
 _processing_lock = Lock()
 _expected_total_projects = 0  # JobManager에서 실제 생성된 태스크 수 (동적 설정)
@@ -241,19 +241,19 @@ def job_get_tasks(params: dict) -> dict:
         }
 
     """
-    _LOGGER.info("🚀 [job_get_tasks] API endpoint called - 태스크 생성 시작")
+    _LOGGER.info("[job_get_tasks] API endpoint called - 태스크 생성 시작")
 
-    # 🎯 전역 프로젝트 처리 추적 시스템 초기화
+    # 전역 프로젝트 처리 추적 시스템 초기화
     with _processing_lock:
         _processed_projects.clear()
-    _LOGGER.info("🔄 [job_get_tasks] 프로젝트 처리 추적 시스템 초기화 완료")
+    _LOGGER.info("[job_get_tasks] 프로젝트 처리 추적 시스템 초기화 완료")
 
-    # 🎯 중요: 프로젝트 태스크 생성 시작 알림
+    # 중요: 프로젝트 태스크 생성 시작 알림
     _LOGGER.info(
-        "📊 [job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다..."
+        "[job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다..."
     )
     _LOGGER.info(
-        "🔍 [job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다..."
+        "[job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다..."
     )
 
     try:
@@ -269,7 +269,7 @@ def job_get_tasks(params: dict) -> dict:
             raise ValueError(f"Missing required parameters: {missing_params}")
 
         # 요청 파라미터 상세 로깅
-        _LOGGER.info("📋 [job_get_tasks] 요청 파라미터:")
+        _LOGGER.info(" [job_get_tasks] 요청 파라미터:")
         _LOGGER.info(f"   - domain_id: {params.get('domain_id')}")
         _LOGGER.info(f"   - start: {params.get('start', 'None')}")
         _LOGGER.info(f"   - options keys: {list(params.get('options', {}).keys())}")
@@ -288,7 +288,7 @@ def job_get_tasks(params: dict) -> dict:
         # 작업 태스크 생성
         result = _job_get_tasks_logic(params)
 
-        # 🎯 태스크 생성 결과 검증 및 로깅
+        # 태스크 생성 결과 검증 및 로깅
         actual_tasks = len(result.get("tasks", []))
 
         # 전역 변수에 실제 생성된 태스크 수 저장
@@ -297,11 +297,11 @@ def job_get_tasks(params: dict) -> dict:
             _expected_total_projects = actual_tasks
 
         _LOGGER.info("=" * 80)
-        _LOGGER.info("🎉 [job_get_tasks] 태스크 생성 API 완료!")
-        _LOGGER.info(f"📊 최종 결과: {actual_tasks}개 태스크 생성")
-        _LOGGER.info(f"🔄 전역 추적 시스템에 예상 태스크 수 설정: {actual_tasks}개")
+        _LOGGER.info("[job_get_tasks] 태스크 생성 API 완료!")
+        _LOGGER.info(f"최종 결과: {actual_tasks}개 태스크 생성")
+        _LOGGER.info(f"전역 추적 시스템에 예상 태스크 수 설정: {actual_tasks}개")
         _LOGGER.info(
-            "✅ JobManager가 BigQuery에서 탐지한 모든 활성 프로젝트에 대한 태스크 생성 완료!"
+            "JobManager가 BigQuery에서 탐지한 모든 활성 프로젝트에 대한 태스크 생성 완료!"
         )
         _LOGGER.info("=" * 80)
 
@@ -323,7 +323,7 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
         task_options = params.get("task_options", {})
         schema = params.get("schema")
 
-        # 🎯 Credits Detail 모드 확인
+        # Credits Detail 모드 확인
         credits_detail_mode = task_options.get("credits_detail_mode", False)
 
         _LOGGER.info(
@@ -331,7 +331,7 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
         )
 
         if credits_detail_mode:
-            # 🎯 Credits Detail 모드: 원본 데이터 조회
+            # Credits Detail 모드: 원본 데이터 조회
             _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드로 실행")
 
             from plugin.connector.bigquery_connector import BigqueryConnector
@@ -395,7 +395,7 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
             _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드 조회 완료")
 
         else:
-            # 🚀 기본 모드: 기존 최적화된 집계 데이터 조회
+            # 기본 모드: 기존 최적화된 집계 데이터 조회
             _LOGGER.info("[_cost_get_data_logic] 기본 모드로 실행")
 
             # CostManager 인스턴스 생성
@@ -456,7 +456,6 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
         result_generator = _cost_get_data_logic(params)
 
-        # 🚨 ULTIMATE: gRPC 메시지 크기 제한 해결을 위한 스마트 청킹 시스템
         # 4MB 제한을 고려하여 적절한 크기로 응답을 분할하여 전송
         batch_count = 0
         total_records = 0
@@ -483,7 +482,6 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                                 spaceone_formatted["results"][0]
                             )
 
-                        # 🚨 ULTIMATE: 최종 응답 검증 및 cost 필드 보장
                         spaceone_formatted = _ultimate_cost_field_verification(
                             spaceone_formatted, batch_count
                         )
@@ -498,12 +496,9 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                             # 청크 크기에 도달하면 yield
                             if len(chunk_buffer) >= MAX_CHUNK_SIZE:
                                 chunk_response = {"results": chunk_buffer}
-                                # 🆕 응답 직전에 data.cost 제거
+                                #  응답 직전에 data.cost 제거
                                 chunk_response = _remove_data_cost_from_response(
                                     chunk_response
-                                )
-                                _LOGGER.info(
-                                    f"[cost_get_data] Yielding chunk: {len(chunk_buffer)} records"
                                 )
                                 yield chunk_response
                                 chunk_buffer = []  # 버퍼 초기화
@@ -514,10 +509,9 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                 )
                 # 에러가 발생해도 다음 배치 처리 계속
 
-        # 🚨 ULTIMATE: 남은 레코드가 있으면 마지막 청크로 전송
         if chunk_buffer:
             final_response = {"results": chunk_buffer}
-            # 🆕 최종 응답 직전에 data.cost 제거
+            #  최종 응답 직전에 data.cost 제거
             final_response = _remove_data_cost_from_response(final_response)
             _LOGGER.info(
                 f"[cost_get_data] Yielding final chunk: {len(chunk_buffer)} records"
@@ -527,64 +521,16 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             _LOGGER.warning("[cost_get_data] No results to yield")
             yield {"results": []}
 
-        # 🎯 처리 완료 프로젝트 수 검증 로깅 (JobManager와 동일한 형태)
+        # 처리 완료 프로젝트 수 검증 로깅 (JobManager와 동일한 형태)
         task_options = params.get("task_options", {})
         processed_project = task_options.get("project_id", "unknown")
 
         # 전역 처리된 프로젝트 추적 업데이트 (Pod 중복 실행 대응)
         with _processing_lock:
             if processed_project in _processed_projects:
-                _LOGGER.warning(
-                    f"🔄 [중복 처리 감지] 프로젝트 '{processed_project}'가 이미 처리되었습니다!"
-                )
-                _LOGGER.warning(
-                    "💡 Pod 중복 실행으로 인한 중복 처리 가능성이 있습니다."
-                )
                 return  # 중복 처리 방지
 
             _processed_projects.add(processed_project)
-            current_processed_count = len(_processed_projects)
-
-        _LOGGER.info("=" * 80)
-        _LOGGER.info("🎉 [cost_get_data] 개별 프로젝트 처리 완료!")
-        _LOGGER.info(f"📋 처리된 프로젝트: {processed_project}")
-        _LOGGER.info(f"📊 처리된 배치 수: {batch_count}개")
-        _LOGGER.info(f"📝 처리된 총 레코드 수: {total_records}개")
-
-        # 전체 진행 상황 요약
-        _LOGGER.info("🔍 [전체 진행 상황]")
-        _LOGGER.info(f"   📊 현재까지 처리된 프로젝트 수: {current_processed_count}개")
-        _LOGGER.info(
-            f"   🎯 JobManager가 생성한 총 태스크 수: {_expected_total_projects}개"
-        )
-
-        # 0으로 나누기 방지
-        if _expected_total_projects > 0:
-            progress_rate = current_processed_count / _expected_total_projects * 100
-            _LOGGER.info(f"   📈 진행률: {progress_rate:.1f}%")
-
-            # 모든 프로젝트 처리 완료 시 최종 요약
-            if current_processed_count == _expected_total_projects:
-                _LOGGER.info(
-                    "🎊 [최종 완료] JobManager 태스크와 동일한 수의 프로젝트 처리 완료!"
-                )
-                _LOGGER.info("📝 [처리된 프로젝트 목록] - JobManager 태스크와 비교")
-                sorted_projects = sorted(list(_processed_projects))
-                for i, project_id in enumerate(sorted_projects, 1):
-                    _LOGGER.info(f"   {i:2d}. {project_id}")
-            elif current_processed_count < _expected_total_projects:
-                remaining = _expected_total_projects - current_processed_count
-                _LOGGER.info(f"⏳ 남은 프로젝트: {remaining}개")
-            else:
-                extra = current_processed_count - _expected_total_projects
-                _LOGGER.warning(
-                    f"🤔 예상보다 {extra}개 더 많은 프로젝트가 처리되었습니다!"
-                )
-        else:
-            _LOGGER.warning("⚠️  JobManager에서 생성된 태스크 수가 설정되지 않았습니다!")
-            _LOGGER.warning("💡 Job.get_tasks가 먼저 호출되어야 합니다.")
-
-        _LOGGER.info("=" * 80)
 
         _LOGGER.info(
             f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records"
@@ -646,7 +592,6 @@ def _convert_to_spaceone_format(batch_result, batch_count):
         spaceone_results = []
         for record in results:
             if isinstance(record, dict):
-                # 🚨 ULTIMATE: 원본 레코드에서 cost 필드 강제 보장 (최우선)
                 if "cost" not in record:
                     # additional_info에서 cost 복구 시도
                     cost_value = 0.0
@@ -672,7 +617,6 @@ def _convert_to_spaceone_format(batch_result, batch_count):
 
                 spaceone_record = _ensure_spaceone_record_format(record)
                 if spaceone_record:  # 유효한 레코드만 추가
-                    # 🚨 CRITICAL: cost 필드를 딕셔너리의 첫 번째 위치로 강제 이동
                     if "cost" in spaceone_record:
                         cost_value = spaceone_record.pop("cost")
                         record_copy = spaceone_record.copy()
@@ -705,7 +649,6 @@ def _convert_to_spaceone_format(batch_result, batch_count):
 def _ensure_spaceone_record_format(record):
     """개별 레코드를 SpaceONE 표준 형식으로 변환"""
     try:
-        # 🚨 CRITICAL: cost 필드가 최상위에 반드시 존재해야 함
         # 원본 레코드에서 cost 필드 추출 및 검증
         cost_value = record.get("cost")
         if cost_value is None:
@@ -734,7 +677,6 @@ def _ensure_spaceone_record_format(record):
                     "[_ensure_spaceone_record_format] CRITICAL: cost field missing in record, setting to 0.0"
                 )
 
-        # 🚨 CRITICAL: currency 필드 추출 및 보장
         currency_value = record.get("currency")
         if currency_value is None or currency_value == "":
             # additional_info에서 Currency 필드 추출 시도
@@ -748,7 +690,6 @@ def _ensure_spaceone_record_format(record):
                     "[_ensure_spaceone_record_format] Currency field missing, defaulting to USD"
                 )
 
-        # 🚨 EMERGENCY FIX: usage_quantity를 additional_info에서 직접 추출
         usage_quantity_value = record.get("usage_quantity", 0.0)
         usage_unit_value = record.get("usage_unit", "")
 
@@ -790,14 +731,10 @@ def _ensure_spaceone_record_format(record):
                     pass
         # SpaceONE 필수 필드 정의 (필수 필드들을 정확한 순서로 배치)
         spaceone_record = {
-            "cost": _safe_numeric_convert(cost_value),  # 🚨 최상위 필수 필드 #1
-            "currency": _safe_string_convert(currency_value),  # 🚨 최상위 필수 필드 #2
-            "usage_quantity": _safe_numeric_convert(
-                usage_quantity_value
-            ),  # 🚨 EMERGENCY FIX 적용
-            "usage_unit": _safe_string_convert(
-                usage_unit_value
-            ),  # 🚨 EMERGENCY FIX 적용
+            "cost": _safe_numeric_convert(cost_value),
+            "currency": _safe_string_convert(currency_value),
+            "usage_quantity": _safe_numeric_convert(usage_quantity_value),
+            "usage_unit": _safe_string_convert(usage_unit_value),
             "provider": _safe_string_convert(record.get("provider", "google_cloud")),
             "region_code": _safe_string_convert(record.get("region_code", "global")),
             "product": _safe_string_convert(record.get("product", "Unknown")),
@@ -820,7 +757,6 @@ def _ensure_spaceone_record_format(record):
                 "[_ensure_spaceone_record_format] billed_date is empty, keeping as None"
             )
 
-        # 🚨 ULTIMATE: 최종 cost 필드 보장 (이중 검증)
         if "cost" not in spaceone_record or spaceone_record["cost"] is None:
             spaceone_record["cost"] = 0.0
             _LOGGER.error(
@@ -1013,7 +949,7 @@ def cost_get_linked_accounts(params: dict) -> dict:
 
 
 # =============================================================================
-# 🎯 Credits Detail 기능은 기존 Cost.get_data API에 통합됨
+# Credits Detail 기능은 기존 Cost.get_data API에 통합됨
 #
 # SpaceONE 프레임워크 제약으로 새로운 엔드포인트 추가 불가
 # task_options.credits_detail_mode = true 로 Credits Detail 모드 활성화
@@ -1021,7 +957,7 @@ def cost_get_linked_accounts(params: dict) -> dict:
 
 
 # =============================================================================
-# 🎯 Credits Detail 기능은 기존 Cost.get_data API에 통합됨
+# Credits Detail 기능은 기존 Cost.get_data API에 통합됨
 #
 # 사용법:
 # task_options.credits_detail_mode = true

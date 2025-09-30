@@ -189,7 +189,7 @@ class RequestDeduplicator:
         key_data = {
             "data_source_type": data_source_type,
             "file_path": task_options.get("file_path"),
-            "project_id": project_id,  # 🚨 CRITICAL FIX: task_options에서 우선 조회
+            "project_id": project_id,
             "field_mapper": options.get("field_mapper", {}),
             "select_cost": options.get("select_cost"),
         }

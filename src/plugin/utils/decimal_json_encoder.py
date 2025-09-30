@@ -54,7 +54,7 @@ class DecimalJSONEncoder(json.JSONEncoder):
             _LOGGER.debug(f"[DecimalJSONEncoder] Preserving small value: {value}")
 
             # Decimal을 통한 정확한 반올림 후 float로 변환
-            from decimal import Decimal, ROUND_HALF_UP
+            from decimal import ROUND_HALF_UP, Decimal
 
             decimal_val = Decimal(str(value))
 
@@ -256,7 +256,7 @@ def ensure_no_scientific_notation(data: dict) -> dict:
                         "product": "",
                         "usage_type": "",
                         "resource": "",
-                        "currency": "USD",  # 🆕 최상위 필수 필드로 승격
+                        "currency": "USD",  #  최상위 필수 필드로 승격
                         "billed_date": "",
                         "tags": {},
                         "additional_info": {},
@@ -305,7 +305,7 @@ def test_scientific_notation_removal():
     has_scientific = any(re.search(pattern, result) for pattern in scientific_patterns)
 
     print("\n=== 검증 결과 ===")
-    print(f"과학적 표기법 존재: {'❌ 발견됨' if has_scientific else '✅ 완전 제거됨'}")
+    print(f"과학적 표기법 존재: {'발견됨' if has_scientific else '완전 제거됨'}")
 
     return not has_scientific
 

@@ -87,7 +87,7 @@ class BigqueryConnector(BaseConnector):
         BigqueryConnector._query_counter += 1
         current_query_num = BigqueryConnector._query_counter
 
-        _LOGGER.info(f"🚀 [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 시작")
+        _LOGGER.info(f"[BigQuery 커넥터] 쿼리 #{current_query_num} 실행 시작")
         _LOGGER.debug(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
 
         try:
@@ -100,7 +100,7 @@ class BigqueryConnector(BaseConnector):
                 progress_bar_type=None,  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
             )
             _LOGGER.info(
-                f"✅ [BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회"
+                f"[BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회"
             )
             _LOGGER.debug(
                 f"[BigqueryConnector] 쿼리 실행 성공 - DataFrame 크기: {len(result_df)} 행, {len(result_df.columns)} 열"
@@ -122,15 +122,15 @@ class BigqueryConnector(BaseConnector):
                 )
             elif "connection" in error_msg.lower():
                 _LOGGER.error(
-                    f"[BigqueryConnector] 🔌 연결 문제 발생 - 쿼리 #{current_query_num}"
+                    f"[BigqueryConnector]  연결 문제 발생 - 쿼리 #{current_query_num}"
                 )
             elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
                 _LOGGER.error(
-                    f"[BigqueryConnector] 📊 할당량/제한 초과 - 쿼리 #{current_query_num}"
+                    f"[BigqueryConnector] 할당량/제한 초과 - 쿼리 #{current_query_num}"
                 )
             elif "unexpected keyword argument" in error_msg.lower():
                 _LOGGER.error(
-                    f"[BigqueryConnector] 🔧 API 호환성 문제 - 쿼리 #{current_query_num}"
+                    f"[BigqueryConnector] API 호환성 문제 - 쿼리 #{current_query_num}"
                 )
                 _LOGGER.error("[BigqueryConnector] pandas-gbq>=0.29.0 API 호환성 문제")
 

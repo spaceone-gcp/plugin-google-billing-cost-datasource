@@ -1,14 +1,14 @@
 # SpaceONE 플랫폼 호환성 완전 가이드
 
-## 📋 개요
+##  개요
 
 SpaceONE Google Cloud Billing Cost Datasource 플러그인에서 **SpaceONE 플랫폼과 100% 호환되는 응답 데이터**를 생성하기 위한 종합 가이드입니다.
 
-**🚨 CRITICAL: SpaceONE 빌링 응답의 최상위 `cost` 필드는 필수 항목입니다.**
+** CRITICAL: SpaceONE 빌링 응답의 최상위 `cost` 필드는 필수 항목입니다.**
 
 **기반 데이터**: 2025년 9월 11일 v2.0 업데이트 (A+ 등급)
 
-## 🔧 Cost Management 표준 패턴 적용
+##  Cost Management 표준 패턴 적용
 
 ### SpaceONE 표준 구현 방식
 
@@ -57,7 +57,7 @@ def init(self, options: dict) -> dict:
 
 ---
 
-## 🎯 SpaceONE 응답 데이터 필수 요구사항
+##  SpaceONE 응답 데이터 필수 요구사항
 
 ### 1. 기본 응답 구조
 
@@ -67,9 +67,9 @@ def init(self, options: dict) -> dict:
 {
   "results": [
     {
-      "cost": 123.45,                    // 🚨 CRITICAL: 최상위 필드, 절대 누락 금지
-      "usage_quantity": 1000.0,          // 🚨 CRITICAL: Usage 데이터 타입 지원 필수
-      "usage_unit": "GB-hours",          // 🚨 CRITICAL: 사용량 단위 필수
+      "cost": 123.45,                    //  CRITICAL: 최상위 필드, 절대 누락 금지
+      "usage_quantity": 1000.0,          //  CRITICAL: Usage 데이터 타입 지원 필수
+      "usage_unit": "GB-hours",          //  CRITICAL: 사용량 단위 필수
       "provider": "google_cloud",
       "region_code": "us-central1",
       "product": "BigQuery",
@@ -103,7 +103,7 @@ SpaceONE UI는 두 가지 데이터 타입을 지원합니다:
 - **용도**: 사용량 기반 분석 및 최적화
 - **필수 필드**: `usage_quantity`, `usage_unit`
 
-**🚨 중요**: Usage 데이터 타입에서 `usage_quantity = 0`이면 SpaceONE UI에서 데이터가 표시되지 않습니다!
+** 중요**: Usage 데이터 타입에서 `usage_quantity = 0`이면 SpaceONE UI에서 데이터가 표시되지 않습니다!
 
 ### 실제 Google Cloud 응답 예시 (완전한 구조)
 
@@ -113,7 +113,7 @@ SpaceONE UI는 두 가지 데이터 타입을 지원합니다:
 {
   "results": [
     {
-      "cost": 0.0,                       // 🚨 CRITICAL: 최상위 필수 필드
+      "cost": 0.0,                       //  CRITICAL: 최상위 필수 필드
       "usage_unit": "hour",
       "usage_quantity": 0.0,
       "provider": "google_cloud",
@@ -121,7 +121,7 @@ SpaceONE UI는 두 가지 데이터 타입을 지원합니다:
       "product": "Compute Engine",
       "usage_type": "Licensing Fee for Google Cloud Dataproc (GPU cost)",
       "resource": "mkkang-project",
-      "currency": "USD",                 // 🆕 최상위 필수 필드
+      "currency": "USD",                 //  최상위 필수 필드
       "tags": {},
       "additional_info": {
         "Billing Account ID": "01FD8E-B4DDC1-EAB69F",
@@ -168,39 +168,39 @@ SpaceONE UI는 두 가지 데이터 타입을 지원합니다:
 
 ### 2. 필수 필드 검증 체크리스트
 
-#### ✅ 최상위 구조
+####  최상위 구조
 - [ ] `results` 배열이 존재하는가?
 - [ ] `results`가 빈 배열이 아닌 경우 레코드가 올바른 형태인가?
 
-#### ✅ 필수 비용 필드
+####  필수 비용 필드
 - [ ] `cost`: **최상위 필드** 숫자 타입 (float/int) **절대 누락 금지**
 - [ ] `usage_quantity`: 숫자 타입 (0 이상)
 - [ ] `provider`: 문자열 ("google_cloud" 등)
-- [ ] `currency`: 문자열 (통화 코드, "USD", "KRW" 등) **🆕 필수**
+- [ ] `currency`: 문자열 (통화 코드, "USD", "KRW" 등) ** 필수**
 
-#### ✅ 필수 식별 필드
+####  필수 식별 필드
 - [ ] `region_code`: 문자열 (빈 문자열 허용, "global" 기본값)
 - [ ] `product`: 문자열 (서비스명)
 - [ ] `usage_type`: 문자열 (SKU 설명)
 - [ ] `resource`: 문자열 (리소스 식별자)
 
-#### ✅ 필수 시간 필드
+####  필수 시간 필드
 - [ ] `billed_date`: 문자열, YYYY-MM-DD 형식 **필수**
 
-#### ✅ 필수 메타데이터 필드
+####  필수 메타데이터 필드
 - [ ] `tags`: 딕셔너리 타입 (빈 딕셔너리 허용)
 - [ ] `additional_info`: 딕셔너리 타입 (빈 딕셔너리 허용)
 - [ ] `data`: 딕셔너리 타입 **필수** (SpaceONE 프레임워크 요구사항)
 
 ---
 
-## 🚨 JSON 숫자 표기법 제약사항 [CRITICAL]
+##  JSON 숫자 표기법 제약사항 [CRITICAL]
 
 ### 1. 과학적 표기법 완전 금지
 
 SpaceONE 플랫폼은 JSON 응답에서 **과학적 표기법을 지원하지 않습니다**.
 
-#### ❌ 절대 사용 금지
+####  절대 사용 금지
 ```json
 {
   "cost": 1.23e-6,          // 소문자 e 금지
@@ -210,7 +210,7 @@ SpaceONE 플랫폼은 JSON 응답에서 **과학적 표기법을 지원하지 �
 }
 ```
 
-#### ✅ 반드시 사용해야 하는 형식
+####  반드시 사용해야 하는 형식
 ```json
 {
   "cost": 0.00000123,       // 소수점 표기법만 허용
@@ -236,14 +236,14 @@ def generate_spaceone_response(self, data: dict) -> dict:
         ]
     }
     
-    # 2. 🚨 CRITICAL: 과학적 표기법 완전 제거
+    # 2.  CRITICAL: 과학적 표기법 완전 제거
     response = ensure_no_scientific_notation(response)
     
     return response
 ```
 
 #### 현재 프로젝트 적용 현황
-✅ **이미 적용된 모듈들**:
+ **이미 적용된 모듈들**:
 - `src/plugin/main.py`: 메인 응답 처리
 - `src/plugin/manager/cost_manager.py`: 비용 데이터 처리
 - `src/plugin/manager/field_mapper.py`: 필드 매핑 결과
@@ -252,7 +252,7 @@ def generate_spaceone_response(self, data: dict) -> dict:
 
 ---
 
-## 🔧 데이터 타입 표준화 (v2.0)
+##  데이터 타입 표준화 (v2.0)
 
 ### 1. 부동소수점 정밀도 개선
 
@@ -357,7 +357,7 @@ def _ensure_spaceone_response_types(self, data):
 
 ---
 
-## 🔍 검증 및 테스트
+##  검증 및 테스트
 
 ### 1. 개발 중 실시간 검증
 
@@ -380,10 +380,10 @@ def validate_no_scientific_notation(response: dict) -> bool:
     
     for pattern in scientific_patterns:
         if re.search(pattern, json_str):
-            print(f"🚨 Scientific notation found: {pattern}")
+            print(f" Scientific notation found: {pattern}")
             return False
     
-    print("✅ No scientific notation found")
+    print(" No scientific notation found")
     return True
 ```
 
@@ -393,21 +393,21 @@ def validate_no_scientific_notation(response: dict) -> bool:
 #!/bin/bash
 # 과학적 표기법 검증 스크립트
 
-echo "🔍 SpaceONE 응답에서 과학적 표기법 검사..."
+echo " SpaceONE 응답에서 과학적 표기법 검사..."
 
 # 1. 소스 코드에서 ensure_no_scientific_notation 사용 확인
-echo "📋 과학적 표기법 방지 모듈 사용 현황:"
+echo " 과학적 표기법 방지 모듈 사용 현황:"
 grep -r "ensure_no_scientific_notation" src/ --include="*.py"
 
 # 2. 테스트 응답에서 과학적 표기법 검사
-echo "🧪 테스트 응답 검증:"
+echo " 테스트 응답 검증:"
 python -c "
 from src.plugin.utils.decimal_json_encoder import test_scientific_notation_removal
 result = test_scientific_notation_removal()
-print('✅ 과학적 표기법 제거 테스트:', '통과' if result else '실패')
+print(' 과학적 표기법 제거 테스트:', '통과' if result else '실패')
 "
 
-echo "✅ 과학적 표기법 검증 완료!"
+echo " 과학적 표기법 검증 완료!"
 ```
 
 ### 3. 타입 검증
@@ -437,7 +437,7 @@ def test_json_serialization(response_data):
 
 ---
 
-## 🚨 중요한 품질 보장 포인트
+##  중요한 품질 보장 포인트
 
 ### 1. 최상위 cost 필드 강제 보장 [CRITICAL]
 
@@ -496,11 +496,11 @@ def _ensure_data_field(self, record: dict) -> dict:
 
 ---
 
-## 📊 성능 및 품질 지표
+##  성능 및 품질 지표
 
 ### 현재 구현 성과 (v2.0)
 
-#### ✅ 완전 적용 현황
+####  완전 적용 현황
 - **적용 모듈**: 5개 핵심 모듈
 - **과학적 표기법 발생**: 0건
 - **JSON 직렬화 오류**: 0건
@@ -514,17 +514,17 @@ def _ensure_data_field(self, record: dict) -> dict:
 #### 품질 보장
 ```python
 quality_checklist = {
-    "decimal_json_encoder_usage": True,      # ✅ 모듈 사용
-    "scientific_notation_prevention": True,  # ✅ 과학적 표기법 방지
-    "json_serialization_safe": True,        # ✅ JSON 직렬화 안전
-    "spaceone_compatibility": True,         # ✅ SpaceONE 호환성
-    "performance_impact": "minimal",        # ✅ 최소 성능 영향
+    "decimal_json_encoder_usage": True,      #  모듈 사용
+    "scientific_notation_prevention": True,  #  과학적 표기법 방지
+    "json_serialization_safe": True,        #  JSON 직렬화 안전
+    "spaceone_compatibility": True,         #  SpaceONE 호환성
+    "performance_impact": "minimal",        #  최소 성능 영향
 }
 ```
 
 ---
 
-## 🔧 구현 가이드
+##  구현 가이드
 
 ### 1. 응답 생성 패턴
 
@@ -635,7 +635,7 @@ def _sanitize_for_serialization(self, data: dict) -> dict:
 
 ---
 
-## 🎯 결론
+##  결론
 
 ### 핵심 원칙
 1. **과학적 표기법 절대 금지**: `1e-6`, `4.56E+3` 등 불허
@@ -646,16 +646,16 @@ def _sanitize_for_serialization(self, data: dict) -> dict:
 6. **실시간 검증**: 개발 중 지속적인 품질 확인
 
 ### 구현 완료 사항
-- ✅ **5개 핵심 모듈**에 과학적 표기법 방지 적용
-- ✅ **자동 검증 시스템** 구축
-- ✅ **100% SpaceONE 호환성** 달성
-- ✅ **성능 영향 최소화** (< 1%)
-- ✅ **데이터 타입 표준화** (Decimal → float)
-- ✅ **부동소수점 정밀도 개선** 완료
+-  **5개 핵심 모듈**에 과학적 표기법 방지 적용
+-  **자동 검증 시스템** 구축
+-  **100% SpaceONE 호환성** 달성
+-  **성능 영향 최소화** (< 1%)
+-  **데이터 타입 표준화** (Decimal → float)
+-  **부동소수점 정밀도 개선** 완료
 
 ---
 
-## 🔧 최신 개선사항 (2025년 9월 23일)
+##  최신 개선사항 (2025년 9월 23일)
 
 ### **SpaceONE Mock 처리 완전성 개선**
 
@@ -679,15 +679,15 @@ except ImportError:
 ```
 
 #### **Mock 처리 완료 모듈**
-- ✅ `src/plugin/main.py`: DataSourcePluginServer Mock
-- ✅ `src/plugin/connector/bigquery_connector.py`: BaseConnector Mock
-- ✅ `src/plugin/connector/gcs_connector.py`: BaseConnector Mock
-- ✅ `src/plugin/connector/pricing_connector.py`: BaseConnector Mock
-- ✅ `src/plugin/manager/cost_manager.py`: BaseManager Mock
-- ✅ `src/plugin/manager/data_source_manager.py`: BaseManager Mock
-- ✅ `src/plugin/manager/job_manager.py`: BaseManager Mock
-- ✅ `src/plugin/manager/pricing_manager.py`: BaseManager Mock
-- ✅ `src/plugin/manager/credits_detail_manager.py`: BaseManager Mock **(신규 추가)**
+-  `src/plugin/main.py`: DataSourcePluginServer Mock
+-  `src/plugin/connector/bigquery_connector.py`: BaseConnector Mock
+-  `src/plugin/connector/gcs_connector.py`: BaseConnector Mock
+-  `src/plugin/connector/pricing_connector.py`: BaseConnector Mock
+-  `src/plugin/manager/cost_manager.py`: BaseManager Mock
+-  `src/plugin/manager/data_source_manager.py`: BaseManager Mock
+-  `src/plugin/manager/job_manager.py`: BaseManager Mock
+-  `src/plugin/manager/pricing_manager.py`: BaseManager Mock
+-  `src/plugin/manager/credits_detail_manager.py`: BaseManager Mock **(신규 추가)**
 
 #### **로컬 개발 환경 완전 독립성**
 - **SpaceONE 패키지 의존성 제거**: 모든 핵심 모듈에서 SpaceONE 없이 실행 가능
@@ -697,28 +697,28 @@ except ImportError:
 ### **grpcurl 테스트 완전 성공**
 
 #### **테스트 검증 결과**
-- ✅ **API 호출 성공**: Exit Code 0으로 정상 완료
-- ✅ **데이터 완전성**: 99,115줄의 완전한 JSON 응답
-- ✅ **SpaceONE 호환성**: 모든 필수 필드 포함 확인
-- ✅ **성능 안정성**: 대용량 데이터 스트리밍 성공
+-  **API 호출 성공**: Exit Code 0으로 정상 완료
+-  **데이터 완전성**: 99,115줄의 완전한 JSON 응답
+-  **SpaceONE 호환성**: 모든 필수 필드 포함 확인
+-  **성능 안정성**: 대용량 데이터 스트리밍 성공
 
 #### **검증된 SpaceONE 응답 구조**
 ```json
 {
   "results": [
     {
-      "cost": 3.354696,                    // ✅ 필수 최상위 필드
-      "usage_quantity": 3,                 // ✅ Usage 데이터 타입
-      "usage_unit": "requests",            // ✅ 사용량 단위
-      "provider": "google_cloud",          // ✅ 프로바이더 정보
-      "region_code": "global",             // ✅ 지역 코드
-      "product": "Networking",             // ✅ 제품 정보
-      "usage_type": "Network Intelligence Center...", // ✅ 사용 유형
-      "resource": "mkkang-project",        // ✅ 리소스 정보
-      "tags": {},                          // ✅ 태그 정보
-      "additional_info": { ... },          // ✅ 추가 정보
-      "data": { ... },                     // ✅ 데이터 섹션
-      "billed_date": "2025-09-01"         // ✅ 청구 날짜
+      "cost": 3.354696,                    //  필수 최상위 필드
+      "usage_quantity": 3,                 //  Usage 데이터 타입
+      "usage_unit": "requests",            //  사용량 단위
+      "provider": "google_cloud",          //  프로바이더 정보
+      "region_code": "global",             //  지역 코드
+      "product": "Networking",             //  제품 정보
+      "usage_type": "Network Intelligence Center...", //  사용 유형
+      "resource": "mkkang-project",        //  리소스 정보
+      "tags": {},                          //  태그 정보
+      "additional_info": { ... },          //  추가 정보
+      "data": { ... },                     //  데이터 섹션
+      "billed_date": "2025-09-01"         //  청구 날짜
     }
   ]
 }
@@ -734,7 +734,7 @@ except ImportError:
 
 ---
 
-## 🔧 최종 간소화 (2025년 9월 23일 - 오후)
+##  최종 간소화 (2025년 9월 23일 - 오후)
 
 ### **프로덕션 최적화 완료** ⭐ **FINAL**
 
@@ -757,10 +757,10 @@ from spaceone.core.manager import BaseManager
 ```
 
 #### **SpaceONE 호환성 유지**
-- ✅ **API 호환성**: 모든 SpaceONE API 정상 동작
-- ✅ **데이터 구조**: SpaceONE 표준 응답 구조 준수
-- ✅ **필드 완전성**: 필수 필드 100% 포함
-- ✅ **성능 향상**: Mock 오버헤드 제거로 성능 개선
+-  **API 호환성**: 모든 SpaceONE API 정상 동작
+-  **데이터 구조**: SpaceONE 표준 응답 구조 준수
+-  **필드 완전성**: 필수 필드 100% 포함
+-  **성능 향상**: Mock 오버헤드 제거로 성능 개선
 
 #### **최종 성과**
 - **코드 감소**: 약 200줄 코드 정리
@@ -774,4 +774,4 @@ from spaceone.core.manager import BaseManager
 **버전**: 2.3 (간소화 버전)  
 **적용 범위**: 전체 프로젝트 (11개 파일 간소화)  
 **호환성**: SpaceONE 플랫폼 100% + 프로덕션 환경 최적화  
-**코드 상태**: ✅ Mock 코드 완전 제거, 프로덕션 최적화 완료
+**코드 상태**:  Mock 코드 완전 제거, 프로덕션 최적화 완료

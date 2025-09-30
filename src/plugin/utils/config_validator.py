@@ -370,7 +370,7 @@ class ConfigValidator:
     def generate_report(self, results: list[dict]) -> str:
         """검증 결과 리포트 생성"""
         if not results:
-            return "✅ Configuration validation passed with no issues!"
+            return "Configuration validation passed with no issues!"
 
         report_lines = ["# Configuration Validation Report\n"]
 
@@ -389,9 +389,9 @@ class ConfigValidator:
 
         # 요약
         report_lines.append("## Summary")
-        report_lines.append(f"- 🚨 Critical Issues: {critical_count}")
-        report_lines.append(f"- ❌ Errors: {error_count}")
-        report_lines.append(f"- ⚠️ Warnings: {warning_count}")
+        report_lines.append(f"- Critical Issues: {critical_count}")
+        report_lines.append(f"-  Errors: {error_count}")
+        report_lines.append(f"- Warnings: {warning_count}")
         report_lines.append("")
 
         # 카테고리별 상세
@@ -399,11 +399,11 @@ class ConfigValidator:
             report_lines.append(f"## {category.title()} Issues")
             for item in items:
                 icon = (
-                    "🚨"
+                    "CRITICAL"
                     if item.get("type") == "critical"
-                    else "❌"
+                    else ""
                     if item.get("type") == "error"
-                    else "⚠️"
+                    else "WARNING"
                 )
                 report_lines.append(
                     f"{icon} **{item.get('message', 'Unknown issue')}**"
