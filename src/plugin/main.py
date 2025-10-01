@@ -57,7 +57,11 @@ def setup_logging():
         spaceone_logger.addHandler(console_handler)
         spaceone_logger.propagate = False  # 중복 로그 방지
 
-    if not debug_mode:
+    # 디버깅 모드 상태 로깅
+    if debug_mode:
+        spaceone_logger.info("[MAIN] DEBUG 모드가 활성화되었습니다.")
+        spaceone_logger.debug("[MAIN] 디버그 로깅이 작동 중입니다.")
+    else:
         spaceone_logger.info("[MAIN] 프로덕션 모드로 실행 중입니다.")
 
 
@@ -237,10 +241,20 @@ def job_get_tasks(params: dict) -> dict:
         }
 
     """
+    _LOGGER.info("[job_get_tasks] API endpoint called - 태스크 생성 시작")
 
     # 전역 프로젝트 처리 추적 시스템 초기화
     with _processing_lock:
         _processed_projects.clear()
+    _LOGGER.info("[job_get_tasks] 프로젝트 처리 추적 시스템 초기화 완료")
+
+    # 중요: 프로젝트 태스크 생성 시작 알림
+    _LOGGER.info(
+        "[job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다..."
+    )
+    _LOGGER.info(
+        "[job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다..."
+    )
 
     try:
         # 파라미터 기본 검증

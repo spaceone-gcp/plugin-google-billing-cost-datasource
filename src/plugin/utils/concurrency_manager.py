@@ -1,16 +1,26 @@
 """동시성 제어 및 파일 처리 최적화 유틸리티"""
 
+import hashlib
 import logging
 import threading
 import time
 from contextlib import contextmanager
 from typing import Optional
 
+from plugin.conf.cost_conf import DATA_SOURCE_TYPES, DEFAULT_DATA_SOURCE_TYPE
+
 _LOGGER = logging.getLogger("spaceone")
+
+# BigQuery 필수 옵션 (JobManager와 동일)
+REQUIRED_OPTIONS = [
+    "billing_export_project_id",
+    "billing_dataset_id",
+    "billing_account_id",
+]
 
 
 class ConcurrencyManager:
-    """파일 처리 동시성 제어"""
+    """파일 처리 동시성 제어 및 중복 요청 관리"""
 
     _instance = None
     _lock = threading.Lock()
@@ -133,5 +143,94 @@ class ConcurrencyManager:
             }
 
 
+class RequestDeduplicator:
+    """요청 중복 제거 관리"""
+
+    def __init__(self, ttl: float = 30.0):
+        self.ttl = ttl
+        self._requests: dict[str, float] = {}
+        self._lock = threading.RLock()
+
+    def _get_data_source_type(self, options: dict) -> str:
+        """데이터 소스 타입 결정 (JobManager와 동일한 로직)"""
+        # 1. 명시적 data_source_type 확인
+        data_source_type = options.get("data_source_type")
+        if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
+            return data_source_type
+
+        # 2. 'source' 파라미터 지원 (3개 고정 값: bigquery, gcs, http)
+        source = options.get("source")
+        if source == "bigquery":
+            return DATA_SOURCE_TYPES["bigquery"]
+        elif source == "gcs":
+            return DATA_SOURCE_TYPES["gcs"]
+        elif source == "http":
+            return DATA_SOURCE_TYPES["http"]
+
+        # 3. 파라미터 기반 자동 감지
+        has_bucket = "bucket_name" in options
+        has_bigquery_params = all(key in options for key in REQUIRED_OPTIONS)
+
+        if has_bucket and not has_bigquery_params:
+            return DATA_SOURCE_TYPES["gcs"]  # GCS로 변경
+        elif has_bigquery_params:
+            return DATA_SOURCE_TYPES["bigquery"]
+
+        # 4. 기본값 반환
+        return DEFAULT_DATA_SOURCE_TYPE
+
+    def generate_request_hash(self, options: dict, task_options: dict) -> str:
+        """요청의 해시 생성 - 데이터 소스 타입으로만 식별"""
+        # 데이터 소스 타입 결정
+        data_source_type = self._get_data_source_type(options)
+
+        # 데이터 소스 타입을 기반으로 한 핵심 파라미터만 사용
+        project_id = task_options.get("project_id") or options.get("project_id")
+        key_data = {
+            "data_source_type": data_source_type,
+            "file_path": task_options.get("file_path"),
+            "project_id": project_id,
+            "field_mapper": options.get("field_mapper", {}),
+            "select_cost": options.get("select_cost"),
+        }
+
+        key_str = str(sorted(key_data.items()))
+        hash_value = hashlib.md5(key_str.encode()).hexdigest()
+
+        _LOGGER.info(
+            f"[RequestDeduplicator] 해시 생성 - 프로젝트: {project_id}, 해시: {hash_value[:8]}..."
+        )
+        return hash_value
+
+    def is_duplicate_request(self, request_hash: str) -> bool:
+        """중복 요청인지 확인"""
+        current_time = time.time()
+
+        with self._lock:
+            # 만료된 요청 정리
+            expired_hashes = [
+                h
+                for h, timestamp in self._requests.items()
+                if current_time - timestamp > self.ttl
+            ]
+            for h in expired_hashes:
+                del self._requests[h]
+
+            # 중복 요청 확인
+            if request_hash in self._requests:
+                _LOGGER.info(
+                    f"[RequestDeduplicator] 중복 요청 감지 - 해시: {request_hash[:8]}..."
+                )
+                return True
+
+            # 새 요청 등록
+            self._requests[request_hash] = current_time
+            _LOGGER.info(
+                f"[RequestDeduplicator] 새 요청 등록 - 해시: {request_hash[:8]}..."
+            )
+            return False
+
+
 # 전역 인스턴스
 concurrency_manager = ConcurrencyManager()
+request_deduplicator = RequestDeduplicator()

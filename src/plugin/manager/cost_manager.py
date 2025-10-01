@@ -14,7 +14,7 @@ from ..connector.bigquery_connector import BigqueryConnector
 from ..connector.gcs_connector import GcsConnector
 from ..factory.file_processor_factory import FileProcessorFactory
 from ..manager.field_mapper import FieldMapper
-from ..utils.concurrency_manager import concurrency_manager
+from ..utils.concurrency_manager import concurrency_manager, request_deduplicator
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -96,8 +96,21 @@ class CostManager(BaseManager):
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
         """데이터 소스 타입에 따라 처리 분기"""
+        # 요청 중복 제거를 위한 해시 생성
+
         # source 값 추출 (options에서만)
         source = self._get_source_value(options)
+
+        # 중복 요청 확인 (RequestDeduplicator 사용)
+        from ..utils.concurrency_manager import request_deduplicator
+
+        request_hash = request_deduplicator.generate_request_hash(options, task_options)
+        _LOGGER.info(
+            f"[CostManager] 요청 해시 생성 - 해시: {request_hash[:8]}..., 프로젝트: {task_options.get('project_id', 'UNKNOWN')}"
+        )
+        if request_deduplicator.is_duplicate_request(request_hash):
+            _LOGGER.info(f"[CostManager] 중복 요청 스킵 - 해시: {request_hash[:8]}...")
+            return
 
         # source 기반 분기 처리
         if source == "bigquery":
@@ -124,8 +137,10 @@ class CostManager(BaseManager):
         """BigQuery에서 데이터 조회 (기존 로직)"""
         self.bigquery_connector.create_session(options, secret_data, schema)
 
-        # 옵션 검증
+        # options 검증 (항상 실행)
         self._check_options(options)
+
+        # task_options 검증 (항상 실행)
         self._check_bigquery_task_options(task_options)
 
         # select_cost 옵션 설정 (task_options 우선, options 차순)
@@ -206,11 +221,6 @@ class CostManager(BaseManager):
         import time
 
         query_start_time = time.time()
-
-        # 실행할 쿼리 로깅
-        _LOGGER.info(
-            f"[CostManager] Executing BigQuery SQL for project '{self.target_project_id}':\n{query}"
-        )
 
         try:
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
@@ -318,9 +328,15 @@ class CostManager(BaseManager):
                             batch_result
                         )
 
-                        # 배치 결과 처리
+                        # BigQuery 배치 응답 레코드 로깅 (모든 레코드)
                         if batch_records:
-                            yield batch_result
+                            # _LOGGER.info(f"[BigQuery-Response] 배치 응답 레코드 수: {len(batch_records)}")
+                            for i, record in enumerate(
+                                batch_records
+                            ):  # 모든 레코드 로깅
+                                # _LOGGER.info(f"[BigQuery-Response] 레코드 {i+1}: {record}")
+                                pass
+                        yield batch_result
                         batch_records = []
 
             # 남은 레코드 처리
@@ -341,6 +357,9 @@ class CostManager(BaseManager):
                 _LOGGER.info(
                     f"[BigQuery-FinalResponse] 최종 배치 응답 레코드 수: {len(batch_records)}"
                 )
+                for i, record in enumerate(batch_records):  # 모든 레코드 로깅
+                    # _LOGGER.info(f"[BigQuery-FinalResponse] 레코드 {i+1}: {record}")
+                    pass
                 yield batch_result
 
             _LOGGER.info(f"[BigQuery] 처리 완료 - 총 {row_count}건의 데이터 처리됨")
@@ -357,8 +376,10 @@ class CostManager(BaseManager):
     def _get_data_from_gcs(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
-        """GCS 버킷에서 데이터 조회"""
+        """GCS 버킷에서 데이터 조회 - 중복 요청 검사는 get_data()에서 이미 완료됨"""
         try:
+            # 중복 요청 검사는 get_data()에서 이미 완료되었으므로 제거
+
             # GCS 버킷 처리용 파라미터 검증
             self._check_gcs_task_options(task_options, options, secret_data)
 
@@ -605,6 +626,13 @@ class CostManager(BaseManager):
     ) -> Generator[dict, None, None]:
         """HTTP URL에서 데이터 조회 - 인증 불필요"""
         try:
+            # 요청 중복 제거 검사
+            request_hash = request_deduplicator.generate_request_hash(
+                options, task_options
+            )
+            if request_deduplicator.is_duplicate_request(request_hash):
+                return
+
             # HTTP URL 처리용 파라미터 검증
             self._check_http_task_options(task_options, options)
 
@@ -936,7 +964,7 @@ class CostManager(BaseManager):
         """BigQuery DataFrame row를 딕셔너리로 변환 (GCS 파서와 호환, 부동소수점 정밀도 개선 포함)"""
         row_dict = {}
 
-        # Series.to_dict() 메서드 사용
+        # Series.to_dict() 메서드 사용 (더 안전)
         try:
             if hasattr(row, "to_dict"):
                 series_dict = row.to_dict()
@@ -1044,7 +1072,7 @@ class CostManager(BaseManager):
             if hasattr(row, field):
                 row_dict[field] = getattr(row, field)
 
-        # credits 배열 처리
+        # credits 배열 처리 - BigQuery 결과에서는 credits_detail (JSON)과 credits_total_amount (집계값) 사용
         if hasattr(row, "credits_detail"):
             credits_data = getattr(row, "credits_detail")
             if credits_data:
@@ -1282,11 +1310,13 @@ class CostManager(BaseManager):
                 result["cost"] = None
 
             # 모든 값을 원본 그대로 보존 (극소값도 보존)
+            # DEBUG 로그 제거: float 값 보존은 정상 동작이므로 로깅 불필요
 
             # cost 필드 값 확인 (원본 보존)
             if "cost" in result and (
                 result["cost"] is None or str(result["cost"]).lower() == "null"
             ):
+                # DEBUG 로그 제거: None/null 값도 정상적인 데이터이므로 로깅 불필요
                 pass
             elif "cost" not in result:
                 # cost 필드가 아예 없는 경우 None으로 설정
@@ -1343,6 +1373,8 @@ class CostManager(BaseManager):
             if isinstance(cost_value, float):
                 pass
                 # 극소값도 포함하여 모든 값을 원본 그대로 보존
+                # _LOGGER.debug(f"[_make_cost_data] Cost value preserved as-is: {cost_value}")
+                # 반올림도 제거하여 원본 정확도 유지
 
             usage_quantity = getattr(row, "usage_amount", None)
 
@@ -1375,7 +1407,25 @@ class CostManager(BaseManager):
                 "billed_date": self._extract_billed_date(row),
             }
 
-            # 최종 숫자 정리 - 극소값도 원본 그대로 보존
+            # STEP 4: 최종 숫자 정리
+            # 극소값도 원본 그대로 보존 (0으로 강제 변환 제거)
+            # for key in ["cost", "usage_quantity"]:
+            #     if isinstance(record.get(key), float):
+            #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record[key]}")
+
+            # # additional_info의 극소값도 원본 그대로 보존
+            # for key in ["Cost After Credits", "Cost At List"]:
+            #     if isinstance(record["additional_info"].get(key), float):
+            #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record['additional_info'][key]}")
+
+            # # STEP 5: 필수 필드 검증 (0으로 강제 처리 제거)
+            # if "cost" not in record:
+            #     record["cost"] = cost_value  # 원본 값 사용
+            #     _LOGGER.warning(f"[_make_cost_data] Cost field missing after creation, added original value: {cost_value}")
+
+            # if "currency" not in record:
+            #     record["currency"] = "USD"
+            #     _LOGGER.error(f"[_make_cost_data] CRITICAL: currency field missing after creation, force added USD")
 
             cost_val = record.pop("cost")
             currency_val = record.pop("currency")
@@ -2215,7 +2265,9 @@ class CostManager(BaseManager):
             resource_fields = """
               resource.name as resource_name,
               resource.global_name as resource_global_name,"""
-            # GROUP BY 필드: 집계되지 않는 필드들만 포함
+            # GROUP BY 필드: 집계되지 않는 필드들만 포함 (ANY_VALUE/SUM 제외)
+            # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING
+            # 23-25: ANY_VALUE(REPEATED JSON) - GROUP BY 제외, 26: credits 원본 - GROUP BY 제외, 27-28: 리소스 NULL
             group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("[SQL] 상세 사용량 모드")
@@ -2379,61 +2431,136 @@ class CostManager(BaseManager):
     def _calculate_partition_date_range(
         start_date: str, end_date: str = None
     ) -> tuple[str, str]:
-        """PARTITIONDATE 범위 계산
+        """Data Sources Re-Sync를 위한 PARTITIONDATE 범위 계산
 
-        시작월부터 현재월까지의 범위를 설정합니다.
+        시작일은 -1개월, 종료일은 +1개월로 확장하여 안전한 데이터 수집을 보장합니다.
 
         Args:
             start_date: YYYY-MM 형식의 시작 날짜
-            end_date: YYYY-MM 형식의 종료 날짜 (선택사항, 현재는 사용하지 않음)
+            end_date: YYYY-MM 형식의 종료 날짜 (선택사항, 없으면 start_date 기준으로 계산)
 
         Returns:
             tuple[str, str]: (partition_start_date, partition_end_date) YYYY-MM-DD 형식
         """
         try:
-            import calendar
-
-            # 현재 날짜
-            current_date = datetime.now()
-            current_year = current_date.year
-            current_month = current_date.month
+            from dateutil.relativedelta import relativedelta
 
             # 시작일 파싱
             if not start_date or len(start_date) != 7:  # YYYY-MM 형식 검증
-                start_year = current_year
-                start_month = current_month
+                current_date = datetime.now()
+                start_datetime = datetime(current_date.year, current_date.month, 1)
             else:
                 start_year, start_month = map(int, start_date.split("-"))
+                start_datetime = datetime(start_year, start_month, 1)
 
-            # 시작월의 첫째 날
-            partition_start_str = f"{start_year:04d}-{start_month:02d}-01"
+            # 종료일 파싱
+            if end_date and len(end_date) == 7:  # YYYY-MM 형식 검증
+                end_year, end_month = map(int, end_date.split("-"))
+                end_datetime = datetime(end_year, end_month, 1)
+            else:
+                # 종료일이 없으면 현재월로 설정
+                current_date = datetime.now()
+                end_datetime = datetime(current_date.year, current_date.month, 1)
+                _LOGGER.info(
+                    f"[PARTITIONDATE] 종료일이 None이므로 현재월로 설정: {current_date.strftime('%Y-%m')}"
+                )
 
-            # 현재월의 마지막 날
-            last_day = calendar.monthrange(current_year, current_month)[1]
-            partition_end_str = f"{current_year:04d}-{current_month:02d}-{last_day:02d}"
+            # 시작일 계산: start_date -1개월의 첫째 날
+            partition_start = start_datetime - relativedelta(months=1)
+            partition_start_str = partition_start.strftime("%Y-%m-%d")
+
+            # 종료일 계산: end_date +1개월의 마지막 날
+            partition_end = end_datetime + relativedelta(months=1)
+            # 다음 달의 마지막 날 계산
+            partition_end = (
+                partition_end + relativedelta(months=1) - relativedelta(days=1)
+            )
+            partition_end_str = partition_end.strftime("%Y-%m-%d")
 
             _LOGGER.debug(
-                f"[PARTITIONDATE] {start_date} → {partition_start_str}~{partition_end_str} (시작월~현재월)"
+                f"[PARTITIONDATE] {start_date}~{end_date or start_date} → {partition_start_str}~{partition_end_str}"
             )
 
             return partition_start_str, partition_end_str
 
-        except Exception as e:
-            _LOGGER.error(f"[PARTITIONDATE] Calculation failed: {e}")
-            # 실패 시 안전한 기본값 반환 (현재 월)
-            current_date = datetime.now()
-            start_str = current_date.strftime("%Y-%m-01")
-            # 현재 월의 마지막 날 계산
+        except ImportError:
+            # dateutil이 없는 경우 기본 datetime 사용
+            _LOGGER.warning(
+                "[PARTITIONDATE] dateutil을 사용할 수 없어 기본 계산 방법을 사용합니다."
+            )
             try:
-                import calendar
+                # 시작일 파싱
+                if not start_date or len(start_date) != 7:
+                    current_date = datetime.now()
+                    start_year, start_month = current_date.year, current_date.month
+                else:
+                    start_year, start_month = map(int, start_date.split("-"))
 
-                last_day = calendar.monthrange(current_date.year, current_date.month)[1]
-                end_str = (
-                    f"{current_date.year:04d}-{current_date.month:02d}-{last_day:02d}"
+                # 종료일 파싱
+                if end_date and len(end_date) == 7:
+                    end_year, end_month = map(int, end_date.split("-"))
+                else:
+                    # 종료일이 없거나 잘못된 경우 현재월로 설정
+                    current_date = datetime.now()
+                    end_year, end_month = current_date.year, current_date.month
+                    _LOGGER.info(
+                        f"[PARTITIONDATE] 종료일이 None이므로 현재월로 설정: {current_date.strftime('%Y-%m')}"
+                    )
+
+                # 시작일 계산: start_date -1개월
+                if start_month == 1:
+                    partition_start = datetime(start_year - 1, 12, 1)
+                else:
+                    partition_start = datetime(start_year, start_month - 1, 1)
+
+                # 종료일 계산: end_date +1개월 말일
+                if end_month == 12:
+                    next_month = datetime(end_year + 1, 1, 1)
+                else:
+                    next_month = datetime(end_year, end_month + 1, 1)
+
+                # 다음 달의 다음 달 첫째 날에서 하루 빼기 (다음 달 마지막 날)
+                if next_month.month == 12:
+                    partition_end = datetime(next_month.year + 1, 1, 1) - timedelta(
+                        days=1
+                    )
+                else:
+                    partition_end = datetime(
+                        next_month.year, next_month.month + 1, 1
+                    ) - timedelta(days=1)
+
+                partition_start_str = partition_start.strftime("%Y-%m-%d")
+                partition_end_str = partition_end.strftime("%Y-%m-%d")
+
+                _LOGGER.debug(
+                    f"[PARTITIONDATE] {start_date}~{end_date or start_date} → {partition_start_str}~{partition_end_str}"
                 )
-            except Exception:
-                end_str = current_date.strftime("%Y-%m-28")  # 안전한 기본값
-            return start_str, end_str
+
+                return partition_start_str, partition_end_str
+
+            except Exception as e:
+                _LOGGER.error(f"[PARTITIONDATE 범위 계산 오류] {e}")
+                # 기본값으로 현재 월 기준 ±1개월 반환
+                current_date = datetime.now()
+                start_default = current_date.replace(day=1) - timedelta(days=32)
+                start_default = start_default.replace(day=1)
+                end_default = current_date.replace(day=1) + timedelta(days=62)
+                end_default = end_default.replace(day=1) - timedelta(days=1)
+
+                return start_default.strftime("%Y-%m-%d"), end_default.strftime(
+                    "%Y-%m-%d"
+                )
+
+        except Exception as e:
+            _LOGGER.error(f"[PARTITIONDATE 범위 계산 오류] {e}")
+            # 기본값으로 현재 월 기준 ±1개월 반환
+            current_date = datetime.now()
+            start_default = current_date.replace(day=1) - timedelta(days=32)
+            start_default = start_default.replace(day=1)
+            end_default = current_date.replace(day=1) + timedelta(days=62)
+            end_default = end_default.replace(day=1) - timedelta(days=1)
+
+            return start_default.strftime("%Y-%m-%d"), end_default.strftime("%Y-%m-%d")
 
     @staticmethod
     def _validate_and_fix_date_range(start_date: str) -> str:

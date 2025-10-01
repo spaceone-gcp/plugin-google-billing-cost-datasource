@@ -93,7 +93,9 @@ class JsonTransformer:
                         record["data"]["cost"] = record.get("cost", 0.0)
 
         if fixed_count > 0:
-            _LOGGER.warning(f"Fixed {fixed_count} records with missing cost fields")
+            print(
+                f"[JsonTransformer] ULTIMATE: Fixed {fixed_count} records with missing cost fields"
+            )
 
         return response
 

@@ -28,7 +28,7 @@ class ParquetParser(BaseParser):
             매핑된 비용 데이터 레코드
         """
         columns = kwargs.get("columns", None)
-        # filters = kwargs.get("filters", None)  # 향후 필터링 기능 구현 예정
+        # filters = kwargs.get("filters", None)  # TODO: 향후 필터링 기능 구현 시 사용
 
         try:
             # pyarrow 동적 임포트 (선택적 의존성)

@@ -5,6 +5,7 @@ from typing import IO, Optional
 import requests
 from google.cloud import storage
 from google.oauth2 import service_account
+
 from spaceone.core.connector import BaseConnector
 from spaceone.core.error import ERROR_INVALID_ARGUMENT
 
@@ -84,6 +85,9 @@ class GcsConnector(BaseConnector):
                     try:
                         blob = bucket.blob(pattern)
                         if blob.exists():
+                            _LOGGER.info(
+                                f"[GcsConnector] Found specific file: {pattern}"
+                            )
                             return [
                                 {
                                     "name": blob.name,
@@ -131,6 +135,9 @@ class GcsConnector(BaseConnector):
                     if limit and count >= limit:
                         break
 
+            _LOGGER.info(
+                f"[GcsConnector] Pattern '{pattern}' search result: {len(files)} files found (scanned {total_scanned})"
+            )
             return files
 
         except Exception as e:
