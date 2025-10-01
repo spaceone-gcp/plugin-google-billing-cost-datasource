@@ -18,16 +18,17 @@ _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_DATA_SOURCE_RULES = [
     {
-        "name": "match_service_account",
-        "conditions_policy": "ALWAYS",
         "actions": {
-            "match_service_account": {
-                "source": "secret.billing_account_id",
-                "target": "data.service_account_id",
-            },
+            "match_workspace": {
+                "source": "additional_info.Project ID",
+                "target": "data.project_id",
+            }
         },
         "options": {"stop_processing": True},
-    },
+        "name": "match_workspace",
+        "conditions_policy": "ALWAYS",
+        "resource_group": "DOMAIN",
+    }
 ]
 
 # 조건부_additional_info_필터링_PRD.md 문서 기준 33개 필드만 포함
@@ -105,7 +106,7 @@ class DataSourceManager(BaseManager):
         plugin_metadata = {
             "data_source_rules": _DEFAULT_DATA_SOURCE_RULES,
             "supported_secret_types": ["MANUAL"],
-            "currency": "KRW",
+            "currency": options.get("currency", "USD"),
             "collect_resource_id": True,
             "use_account_routing": False,
             "exclude_license_cost": False,
