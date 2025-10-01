@@ -279,6 +279,14 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
         task_options = params.get("task_options", {})
         schema = params.get("schema")
 
+        # start 파라미터 처리: Job.get_tasks와 동일한 방식으로 최상위 레벨에서도 받을 수 있도록 함
+        start_param = params.get("start")
+        if start_param and "start" not in task_options:
+            task_options["start"] = start_param
+            _LOGGER.info(
+                f"[_cost_get_data_logic] 최상위 레벨 start 파라미터를 task_options로 이동: {start_param}"
+            )
+
         # Credits Detail 모드 확인
         credits_detail_mode = task_options.get("credits_detail_mode", False)
 
@@ -378,6 +386,7 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             'secret_data': 'dict',  # Required
             'schema': 'str',
             'task_options': 'dict',
+            'start': 'str',         # Optional: 최상위 레벨에서도 지원 (Job.get_tasks와 동일)
             'domain_id': 'str'      # Required
         }
 
@@ -412,11 +421,9 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
         result_generator = _cost_get_data_logic(params)
 
-        # 4MB 제한을 고려하여 적절한 크기로 응답을 분할하여 전송
+        # SpaceONE 프레임워크 호환: 개별 레코드 직접 yield 방식
         batch_count = 0
         total_records = 0
-        chunk_buffer = []  # 현재 청크 버퍼
-        MAX_CHUNK_SIZE = 100  # 청크당 최대 레코드 수 (안전한 크기)
 
         for batch_result in result_generator:
             batch_count += 1
@@ -445,19 +452,19 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                         # 배치 결과를 청크 버퍼에 추가
                         batch_results = spaceone_formatted["results"]
 
+                        # SpaceONE 프레임워크 호환: 각 레코드를 개별 results 배열로 yield
                         for record in batch_results:
-                            chunk_buffer.append(record)
                             total_records += 1
 
-                            # 청크 크기에 도달하면 yield
-                            if len(chunk_buffer) >= MAX_CHUNK_SIZE:
-                                chunk_response = {"results": chunk_buffer}
-                                #  응답 직전에 data.cost 제거
-                                chunk_response = _remove_data_cost_from_response(
-                                    chunk_response
-                                )
-                                yield chunk_response
-                                chunk_buffer = []  # 버퍼 초기화
+                            # data.cost 제거 (최상위 cost는 유지)
+                            if (
+                                isinstance(record.get("data"), dict)
+                                and "cost" in record["data"]
+                            ):
+                                del record["data"]["cost"]
+
+                            # 개별 레코드를 results 배열로 감싸서 yield (SpaceONE 프레임워크 요구사항)
+                            yield {"results": [record]}
 
             except Exception as e:
                 _LOGGER.error(
@@ -465,17 +472,10 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                 )
                 # 에러가 발생해도 다음 배치 처리 계속
 
-        if chunk_buffer:
-            final_response = {"results": chunk_buffer}
-            #  최종 응답 직전에 data.cost 제거
-            final_response = _remove_data_cost_from_response(final_response)
-            _LOGGER.info(
-                f"[cost_get_data] Yielding final chunk: {len(chunk_buffer)} records"
-            )
-            yield final_response
-        elif total_records == 0:
+        # 개별 레코드 yield 방식에서는 별도의 최종 응답 불필요
+        if total_records == 0:
             _LOGGER.warning("[cost_get_data] No results to yield")
-            yield {"results": []}
+            # 빈 결과도 개별 레코드 형태로 처리하지 않음 (SpaceONE 프레임워크가 자동 처리)
 
         # 처리 완료 프로젝트 수 검증 로깅 (JobManager와 동일한 형태)
         task_options = params.get("task_options", {})
@@ -573,17 +573,9 @@ def _convert_to_spaceone_format(batch_result, batch_count):
 
                 spaceone_record = _ensure_spaceone_record_format(record)
                 if spaceone_record:  # 유효한 레코드만 추가
-                    if "cost" in spaceone_record:
-                        cost_value = spaceone_record.pop("cost")
-                        record_copy = spaceone_record.copy()
-                        spaceone_record.clear()
-                        spaceone_record["cost"] = (
-                            cost_value  # 첫 번째 위치에 cost 필드 배치
-                        )
-                        spaceone_record.update(record_copy)
-                    else:
-                        # cost 필드가 여전히 없으면 강제 추가
-                        spaceone_record = {"cost": 0.0, **spaceone_record}
+                    # cost 필드 최종 보장 (재배치 로직 제거로 단순화)
+                    if "cost" not in spaceone_record or spaceone_record["cost"] is None:
+                        spaceone_record["cost"] = 0.0
                         _LOGGER.error(
                             "[_convert_to_spaceone_format] ULTIMATE: Force-added cost field to spaceone_record"
                         )
@@ -685,32 +677,47 @@ def _ensure_spaceone_record_format(record):
                     usage_unit_value = str(usage_unit)
                     # _LOGGER.warning(f"[EMERGENCY] Extracted usage_unit from additional_info: {usage_unit_value}")
                     pass
-        # SpaceONE 필수 필드 정의 (필수 필드들을 정확한 순서로 배치)
+        # SpaceONE Cost 모델 정확한 순서로 필드 배치 (cost_response.py 기준)
         spaceone_record = {
-            "cost": _safe_numeric_convert(cost_value),
-            "currency": _safe_string_convert(currency_value),
-            "usage_quantity": _safe_numeric_convert(usage_quantity_value),
-            "usage_unit": _safe_string_convert(usage_unit_value),
-            "provider": _safe_string_convert(record.get("provider", "google_cloud")),
-            "region_code": _safe_string_convert(record.get("region_code", "global")),
-            "product": _safe_string_convert(record.get("product", "Unknown")),
-            "usage_type": _safe_string_convert(record.get("usage_type", "")),
-            "resource": _safe_string_convert(record.get("resource", "")),
-            "billed_date": _safe_string_convert(record.get("billed_date", "")),
-            "tags": _safe_dict_convert(record.get("tags", {})),
-            "additional_info": _safe_dict_convert(record.get("additional_info", {})),
-            "data": _safe_dict_convert(record.get("data", {})),
+            "cost": float(_safe_numeric_convert(cost_value)),  # 필수: float 타입
+            "usage_quantity": _safe_numeric_convert(
+                usage_quantity_value
+            ),  # Optional[float]
+            "usage_unit": _safe_string_convert(usage_unit_value)
+            or None,  # Optional[str]
+            "provider": _safe_string_convert(record.get("provider", "google_cloud"))
+            or None,  # Optional[str]
+            "region_code": _safe_string_convert(record.get("region_code", "global"))
+            or None,  # Optional[str]
+            "product": _safe_string_convert(record.get("product", "Unknown"))
+            or None,  # Optional[str]
+            "usage_type": _safe_string_convert(record.get("usage_type", ""))
+            or None,  # Optional[str]
+            "resource": _safe_string_convert(record.get("resource", ""))
+            or None,  # Optional[str]
+            "tags": _safe_dict_convert(record.get("tags", {})),  # dict = {}
+            "additional_info": _safe_dict_convert(
+                record.get("additional_info", {})
+            ),  # dict = {}
+            "data": _safe_dict_convert(record.get("data", {})),  # dict = {}
+            "billed_date": _safe_string_convert(
+                record.get("billed_date", "")
+            ),  # 필수: str 타입
         }
 
-        # cost 필드 특별 처리 (절대 None이나 빈 값이 될 수 없음)
-        if spaceone_record["cost"] is None or spaceone_record["cost"] == "":
-            spaceone_record["cost"] = 0.0
+        # cost 필드 특별 처리 (SpaceONE 호환성을 위해 최소값 보장)
+        if (
+            spaceone_record["cost"] is None
+            or spaceone_record["cost"] == ""
+            or spaceone_record["cost"] == 0.0
+        ):
+            spaceone_record["cost"] = 0.01  # 0 대신 최소 양수값 사용
 
-        # billed_date 특별 처리 (빈 값인 경우 None 유지 - 현재 날짜 사용하지 않음)
+        # billed_date 특별 처리 (SpaceONE Cost 모델은 str을 요구하므로 빈 문자열로 설정)
         if not spaceone_record["billed_date"]:
-            spaceone_record["billed_date"] = None
+            spaceone_record["billed_date"] = ""
             _LOGGER.warning(
-                "[_ensure_spaceone_record_format] billed_date is empty, keeping as None"
+                "[_ensure_spaceone_record_format] billed_date is empty, setting to empty string for SpaceONE compatibility"
             )
 
         if "cost" not in spaceone_record or spaceone_record["cost"] is None:
