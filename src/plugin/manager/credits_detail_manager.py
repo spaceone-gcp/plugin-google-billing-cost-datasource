@@ -9,7 +9,7 @@ Credits Detail 정보는 집계 과정에서 손실됩니다.
 """
 
 import logging
-from typing import Dict, Any, Generator
+from typing import Any, Dict, Generator
 
 from spaceone.core.manager import BaseManager
 
@@ -75,7 +75,7 @@ class CreditsDetailManager(BaseManager):
                 start_date, end_date, project_id, billing_account_id, service_id, limit
             )
 
-            _LOGGER.debug(f"[CreditsDetailManager] 생성된 쿼리: {query}")
+            _LOGGER.info(f"[CreditsDetailManager] Executing BigQuery SQL:\n{query}")
 
             # BigQuery 실행
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)

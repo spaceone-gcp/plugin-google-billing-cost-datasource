@@ -291,12 +291,8 @@ def test_scientific_notation_removal():
         ]
     }
 
-    print("=== 원본 데이터 (표준 JSON) ===")
-    print(json.dumps(test_data, indent=2))
-
-    print("\n=== 과학적 표기법 제거 후 ===")
+    # 테스트 실행
     result = dumps_decimal(test_data, indent=2)
-    print(result)
 
     # 과학적 표기법 검증
     import re
@@ -304,8 +300,8 @@ def test_scientific_notation_removal():
     scientific_patterns = [r"-?\d+\.?\d*[eE][+-]?\d+"]
     has_scientific = any(re.search(pattern, result) for pattern in scientific_patterns)
 
-    print("\n=== 검증 결과 ===")
-    print(f"과학적 표기법 존재: {'발견됨' if has_scientific else '완전 제거됨'}")
+    if has_scientific:
+        raise ValueError("Scientific notation still exists in output")
 
     return not has_scientific
 

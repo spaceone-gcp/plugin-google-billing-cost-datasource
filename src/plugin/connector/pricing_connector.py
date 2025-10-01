@@ -77,7 +77,6 @@ class PricingConnector(BaseConnector):
         """
         try:
             query = self._build_pricing_query(service_id, sku_id, date)
-            _LOGGER.debug(f"[PricingConnector] Executing query: {query}")
 
             response_df = pandas_gbq.read_gbq(
                 query,
@@ -360,7 +359,6 @@ class PricingConnector(BaseConnector):
                 }
                 table_list.append(table_info)
 
-            _LOGGER.info(f"[PricingConnector] Found {len(table_list)} pricing tables")
             return table_list
 
         except Exception as e:
