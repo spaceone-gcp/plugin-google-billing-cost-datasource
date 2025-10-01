@@ -78,7 +78,7 @@ class CostManager(BaseManager):
         _LOGGER.info("[QUERY #0] CostManager - 링크된 계정(프로젝트) 목록 조회")
         _LOGGER.info(f"[get_linked_accounts] 시작일: {start_month}")
         _LOGGER.info(
-            f"[get_linked_accounts] PARTITIONDATE 범위: {self._calculate_partition_date_range(start_month)}"
+            f"[get_linked_accounts] PARTITIONDATE 범위: {self._get_partition_date_range(start_month)}"
         )
         _LOGGER.info(f"[get_linked_accounts] Query: {query}")
         _LOGGER.info("=" * 80)
@@ -207,9 +207,7 @@ class CostManager(BaseManager):
         )
         validated_start = self._validate_and_fix_date_range(start)
         validated_end = self._validate_and_fix_date_range(end) if end else None
-        partition_range = self._calculate_partition_date_range(
-            validated_start, validated_end
-        )
+        partition_range = self._get_partition_date_range(validated_start, validated_end)
         _LOGGER.debug(
             f"[BigQuery] PARTITIONDATE: {partition_range[0]}~{partition_range[1]}"
         )
@@ -2177,6 +2175,19 @@ class CostManager(BaseManager):
             raise ERROR_REQUIRED_PARAMETER(
                 key=f"options.provider (invalid value: {provider})"
             )
+
+    def _get_partition_date_range(
+        self, start_month: str, end_month: str = None
+    ) -> tuple:
+        """PARTITIONDATE 범위를 계산합니다."""
+        from ..utils.date_transformer import calculate_partition_date_range
+
+        if end_month:
+            # 범위가 있는 경우 시작월 기준으로 계산
+            return calculate_partition_date_range(start_month)
+        else:
+            # 단일 월인 경우
+            return calculate_partition_date_range(start_month)
 
     def _validate_table_exists(self):
         bigquery_tables_info = self.bigquery_connector.list_tables(
