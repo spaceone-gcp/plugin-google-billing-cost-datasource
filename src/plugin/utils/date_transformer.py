@@ -74,3 +74,62 @@ class DateTransformer:
     def to_timestamp(self, value: Any) -> str:
         """날짜를 타임스탬프 형식으로 변환"""
         return self.format_date(value, "%Y-%m-%d %H:%M:%S")
+
+
+def calculate_partition_date_range(start_date: str) -> tuple[str, str]:
+    """PARTITIONDATE 범위 계산 (공통 유틸리티 함수)
+
+    시작일: 시작월의 첫째 날 (예: 2025-09-01)
+    종료일: 현재월의 마지막 날 (예: 2025-10-31)
+
+    Args:
+        start_date: YYYY-MM 형식의 시작 날짜
+
+    Returns:
+        tuple[str, str]: (partition_start_date, partition_end_date) YYYY-MM-DD 형식
+    """
+    try:
+        import calendar
+
+        # 시작일 파싱 및 검증
+        if not start_date or len(start_date) != 7:  # YYYY-MM 형식 검증
+            current_date = datetime.now()
+            start_year, start_month = current_date.year, current_date.month
+            _LOGGER.warning(
+                f"[PARTITIONDATE] Invalid start_date format: {start_date}, using current month: {current_date.strftime('%Y-%m')}"
+            )
+        else:
+            start_year, start_month = map(int, start_date.split("-"))
+
+        # 현재 날짜
+        current_date = datetime.now()
+        current_year, current_month = current_date.year, current_date.month
+
+        # 시작일: 시작월의 첫째 날
+        partition_start_str = f"{start_year}-{start_month:02d}-01"
+
+        # 종료일: 현재월의 마지막 날
+        last_day_of_current_month = calendar.monthrange(current_year, current_month)[1]
+        partition_end_str = (
+            f"{current_year}-{current_month:02d}-{last_day_of_current_month:02d}"
+        )
+
+        # PARTITIONDATE 계산 완료 (로그 간소화)
+
+        return partition_start_str, partition_end_str
+
+    except Exception as e:
+        _LOGGER.error(f"[PARTITIONDATE] 날짜 계산 실패: {e}")
+        # 실패 시 안전한 기본값 반환
+        current_date = datetime.now()
+        current_year, current_month = current_date.year, current_date.month
+        import calendar
+
+        last_day = calendar.monthrange(current_year, current_month)[1]
+
+        # 기본값: 현재월의 첫째 날 ~ 마지막 날
+        start_safe = f"{current_year}-{current_month:02d}-01"
+        end_safe = f"{current_year}-{current_month:02d}-{last_day:02d}"
+
+        _LOGGER.warning(f"[PARTITIONDATE] 기본값 사용: {start_safe} ~ {end_safe}")
+        return start_safe, end_safe

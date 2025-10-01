@@ -57,13 +57,6 @@ def setup_logging():
         spaceone_logger.addHandler(console_handler)
         spaceone_logger.propagate = False  # 중복 로그 방지
 
-    # 디버깅 모드 상태 로깅
-    if debug_mode:
-        spaceone_logger.info("[MAIN] DEBUG 모드가 활성화되었습니다.")
-        spaceone_logger.debug("[MAIN] 디버그 로깅이 작동 중입니다.")
-    else:
-        spaceone_logger.info("[MAIN] 프로덕션 모드로 실행 중입니다.")
-
 
 # 로깅 설정 초기화
 setup_logging()
@@ -241,20 +234,9 @@ def job_get_tasks(params: dict) -> dict:
         }
 
     """
-    _LOGGER.info("[job_get_tasks] API endpoint called - 태스크 생성 시작")
-
     # 전역 프로젝트 처리 추적 시스템 초기화
     with _processing_lock:
         _processed_projects.clear()
-    _LOGGER.info("[job_get_tasks] 프로젝트 처리 추적 시스템 초기화 완료")
-
-    # 중요: 프로젝트 태스크 생성 시작 알림
-    _LOGGER.info(
-        "[job_get_tasks] JobManager가 BigQuery에서 활성 프로젝트를 탐지하여 태스크를 생성합니다..."
-    )
-    _LOGGER.info(
-        "[job_get_tasks] 스마트 필터링으로 비용/사용량이 있는 프로젝트만 선별합니다..."
-    )
 
     try:
         # 파라미터 기본 검증
@@ -268,23 +250,6 @@ def job_get_tasks(params: dict) -> dict:
         if missing_params:
             raise ValueError(f"Missing required parameters: {missing_params}")
 
-        # 요청 파라미터 상세 로깅
-        _LOGGER.info(" [job_get_tasks] 요청 파라미터:")
-        _LOGGER.info(f"   - domain_id: {params.get('domain_id')}")
-        _LOGGER.info(f"   - start: {params.get('start', 'None')}")
-        _LOGGER.info(f"   - options keys: {list(params.get('options', {}).keys())}")
-        if "options" in params:
-            options = params["options"]
-            _LOGGER.info(
-                f"   - billing_export_project_id: {options.get('billing_export_project_id')}"
-            )
-            _LOGGER.info(
-                f"   - billing_dataset_id: {options.get('billing_dataset_id')}"
-            )
-            _LOGGER.info(
-                f"   - billing_account_id: {options.get('billing_account_id')}"
-            )
-
         # 작업 태스크 생성
         result = _job_get_tasks_logic(params)
 
@@ -295,15 +260,6 @@ def job_get_tasks(params: dict) -> dict:
         global _expected_total_projects
         with _processing_lock:
             _expected_total_projects = actual_tasks
-
-        _LOGGER.info("=" * 80)
-        _LOGGER.info("[job_get_tasks] 태스크 생성 API 완료!")
-        _LOGGER.info(f"최종 결과: {actual_tasks}개 태스크 생성")
-        _LOGGER.info(f"전역 추적 시스템에 예상 태스크 수 설정: {actual_tasks}개")
-        _LOGGER.info(
-            "JobManager가 BigQuery에서 탐지한 모든 활성 프로젝트에 대한 태스크 생성 완료!"
-        )
-        _LOGGER.info("=" * 80)
 
         return result
 

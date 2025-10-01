@@ -9,7 +9,7 @@ Credits Detail 정보는 집계 과정에서 손실됩니다.
 """
 
 import logging
-from typing import Dict, Any, Generator
+from typing import Any, Dict, Generator
 
 from spaceone.core.manager import BaseManager
 
@@ -131,39 +131,30 @@ class CreditsDetailManager(BaseManager):
 
         query = f"""
             SELECT
-              -- 기본 식별 정보
               timestamp_trunc(usage_start_time, DAY) as billed_at,
               billing_account_id,
               
-              -- 프로젝트 정보
               project.id as project_id,
               project.name as project_name,
               
-              -- 서비스 정보
               service.id as service_id,
               service.description as service_description,
               
-              -- SKU 정보
               sku.id as sku_id,
               sku.description as sku_description,
               
-              -- 위치 정보
               IFNULL(location.location, 'global') as location_name,
               IFNULL(location.country, '') as location_country,
               IFNULL(location.region, 'global') as region_code,
               
-              -- 비용 정보
               cost,
               currency,
               IFNULL(currency_conversion_rate, 1.0) as currency_conversion_rate,
               
-              -- Credits Detail (원본 데이터 그대로)
               TO_JSON_STRING(credits) as credits_detail,
               
-              -- Credits 총액 (검증용)
               (SELECT SUM(CAST(c.amount AS FLOAT64)) FROM UNNEST(credits) c) as credits_total_amount,
               
-              -- 인보이스 정보
               IFNULL(invoice.month, '') as invoice_month
               
             FROM `{self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}`

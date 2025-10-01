@@ -9,6 +9,8 @@ from typing import Optional
 
 from spaceone.core.manager import BaseManager
 
+from ..conf.cost_conf import DATA_SOURCE_TYPES
+
 _LOGGER = logging.getLogger(__name__)
 
 # Google Cloud Billing 데이터의 additional_info 필드 기본 메타데이터 정의
@@ -115,6 +117,129 @@ class DataSourceManager(BaseManager):
         }
 
         return {"metadata": plugin_metadata}
+
+    @staticmethod
+    def verify_plugin(
+        options: dict,
+        secret_data: dict,
+        domain_id: str,
+        schema: str = None,
+    ) -> None:
+        """데이터 소스 플러그인의 설정을 검증합니다.
+
+        Args:
+            options: 플러그인 옵션 딕셔너리
+            secret_data: 시크릿 데이터 딕셔너리
+            domain_id: 도메인 ID
+            schema: 스키마 정보 (선택사항)
+
+        Raises:
+            ValueError: 필수 파라미터가 누락되거나 잘못된 경우
+            Exception: 검증 과정에서 오류가 발생한 경우
+        """
+        _LOGGER.info("[DataSourceManager.verify_plugin] Starting plugin verification")
+
+        try:
+            # 1. 기본 파라미터 검증
+            if not isinstance(options, dict):
+                raise ValueError("Options must be a dictionary")
+
+            if not isinstance(secret_data, dict):
+                raise ValueError("Secret data must be a dictionary")
+
+            if not domain_id:
+                raise ValueError("Domain ID is required")
+
+            # 2. 데이터 소스 타입별 검증
+            data_source_type = options.get(
+                "data_source_type", DATA_SOURCE_TYPES["bigquery"]
+            )
+            _LOGGER.info(
+                f"[DataSourceManager.verify_plugin] Verifying data source type: {data_source_type}"
+            )
+
+            if data_source_type == DATA_SOURCE_TYPES["bigquery"]:
+                DataSourceManager._verify_bigquery_config(options, secret_data)
+            elif data_source_type == DATA_SOURCE_TYPES["http"]:
+                DataSourceManager._verify_http_file_config(options, secret_data)
+            else:
+                raise ValueError(f"Unsupported data source type: {data_source_type}")
+
+            # 3. 공통 옵션 검증
+            DataSourceManager._verify_common_options(options)
+
+            _LOGGER.info(
+                "[DataSourceManager.verify_plugin] Plugin verification completed successfully"
+            )
+
+        except Exception as e:
+            _LOGGER.error(
+                f"[DataSourceManager.verify_plugin] Plugin verification failed: {e}"
+            )
+            raise
+
+    @staticmethod
+    def _verify_bigquery_config(options: dict, secret_data: dict) -> None:
+        """BigQuery 데이터 소스 설정 검증"""
+        required_options = [
+            "billing_export_project_id",
+            "billing_dataset",
+            "billing_table",
+            "billing_account_id",
+        ]
+
+        missing_options = [opt for opt in required_options if not options.get(opt)]
+        if missing_options:
+            raise ValueError(f"Missing required BigQuery options: {missing_options}")
+
+        # Service Account 키 검증
+        if not secret_data.get("service_account_json_object"):
+            raise ValueError(
+                "Service account JSON object is required for BigQuery access"
+            )
+
+        _LOGGER.debug(
+            "[DataSourceManager._verify_bigquery_config] BigQuery configuration verified"
+        )
+
+    @staticmethod
+    def _verify_http_file_config(options: dict, secret_data: dict) -> None:
+        """HTTP File 데이터 소스 설정 검증"""
+        # base_url 또는 bucket_name 중 하나는 필수
+        has_base_url = bool(options.get("base_url"))
+        has_bucket_name = bool(options.get("bucket_name"))
+
+        if not (has_base_url or has_bucket_name):
+            raise ValueError(
+                "Either 'base_url' or 'bucket_name' is required for HTTP file data source"
+            )
+
+        # GCS 사용 시 Service Account 키 검증
+        if has_bucket_name and not secret_data.get("service_account_json_object"):
+            raise ValueError("Service account JSON object is required for GCS access")
+
+        _LOGGER.debug(
+            "[DataSourceManager._verify_http_file_config] HTTP file configuration verified"
+        )
+
+    @staticmethod
+    def _verify_common_options(options: dict) -> None:
+        """공통 옵션 검증"""
+        # 통화 코드 검증
+        currency = options.get("currency", "USD")
+        if not isinstance(currency, str) or len(currency) != 3:
+            raise ValueError(
+                f"Invalid currency code: {currency}. Must be a 3-letter currency code."
+            )
+
+        # 날짜 형식 검증 (선택사항)
+        date_format = options.get("date_format")
+        if date_format and not isinstance(date_format, str):
+            raise ValueError("Date format must be a string")
+
+        _LOGGER.debug(
+            "[DataSourceManager._verify_common_options] Common options verified"
+        )
 
     @staticmethod
     def init_cost_data_info() -> dict:
