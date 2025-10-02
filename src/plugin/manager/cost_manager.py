@@ -1081,14 +1081,34 @@ class CostManager(BaseManager):
     def _create_metadata_additional_info_from_row(self, row) -> dict:
         """빅쿼리 로우에서 메타데이터 additional_info 생성 (Cost Management 가이드 33개 필드만)"""
         # Cost Management 플러그인 호환성 가이드에 정의된 33개 메타데이터 필드만 포함
+
+        # 디버깅: 실제 로우 데이터 확인
+        project_val = self._format_project_display_name(row)
+        service_desc = getattr(row, "service_description", None)
+        location_region = getattr(row, "location_region", None)
+        sku_desc = getattr(row, "sku_description", None)
+
+        # 로우 객체의 모든 속성 확인
+        row_attrs = [attr for attr in dir(row) if not attr.startswith("_")]
+        _LOGGER.info(f"[DEBUG] Available row attributes: {row_attrs}")
+        _LOGGER.info(
+            f"[DEBUG] Row values - project: '{project_val}', service_description: '{service_desc}', location_region: '{location_region}', sku_description: '{sku_desc}'"
+        )
+
         metadata_fields = {
             # SpaceONE UI 기본 필수 항목 (6개)
-            "Project": str(getattr(row, "project_name", "")).strip(),
+            "Project": project_val,  # resource 필드와 동일한 로직 사용
             "Provider": "Google Cloud",
             "Service Account": str(getattr(row, "billing_account_id", "")).strip(),
-            "Product": str(getattr(row, "service_description", "")).strip(),
-            "Region": str(getattr(row, "region_code", "")).strip(),
-            "Usage Type": str(getattr(row, "sku_description", "")).strip(),
+            "Product": str(
+                service_desc or "Unknown"
+            ).strip(),  # 메인 레코드와 동일한 로직
+            "Region": str(
+                location_region or "global"
+            ).strip(),  # 메인 레코드와 동일한 필드명
+            "Usage Type": str(
+                sku_desc or "Unknown"
+            ).strip(),  # 메인 레코드와 동일한 로직
             # 조정 정보 (4개)
             "Adjustment Info Description": self._extract_nested_field(
                 row, "adjustment_info", "description"
@@ -1142,11 +1162,108 @@ class CostManager(BaseManager):
             "Usage Unit": str(getattr(row, "usage_unit", "")).strip(),
         }
 
-        # 실제 데이터가 있는 필드만 포함 (빈 값과 <NA> 제거)
+        # 필수 고정 항목 (6개)는 빈 값이어도 포함 (SpaceONE UI 기준)
+        REQUIRED_FIELDS = {
+            "Project",
+            "Provider",
+            "Service Account",
+            "Product",
+            "Region",
+            "Usage Type",
+        }
+
         cleaned_metadata = {}
         for k, v in metadata_fields.items():
-            # None, 빈 문자열, "<NA>" 값인 경우 제외
-            if v is not None and v != "" and v != "<NA>":
+            if k in REQUIRED_FIELDS:
+                # 필수 필드는 항상 포함 (이미 기본값이 설정되어 있음)
+                cleaned_metadata[k] = str(v).strip() if v else "Unknown"
+            elif v is not None and v != "" and v != "<NA>":
+                # 선택적 필드는 기존 로직 유지
+                cleaned_metadata[k] = str(v).strip()
+
+        return cleaned_metadata
+
+    def _create_metadata_additional_info_from_record(self, record: dict, row) -> dict:
+        """메인 레코드의 값들을 재사용하여 additional_info 생성"""
+        # 메인 레코드에서 이미 올바르게 처리된 값들을 재사용
+        metadata_fields = {
+            # SpaceONE UI 기본 필수 항목 (6개) - 메인 레코드 값 재사용
+            "Project": record.get("resource", "Unknown"),  # resource 필드 재사용
+            "Provider": "Google Cloud",
+            "Service Account": str(getattr(row, "billing_account_id", "")).strip(),
+            "Product": record.get("product", "Unknown"),  # 메인 레코드 값 재사용
+            "Region": record.get("region_code", "global"),  # 메인 레코드 값 재사용
+            "Usage Type": record.get("usage_type", "Unknown"),  # 메인 레코드 값 재사용
+            # 조정 정보 (4개)
+            "Adjustment Info Description": self._extract_nested_field(
+                row, "adjustment_info", "description"
+            ),
+            "Adjustment Info ID": self._extract_nested_field(
+                row, "adjustment_info", "id"
+            ),
+            "Adjustment Info Mode": self._extract_nested_field(
+                row, "adjustment_info", "mode"
+            ),
+            "Adjustment Info Type": self._extract_nested_field(
+                row, "adjustment_info", "type"
+            ),
+            # 청구 관련 정보 (2개)
+            "Billing Account ID": str(getattr(row, "billing_account_id", "")).strip(),
+            "Invoice Month": self._extract_nested_field(row, "invoice", "month"),
+            # 소비 모델 정보 (2개)
+            "Consumption Model Description": self._extract_nested_field(
+                row, "consumption_model", "description"
+            ),
+            "Consumption Model ID": self._extract_nested_field(
+                row, "consumption_model", "id"
+            ),
+            # 기술적 메타데이터 (4개)
+            "Cost Type": str(getattr(row, "cost_type", "regular")).strip(),
+            "Currency": record.get("currency", "USD"),  # 메인 레코드 값 재사용
+            "Transaction Type": str(getattr(row, "transaction_type", "")).strip(),
+            "Seller Name": str(getattr(row, "seller_name", "")).strip(),
+            # 지역 관련 정보 (4개)
+            "Location Country": str(getattr(row, "location_country", "")).strip(),
+            "Location Location": str(getattr(row, "location_location", "")).strip(),
+            "Location Region": str(getattr(row, "location_region", "")).strip(),
+            "Location Zone": str(getattr(row, "location_zone", "")).strip(),
+            # 가격 정보 (2개)
+            "Price Unit": self._extract_nested_field(row, "price", "unit"),
+            "Pricing Unit": self._extract_nested_field(row, "usage", "pricing_unit"),
+            # 프로젝트 세부 정보 (3개)
+            "Project ID": str(getattr(row, "project_id", "")).strip(),
+            "Project Name": str(getattr(row, "project_name", "")).strip(),
+            "Project Number": str(getattr(row, "project_number", "")).strip(),
+            # 발행자 정보 (1개)
+            "Publisher Type": self._extract_nested_field(
+                row, "invoice", "publisher_type"
+            ),
+            # 서비스 세부 정보 (4개)
+            "SKU Description": str(getattr(row, "sku_description", "")).strip(),
+            "SKU ID": str(getattr(row, "sku_id", "")).strip(),
+            "Service Description": str(getattr(row, "service_description", "")).strip(),
+            "Service ID": str(getattr(row, "service_id", "")).strip(),
+            # 사용량 정보 (1개)
+            "Usage Unit": record.get("usage_unit", ""),  # 메인 레코드 값 재사용
+        }
+
+        # 필수 고정 항목 (6개)는 빈 값이어도 포함 (SpaceONE UI 기준)
+        REQUIRED_FIELDS = {
+            "Project",
+            "Provider",
+            "Service Account",
+            "Product",
+            "Region",
+            "Usage Type",
+        }
+
+        cleaned_metadata = {}
+        for k, v in metadata_fields.items():
+            if k in REQUIRED_FIELDS:
+                # 필수 필드는 항상 포함 (이미 기본값이 설정되어 있음)
+                cleaned_metadata[k] = str(v).strip() if v else "Unknown"
+            elif v is not None and v != "" and v != "<NA>":
+                # 선택적 필드는 기존 로직 유지
                 cleaned_metadata[k] = str(v).strip()
 
         return cleaned_metadata
@@ -1378,12 +1495,16 @@ class CostManager(BaseManager):
                 # 화면 표시용: 프로젝트 이름 또는 커스텀 형식 사용
                 "resource": self._format_project_display_name(row),
                 "tags": {},
-                "additional_info": self._create_metadata_additional_info_from_row(row),
                 "data": self._create_spaceone_billing_data_from_bigquery(
                     self._row_to_dict(row), getattr(row, "cost_at_list", cost_value)
                 ),
                 "billed_date": self._extract_billed_date(row),
             }
+
+            # STEP 4: additional_info 생성 (메인 레코드 값들을 재사용)
+            record["additional_info"] = (
+                self._create_metadata_additional_info_from_record(record, row)
+            )
 
             # STEP 4: 최종 숫자 정리
             # 극소값도 원본 그대로 보존 (0으로 강제 변환 제거)

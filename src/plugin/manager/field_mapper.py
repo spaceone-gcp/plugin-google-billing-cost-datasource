@@ -114,13 +114,19 @@ class FieldMapper:
                 "resource": mapped_fields["resource"],
                 "billed_date": billed_date_value,
                 "tags": self._map_tags_field(source_data),
-                "additional_info": self._get_metadata_additional_info(source_data),
                 "data": self._create_spaceone_billing_data(
                     source_data,
                     {"additional_info": final_additional_info},
                     self._get_list_price_from_source(source_data),
                 ),
             }
+
+            # additional_info는 메인 레코드 값들을 재사용하여 생성
+            mapped_data["additional_info"] = (
+                self._get_metadata_additional_info_from_mapped_data(
+                    mapped_data, source_data
+                )
+            )
 
             # SpaceONE 응답 형식 보장 - Decimal을 float로 변환
             result = self._ensure_spaceone_response_types(mapped_data)
@@ -784,11 +790,143 @@ class FieldMapper:
             "Usage Unit": source_data.get("usage_unit", ""),
         }
 
-        # 실제 데이터가 있는 필드만 포함 (빈 값과 <NA> 제거)
+        # 필수 고정 항목 (6개)는 빈 값이어도 포함 (SpaceONE UI 기준)
+        REQUIRED_FIELDS = {
+            "Project",
+            "Provider",
+            "Service Account",
+            "Product",
+            "Region",
+            "Usage Type",
+        }
+
         cleaned_metadata = {}
         for k, v in metadata_fields.items():
-            # None, 빈 문자열, "<NA>" 값인 경우 제외
-            if v is not None and v != "" and v != "<NA>":
+            if k in REQUIRED_FIELDS:
+                # 필수 필드는 빈 값이어도 포함 (기본값 설정)
+                if v is None or v == "" or v == "<NA>":
+                    cleaned_metadata[k] = "Unknown"
+                else:
+                    cleaned_metadata[k] = str(v).strip()
+            elif v is not None and v != "" and v != "<NA>":
+                # 선택적 필드는 기존 로직 유지
+                cleaned_metadata[k] = str(v).strip()
+
+        return cleaned_metadata
+
+    def _get_metadata_additional_info_from_mapped_data(
+        self, mapped_data: dict, source_data: dict
+    ) -> dict:
+        """매핑된 데이터의 값들을 재사용하여 additional_info 생성 (FieldMapper용)"""
+        # 메인 레코드에서 이미 올바르게 처리된 값들을 재사용
+        metadata_fields = {
+            # SpaceONE UI 기본 필수 항목 (6개) - 메인 레코드 값 재사용
+            "Project": mapped_data.get("resource", "Unknown"),  # resource 필드 재사용
+            "Provider": "Google Cloud",
+            "Service Account": str(
+                self._get_nested_value(source_data, "billing_account_id", "")
+            ).strip(),
+            "Product": mapped_data.get("product", "Unknown"),  # 메인 레코드 값 재사용
+            "Region": mapped_data.get("region_code", "global"),  # 메인 레코드 값 재사용
+            "Usage Type": mapped_data.get(
+                "usage_type", "Unknown"
+            ),  # 메인 레코드 값 재사용
+            # 조정 정보 (4개)
+            "Adjustment Info Description": self._get_adjustment_info_field(
+                source_data, "description"
+            ),
+            "Adjustment Info ID": self._get_adjustment_info_field(source_data, "id"),
+            "Adjustment Info Mode": self._get_adjustment_info_field(
+                source_data, "mode"
+            ),
+            "Adjustment Info Type": self._get_adjustment_info_field(
+                source_data, "type"
+            ),
+            # 청구 관련 정보 (2개)
+            "Billing Account ID": str(
+                self._get_nested_value(source_data, "billing_account_id", "")
+            ).strip(),
+            "Invoice Month": self._get_invoice_month(source_data),
+            # 소비 모델 정보 (2개)
+            "Consumption Model Description": self._get_consumption_model_field(
+                source_data, "description"
+            ),
+            "Consumption Model ID": self._get_consumption_model_field(
+                source_data, "id"
+            ),
+            # 기술적 메타데이터 (4개)
+            "Cost Type": str(
+                self._get_nested_value(source_data, "cost_type", "regular")
+            ).strip(),
+            "Currency": str(
+                self._get_nested_value(source_data, "currency", "USD")
+            ).strip(),
+            "Transaction Type": str(
+                self._get_nested_value(source_data, "transaction_type", "")
+            ).strip(),
+            "Seller Name": str(
+                self._get_nested_value(source_data, "seller_name", "")
+            ).strip(),
+            # 지역 관련 정보 (4개)
+            "Location Country": str(
+                self._get_nested_value(source_data, "location_country", "")
+            ).strip(),
+            "Location Location": str(
+                self._get_nested_value(source_data, "location_location", "")
+            ).strip(),
+            "Location Region": str(
+                self._get_nested_value(source_data, "location_region", "")
+            ).strip(),
+            "Location Zone": str(
+                self._get_nested_value(source_data, "location_zone", "")
+            ).strip(),
+            # 가격 정보 (2개)
+            "Price Unit": self._get_price_field(source_data, "unit"),
+            "Pricing Unit": self._get_pricing_unit_field(source_data),
+            # 프로젝트 세부 정보 (3개)
+            "Project ID": str(
+                self._get_nested_value(source_data, "project_id", "")
+            ).strip(),
+            "Project Name": str(
+                self._get_nested_value(source_data, "project_name", "")
+            ).strip(),
+            "Project Number": str(
+                self._get_nested_value(source_data, "project_number", "")
+            ).strip(),
+            # 발행자 정보 (1개)
+            "Publisher Type": self._get_publisher_type(source_data),
+            # 서비스 세부 정보 (4개)
+            "SKU Description": str(
+                self._get_nested_value(source_data, "sku_description", "")
+            ).strip(),
+            "SKU ID": str(self._get_nested_value(source_data, "sku_id", "")).strip(),
+            "Service Description": str(
+                self._get_nested_value(source_data, "service_description", "")
+            ).strip(),
+            "Service ID": str(
+                self._get_nested_value(source_data, "service_id", "")
+            ).strip(),
+            # 사용량 정보 (1개)
+            "Usage Unit": mapped_data.get("usage_unit", ""),  # 메인 레코드 값 재사용
+        }
+
+        # 필수 고정 항목 (6개)는 빈 값이어도 포함 (SpaceONE UI 기준)
+        REQUIRED_FIELDS = {
+            "Project",
+            "Provider",
+            "Service Account",
+            "Product",
+            "Region",
+            "Usage Type",
+        }
+
+        cleaned_metadata = {}
+        for k, v in metadata_fields.items():
+            if k in REQUIRED_FIELDS:
+                # 필수 필드는 항상 포함 (이미 기본값이 설정되어 있음)
+                cleaned_metadata[k] = str(v).strip() if v else "Unknown"
+            elif v is not None and v != "" and v != "<NA>":
+                # 선택적 필드는 기존 로직 유지
                 cleaned_metadata[k] = str(v).strip()
 
         return cleaned_metadata
