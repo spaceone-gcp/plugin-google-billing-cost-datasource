@@ -1082,33 +1082,17 @@ class CostManager(BaseManager):
         """빅쿼리 로우에서 메타데이터 additional_info 생성 (Cost Management 가이드 33개 필드만)"""
         # Cost Management 플러그인 호환성 가이드에 정의된 33개 메타데이터 필드만 포함
 
-        # 디버깅: 실제 로우 데이터 확인
+        # 프로젝트 표시명 생성
         project_val = self._format_project_display_name(row)
-        service_desc = getattr(row, "service_description", None)
-        location_region = getattr(row, "location_region", None)
-        sku_desc = getattr(row, "sku_description", None)
-
-        # 로우 객체의 모든 속성 확인
-        row_attrs = [attr for attr in dir(row) if not attr.startswith("_")]
-        _LOGGER.info(f"[DEBUG] Available row attributes: {row_attrs}")
-        _LOGGER.info(
-            f"[DEBUG] Row values - project: '{project_val}', service_description: '{service_desc}', location_region: '{location_region}', sku_description: '{sku_desc}'"
-        )
 
         metadata_fields = {
             # SpaceONE UI 기본 필수 항목 (6개)
             "Project": project_val,  # resource 필드와 동일한 로직 사용
             "Provider": "Google Cloud",
             "Service Account": str(getattr(row, "billing_account_id", "")).strip(),
-            "Product": str(
-                service_desc or "Unknown"
-            ).strip(),  # 메인 레코드와 동일한 로직
-            "Region": str(
-                location_region or "global"
-            ).strip(),  # 메인 레코드와 동일한 필드명
-            "Usage Type": str(
-                sku_desc or "Unknown"
-            ).strip(),  # 메인 레코드와 동일한 로직
+            "Product": str(getattr(row, "service_description", "Unknown")).strip(),
+            "Region": str(getattr(row, "location_region", "global")).strip(),
+            "Usage Type": str(getattr(row, "sku_description", "Unknown")).strip(),
             # 조정 정보 (4개)
             "Adjustment Info Description": self._extract_nested_field(
                 row, "adjustment_info", "description"
@@ -1137,18 +1121,45 @@ class CostManager(BaseManager):
             "Currency": str(getattr(row, "currency", "USD")).strip(),
             "Transaction Type": str(getattr(row, "transaction_type", "")).strip(),
             "Seller Name": str(getattr(row, "seller_name", "")).strip(),
-            # 지역 관련 정보 (4개)
-            "Location Country": str(getattr(row, "location_country", "")).strip(),
-            "Location Location": str(getattr(row, "location_location", "")).strip(),
-            "Location Region": str(getattr(row, "location_region", "")).strip(),
-            "Location Zone": str(getattr(row, "location_zone", "")).strip(),
-            # 가격 정보 (2개)
-            "Price Unit": self._extract_nested_field(row, "price", "unit"),
-            "Pricing Unit": self._extract_nested_field(row, "usage", "pricing_unit"),
-            # 프로젝트 세부 정보 (3개)
-            "Project ID": str(getattr(row, "project_id", "")).strip(),
-            "Project Name": str(getattr(row, "project_name", "")).strip(),
-            "Project Number": str(getattr(row, "project_number", "")).strip(),
+            # 지역 관련 정보 (4개) - 중첩 구조 우선 매핑
+            "Location Country": str(
+                self._extract_nested_field(row, "location", "country")
+                or getattr(row, "location_country", "")
+            ).strip(),
+            "Location Location": str(
+                self._extract_nested_field(row, "location", "location")
+                or getattr(row, "location_location", "")
+            ).strip(),
+            "Location Region": str(
+                self._extract_nested_field(row, "location", "region")
+                or getattr(row, "location_region", "")
+            ).strip(),
+            "Location Zone": str(
+                self._extract_nested_field(row, "location", "zone")
+                or getattr(row, "location_zone", "")
+            ).strip(),
+            # 가격 정보 (2개) - 중첩 구조와 직접 필드 모두 확인
+            "Price Unit": str(
+                self._extract_nested_field(row, "price", "unit")
+                or getattr(row, "price_unit", "")
+            ).strip(),
+            "Pricing Unit": str(
+                self._extract_nested_field(row, "usage", "pricing_unit")
+                or getattr(row, "usage_pricing_unit", "")
+            ).strip(),
+            # 프로젝트 세부 정보 (3개) - 중첩 구조 우선 매핑
+            "Project ID": str(
+                self._extract_nested_field(row, "project", "id")
+                or getattr(row, "project_id", "")
+            ).strip(),
+            "Project Name": str(
+                self._extract_nested_field(row, "project", "name")
+                or getattr(row, "project_name", "")
+            ).strip(),
+            "Project Number": str(
+                self._extract_nested_field(row, "project", "number")
+                or getattr(row, "project_number", "")
+            ).strip(),
             # 발행자 정보 (1개)
             "Publisher Type": self._extract_nested_field(
                 row, "invoice", "publisher_type"
@@ -1158,8 +1169,11 @@ class CostManager(BaseManager):
             "SKU ID": str(getattr(row, "sku_id", "")).strip(),
             "Service Description": str(getattr(row, "service_description", "")).strip(),
             "Service ID": str(getattr(row, "service_id", "")).strip(),
-            # 사용량 정보 (1개)
-            "Usage Unit": str(getattr(row, "usage_unit", "")).strip(),
+            # 사용량 정보 (1개) - 중첩 구조와 직접 필드 모두 확인
+            "Usage Unit": str(
+                self._extract_nested_field(row, "usage", "unit")
+                or getattr(row, "usage_unit", "")
+            ).strip(),
         }
 
         # 필수 고정 항목 (6개)는 빈 값이어도 포함 (SpaceONE UI 기준)
@@ -1172,14 +1186,18 @@ class CostManager(BaseManager):
             "Usage Type",
         }
 
+        # 모든 필드를 포함 (33개 필드 전체)
         cleaned_metadata = {}
         for k, v in metadata_fields.items():
             if k in REQUIRED_FIELDS:
-                # 필수 필드는 항상 포함 (이미 기본값이 설정되어 있음)
+                # 필수 필드는 항상 포함 (기본값 설정)
                 cleaned_metadata[k] = str(v).strip() if v else "Unknown"
-            elif v is not None and v != "" and v != "<NA>":
-                # 선택적 필드는 기존 로직 유지
-                cleaned_metadata[k] = str(v).strip()
+            else:
+                # 모든 필드를 포함하되, 빈 값이나 null은 빈 문자열로 처리
+                if v is None or str(v).strip() in ["", "<NA>", "None", "null"]:
+                    cleaned_metadata[k] = ""
+                else:
+                    cleaned_metadata[k] = str(v).strip()
 
         return cleaned_metadata
 
@@ -1188,7 +1206,11 @@ class CostManager(BaseManager):
         # 메인 레코드에서 이미 올바르게 처리된 값들을 재사용
         metadata_fields = {
             # SpaceONE UI 기본 필수 항목 (6개) - 메인 레코드 값 재사용
-            "Project": record.get("resource", "Unknown"),  # resource 필드 재사용
+            "Project": str(
+                self._extract_nested_field(row, "project", "name")
+                or getattr(row, "project_name", "")
+                or record.get("resource", "Unknown")
+            ).strip(),  # 프로젝트 이름 우선, 없으면 resource(프로젝트 ID) 사용
             "Provider": "Google Cloud",
             "Service Account": str(getattr(row, "billing_account_id", "")).strip(),
             "Product": record.get("product", "Unknown"),  # 메인 레코드 값 재사용
@@ -1257,14 +1279,18 @@ class CostManager(BaseManager):
             "Usage Type",
         }
 
+        # 모든 필드를 포함 (33개 필드 전체)
         cleaned_metadata = {}
         for k, v in metadata_fields.items():
             if k in REQUIRED_FIELDS:
-                # 필수 필드는 항상 포함 (이미 기본값이 설정되어 있음)
+                # 필수 필드는 항상 포함 (기본값 설정)
                 cleaned_metadata[k] = str(v).strip() if v else "Unknown"
-            elif v is not None and v != "" and v != "<NA>":
-                # 선택적 필드는 기존 로직 유지
-                cleaned_metadata[k] = str(v).strip()
+            else:
+                # 모든 필드를 포함하되, 빈 값이나 null은 빈 문자열로 처리
+                if v is None or str(v).strip() in ["", "<NA>", "None", "null"]:
+                    cleaned_metadata[k] = ""
+                else:
+                    cleaned_metadata[k] = str(v).strip()
 
         return cleaned_metadata
 
@@ -2839,8 +2865,25 @@ class CostManager(BaseManager):
         """
         project_id = str(getattr(row, "project_id", "")).strip()
 
-        # 옵션 1: 프로젝트 ID만 사용 (로그와 동일)
-        return project_id
+        # 중첩 구조에서 프로젝트 이름 추출 시도
+        project_name = str(
+            self._extract_nested_field(row, "project", "name")
+            or getattr(row, "project_name", "")
+        ).strip()
+
+        # 옵션 4: 이름 우선, ID 폴백 (수정된 로직)
+        result = project_name if project_name else project_id
+
+        # 디버깅: 프로젝트 필드 매핑 결과 로깅
+        if project_name != project_id:
+            _LOGGER.debug(
+                f"[_format_project_display_name] Project mapping - ID: {project_id}, Name: {project_name}, Result: {result}"
+            )
+
+        return result
+
+        # 옵션 1: 프로젝트 ID만 사용 (기존 로직)
+        # return project_id
 
         # 옵션 2: 프로젝트 이름 사용 (있는 경우)
         # if project_name:
@@ -2851,9 +2894,6 @@ class CostManager(BaseManager):
         # if project_name and project_name != project_id:
         #     return f"{project_id} ({project_name})"
         # return project_id
-
-        # 옵션 4: 이름 우선, ID 폴백
-        # return project_name if project_name else project_id
 
     def _remove_data_cost_from_response(self, response: dict) -> dict:
         """최종 응답에서 data.cost 필드만 제거 (내부 연산은 유지)

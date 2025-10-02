@@ -800,6 +800,7 @@ class FieldMapper:
             "Usage Type",
         }
 
+        # 모든 필드를 포함 (33개 필드 전체)
         cleaned_metadata = {}
         for k, v in metadata_fields.items():
             if k in REQUIRED_FIELDS:
@@ -808,9 +809,12 @@ class FieldMapper:
                     cleaned_metadata[k] = "Unknown"
                 else:
                     cleaned_metadata[k] = str(v).strip()
-            elif v is not None and v != "" and v != "<NA>":
-                # 선택적 필드는 기존 로직 유지
-                cleaned_metadata[k] = str(v).strip()
+            else:
+                # 모든 필드를 포함하되, 빈 값이나 null은 빈 문자열로 처리
+                if v is None or str(v).strip() in ["", "<NA>", "None", "null"]:
+                    cleaned_metadata[k] = ""
+                else:
+                    cleaned_metadata[k] = str(v).strip()
 
         return cleaned_metadata
 
@@ -821,7 +825,11 @@ class FieldMapper:
         # 메인 레코드에서 이미 올바르게 처리된 값들을 재사용
         metadata_fields = {
             # SpaceONE UI 기본 필수 항목 (6개) - 메인 레코드 값 재사용
-            "Project": mapped_data.get("resource", "Unknown"),  # resource 필드 재사용
+            "Project": str(
+                self._get_nested_value(source_data, "project.name", "")
+                or self._get_nested_value(source_data, "project_name", "")
+                or mapped_data.get("resource", "Unknown")
+            ).strip(),  # 프로젝트 이름 우선, 없으면 resource(프로젝트 ID) 사용
             "Provider": "Google Cloud",
             "Service Account": str(
                 self._get_nested_value(source_data, "billing_account_id", "")
@@ -867,47 +875,63 @@ class FieldMapper:
             "Seller Name": str(
                 self._get_nested_value(source_data, "seller_name", "")
             ).strip(),
-            # 지역 관련 정보 (4개)
+            # 지역 관련 정보 (4개) - 중첩 구조 우선 매핑
             "Location Country": str(
-                self._get_nested_value(source_data, "location_country", "")
+                self._get_nested_value(source_data, "location.country", "")
+                or self._get_nested_value(source_data, "location_country", "")
             ).strip(),
             "Location Location": str(
-                self._get_nested_value(source_data, "location_location", "")
+                self._get_nested_value(source_data, "location.location", "")
+                or self._get_nested_value(source_data, "location_location", "")
             ).strip(),
             "Location Region": str(
-                self._get_nested_value(source_data, "location_region", "")
+                self._get_nested_value(source_data, "location.region", "")
+                or self._get_nested_value(source_data, "location_region", "")
             ).strip(),
             "Location Zone": str(
-                self._get_nested_value(source_data, "location_zone", "")
+                self._get_nested_value(source_data, "location.zone", "")
+                or self._get_nested_value(source_data, "location_zone", "")
             ).strip(),
             # 가격 정보 (2개)
             "Price Unit": self._get_price_field(source_data, "unit"),
             "Pricing Unit": self._get_pricing_unit_field(source_data),
-            # 프로젝트 세부 정보 (3개)
+            # 프로젝트 세부 정보 (3개) - 중첩 구조 우선 매핑
             "Project ID": str(
-                self._get_nested_value(source_data, "project_id", "")
+                self._get_nested_value(source_data, "project.id", "")
+                or self._get_nested_value(source_data, "project_id", "")
             ).strip(),
             "Project Name": str(
-                self._get_nested_value(source_data, "project_name", "")
+                self._get_nested_value(source_data, "project.name", "")
+                or self._get_nested_value(source_data, "project_name", "")
             ).strip(),
             "Project Number": str(
-                self._get_nested_value(source_data, "project_number", "")
+                self._get_nested_value(source_data, "project.number", "")
+                or self._get_nested_value(source_data, "project_number", "")
             ).strip(),
             # 발행자 정보 (1개)
             "Publisher Type": self._get_publisher_type(source_data),
-            # 서비스 세부 정보 (4개)
+            # 서비스 세부 정보 (4개) - 중첩 구조 우선 매핑
             "SKU Description": str(
-                self._get_nested_value(source_data, "sku_description", "")
+                self._get_nested_value(source_data, "sku.description", "")
+                or self._get_nested_value(source_data, "sku_description", "")
             ).strip(),
-            "SKU ID": str(self._get_nested_value(source_data, "sku_id", "")).strip(),
+            "SKU ID": str(
+                self._get_nested_value(source_data, "sku.id", "")
+                or self._get_nested_value(source_data, "sku_id", "")
+            ).strip(),
             "Service Description": str(
-                self._get_nested_value(source_data, "service_description", "")
+                self._get_nested_value(source_data, "service.description", "")
+                or self._get_nested_value(source_data, "service_description", "")
             ).strip(),
             "Service ID": str(
-                self._get_nested_value(source_data, "service_id", "")
+                self._get_nested_value(source_data, "service.id", "")
+                or self._get_nested_value(source_data, "service_id", "")
             ).strip(),
-            # 사용량 정보 (1개)
-            "Usage Unit": mapped_data.get("usage_unit", ""),  # 메인 레코드 값 재사용
+            # 사용량 정보 (1개) - 중첩 구조와 직접 필드 모두 확인
+            "Usage Unit": str(
+                self._get_usage_unit_field(source_data)
+                or mapped_data.get("usage_unit", "")
+            ).strip(),
         }
 
         # 필수 고정 항목 (6개)는 빈 값이어도 포함 (SpaceONE UI 기준)
@@ -925,9 +949,12 @@ class FieldMapper:
             if k in REQUIRED_FIELDS:
                 # 필수 필드는 항상 포함 (이미 기본값이 설정되어 있음)
                 cleaned_metadata[k] = str(v).strip() if v else "Unknown"
-            elif v is not None and v != "" and v != "<NA>":
-                # 선택적 필드는 기존 로직 유지
-                cleaned_metadata[k] = str(v).strip()
+            else:
+                # 모든 필드를 포함하되, 빈 값이나 null은 빈 문자열로 처리
+                if v is None or str(v).strip() in ["", "<NA>", "None", "null"]:
+                    cleaned_metadata[k] = ""
+                else:
+                    cleaned_metadata[k] = str(v).strip()
 
         return cleaned_metadata
 
@@ -973,6 +1000,15 @@ class FieldMapper:
         if isinstance(usage, dict):
             return usage.get("pricing_unit", "")
         return ""
+
+    def _get_usage_unit_field(self, source_data: dict) -> str:
+        """사용량 단위 필드 추출"""
+        # usage.unit에서 추출
+        usage = source_data.get("usage", {})
+        if isinstance(usage, dict):
+            return usage.get("unit", "")
+        # 직접 필드에서도 확인
+        return source_data.get("usage_unit", "")
 
     def _convert_to_numeric(self, value):
         """값을 적절한 숫자 타입으로 변환 (부동소수점 정밀도 개선 포함)"""
@@ -1075,6 +1111,14 @@ class FieldMapper:
             project_id = project_info.get("id")
             if project_id and project_id != "":
                 data_structure["project_id"] = str(project_id)
+
+            project_name = project_info.get("name")
+            if project_name and project_name != "":
+                data_structure["project_name"] = str(project_name)
+
+            project_number = project_info.get("number")
+            if project_number and project_number != "":
+                data_structure["project_number"] = str(project_number)
 
         # 서비스 정보
         service_info = source_data.get("service", {})
