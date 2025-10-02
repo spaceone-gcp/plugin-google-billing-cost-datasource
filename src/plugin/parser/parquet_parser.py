@@ -51,7 +51,7 @@ class ParquetParser(BaseParser):
             processed_count = 0
 
             # 배치 크기 조정 (Parquet은 일반적으로 큰 배치가 효율적)
-            batch_size = max(self.chunk_size, 1000)
+            batch_size = max(self.chunk_size, 500)
 
             for batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=columns, use_pandas_metadata=True
