@@ -14,7 +14,7 @@ from ..connector.bigquery_connector import BigqueryConnector
 from ..connector.gcs_connector import GcsConnector
 from ..factory.file_processor_factory import FileProcessorFactory
 from ..manager.field_mapper import FieldMapper
-from ..utils.concurrency_manager import concurrency_manager, request_deduplicator
+from ..utils.concurrency_manager import concurrency_manager
 
 _LOGGER = logging.getLogger("spaceone")
 
@@ -96,21 +96,8 @@ class CostManager(BaseManager):
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None
     ) -> Generator[dict, None, None]:
         """데이터 소스 타입에 따라 처리 분기"""
-        # 요청 중복 제거를 위한 해시 생성
-
         # source 값 추출 (options에서만)
         source = self._get_source_value(options)
-
-        # 중복 요청 확인 (RequestDeduplicator 사용)
-        from ..utils.concurrency_manager import request_deduplicator
-
-        request_hash = request_deduplicator.generate_request_hash(options, task_options)
-        _LOGGER.info(
-            f"[CostManager] 요청 해시 생성 - 해시: {request_hash[:8]}..., 프로젝트: {task_options.get('project_id', 'UNKNOWN')}"
-        )
-        if request_deduplicator.is_duplicate_request(request_hash):
-            _LOGGER.info(f"[CostManager] 중복 요청 스킵 - 해시: {request_hash[:8]}...")
-            return
 
         # source 기반 분기 처리
         if source == "bigquery":
@@ -624,13 +611,6 @@ class CostManager(BaseManager):
     ) -> Generator[dict, None, None]:
         """HTTP URL에서 데이터 조회 - 인증 불필요"""
         try:
-            # 요청 중복 제거 검사
-            request_hash = request_deduplicator.generate_request_hash(
-                options, task_options
-            )
-            if request_deduplicator.is_duplicate_request(request_hash):
-                return
-
             # HTTP URL 처리용 파라미터 검증
             self._check_http_task_options(task_options, options)
 
