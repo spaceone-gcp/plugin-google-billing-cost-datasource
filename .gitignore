@@ -1,14 +1,57 @@
+# Python
 *.swp
 *.bak
-disk
-build
-*.egg-info
+*.pyc
+__pycache__/
+*.egg-info/
 *.egg
 *.whl
-.idea
-__pycache__
-venv
-local-conf.yml
+build/
+dist/
+
+# Virtual environments
+venv/
 .venv/
 .venv.nosync/
+
+# IDE
+.idea/
+.vscode/settings.json
 .DS_Store
+
+# Project specific
+local-conf.yml
+disk/
+
+# Logs and temporary files
+*.log
+*.pid
+logs/
+server.log
+server_debug.log
+data_source_manager.log
+data_source_manager_metrics.json
+
+# Debug and test files
+debug_*.py
+test_*.py
+simple_*.py
+*_temp.json
+*_result.json
+grpc_*.json
+grpc_*.sh
+grpcurl_*.sh
+grpc_services.txt
+grpc_test_commands.md
+request_payload.json
+init_test_result.json
+DEBUG_SUMMARY.md
+
+# Monitoring and temporary directories
+kube_monitoring/
+.server.pid
+
+# Development scripts
+start_*.sh
+server_manager.sh
+simple_grpc_test.sh
