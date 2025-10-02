@@ -20,16 +20,15 @@ _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_DATA_SOURCE_RULES = [
     {
+        "name": "match_service_account",
+        "conditions_policy": "ALWAYS",
         "actions": {
-            "match_workspace": {
+            "match_service_account": {
                 "source": "additional_info.Project ID",
                 "target": "data.project_id",
             }
         },
         "options": {"stop_processing": True},
-        "name": "match_workspace",
-        "conditions_policy": "ALWAYS",
-        "resource_group": "DOMAIN",
     }
 ]
 
@@ -105,18 +104,25 @@ class DataSourceManager(BaseManager):
         Returns:
             dict: 플러그인 메타데이터가 포함된 초기화 응답
         """
-        plugin_metadata = {
-            "data_source_rules": _DEFAULT_DATA_SOURCE_RULES,
-            "supported_secret_types": ["MANUAL"],
+        metadata = {
             "currency": options.get("currency", "USD"),
-            "collect_resource_id": True,
+            "supported_secret_types": ["MANUAL"],
             "use_account_routing": False,
-            "exclude_license_cost": False,
-            "include_credit_cost": False,
+            "data_source_rules": _DEFAULT_DATA_SOURCE_RULES,
+            # "collect_resource_id": True,
+            # "exclude_license_cost": False,
+            # "include_credit_cost": False,
             "additional_info": copy.deepcopy(_DEFAULT_METADATA_ADDITIONAL_INFO),
         }
 
-        return {"metadata": plugin_metadata}
+        if options.get("use_account_routing", False):
+            metadata["use_account_routing"] = True
+            if account_match_key := options.get(
+                "account_match_key", "additional_info.Project ID"
+            ):
+                metadata["account_match_key"] = account_match_key
+
+        return {"metadata": metadata}
 
     @staticmethod
     def verify_plugin(
@@ -183,6 +189,9 @@ class DataSourceManager(BaseManager):
         # 1. 명시적 data_source_type 확인
         data_source_type = options.get("data_source_type")
         if data_source_type and data_source_type in DATA_SOURCE_TYPES.values():
+            # GCS 타입은 내부적으로 HTTP 타입으로 처리
+            if data_source_type == "gcs":
+                return DATA_SOURCE_TYPES["http"]
             return data_source_type
 
         # 2. source 파라미터 확인 (3개 고정 값: bigquery, gcs, http)

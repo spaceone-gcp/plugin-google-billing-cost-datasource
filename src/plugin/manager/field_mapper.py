@@ -169,9 +169,9 @@ class FieldMapper:
             self._track_daily_count(result.get("billed_date", "unknown"))
 
             # DEBUG: 최종 결과에서 cost 필드 확인
-            _LOGGER.debug(
-                f"[FieldMapper] Final result cost field: {result.get('cost', 'MISSING')}"
-            )
+            # _LOGGER.debug(
+            #     f"[FieldMapper] Final result cost field: {result.get('cost', 'MISSING')}"
+            # )
 
             return result
 

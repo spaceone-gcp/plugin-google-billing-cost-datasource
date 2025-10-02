@@ -62,3 +62,20 @@ BIGQUERY_CONFIG = {
     # 재시도 간격 (초) - 향후 사용 예정
     "retry_delay": 5,
 }
+
+# 성능 최적화 설정
+PERFORMANCE_CONFIG = {
+    # gRPC 응답 최적화를 위한 배치 크기 설정
+    "grpc_response_batch_size": 100,  # gRPC 응답당 최대 레코드 수
+    # 동적 배치 크기 조정을 위한 설정
+    "min_batch_size": 10,  # 최소 배치 크기
+    "max_batch_size": 200,  # 최대 배치 크기
+    # 레코드당 평균 크기 추정 (바이트)
+    "avg_record_size_bytes": 2048,  # 2KB per record (conservative estimate)
+    # gRPC 메시지 크기 제한 (3MB에서 안전 마진 20% 확보)
+    "grpc_message_size_limit": int(3 * 1024 * 1024 * 0.8),  # 2.4MB
+    # 성능 모니터링을 위한 설정
+    "enable_performance_logging": True,
+    # 배치 크기 동적 조정 활성화
+    "enable_dynamic_batch_sizing": True,
+}

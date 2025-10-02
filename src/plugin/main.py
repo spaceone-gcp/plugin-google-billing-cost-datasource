@@ -8,9 +8,16 @@ from spaceone.cost_analysis.plugin.data_source.lib.server import (
     DataSourcePluginServer,
 )
 
+from plugin.conf.cost_conf import PERFORMANCE_CONFIG
 from plugin.manager.cost_manager import CostManager
 from plugin.manager.data_source_manager import DataSourceManager
 from plugin.manager.job_manager import JobManager
+from plugin.utils.json_log_collector import (
+    is_json_logging_active,
+    log_json_response,
+    start_json_logging,
+    stop_json_logging,
+)
 
 # 전역 JSON 패치 제거 - BigQuery API 호환성 문제로 인해 제거
 # import plugin.utils.json_patch  # BigQuery request_id 변환 문제 발생
@@ -419,6 +426,15 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         if missing_params:
             raise ValueError(f"Missing required parameters: {missing_params}")
 
+        # JSON 로깅 시작 (환경변수로 제어)
+        json_logging_env = os.getenv("ENABLE_JSON_LOGGING", "false")
+        _LOGGER.info(f"[cost_get_data] ENABLE_JSON_LOGGING = {json_logging_env}")
+        if json_logging_env.lower() == "true":
+            _LOGGER.info("[cost_get_data] Starting JSON logging")
+            start_json_logging()
+        else:
+            _LOGGER.info("[cost_get_data] JSON logging disabled")
+
         result_generator = _cost_get_data_logic(params)
 
         # SpaceONE 프레임워크 호환: 개별 레코드 직접 yield 방식
@@ -452,7 +468,8 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                         # 배치 결과를 청크 버퍼에 추가
                         batch_results = spaceone_formatted["results"]
 
-                        # SpaceONE 프레임워크 호환: 각 레코드를 개별 results 배열로 yield
+                        # 레코드 전처리 (data.cost 제거 및 JSON 로깅)
+                        processed_records = []
                         for record in batch_results:
                             total_records += 1
 
@@ -463,8 +480,20 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
                             ):
                                 del record["data"]["cost"]
 
-                            # 개별 레코드를 results 배열로 감싸서 yield (SpaceONE 프레임워크 요구사항)
-                            yield {"results": [record]}
+                            # JSON 로깅이 활성화된 경우 수집기에 추가
+                            if is_json_logging_active():
+                                log_json_response(record)
+
+                            processed_records.append(record)
+
+                        # 성능 최적화: 배치 단위로 yield (gRPC 메시지 크기 제한 고려)
+                        if PERFORMANCE_CONFIG["enable_dynamic_batch_sizing"]:
+                            # 동적 배치 크기 조정으로 최적화된 yield
+                            yield from _create_optimized_batches(processed_records)
+                        else:
+                            # 기존 방식: 개별 레코드 yield (하위 호환성)
+                            for record in processed_records:
+                                yield {"results": [record]}
 
             except Exception as e:
                 _LOGGER.error(
@@ -488,17 +517,37 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
             _processed_projects.add(processed_project)
 
-        _LOGGER.info(
-            f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records"
-        )
+        # 성능 최적화 효과 로깅
+        if PERFORMANCE_CONFIG["enable_performance_logging"]:
+            if PERFORMANCE_CONFIG["enable_dynamic_batch_sizing"]:
+                _LOGGER.info(
+                    f"[성능최적화] 배치 처리 완료 - 총 {batch_count}개 BigQuery 배치, "
+                    f"{total_records}개 레코드 (최적화된 gRPC 배치로 전송)"
+                )
+            else:
+                _LOGGER.info(
+                    f"[기존방식] 개별 처리 완료 - 총 {batch_count}개 BigQuery 배치, "
+                    f"{total_records}개 레코드 (개별 gRPC 호출로 전송)"
+                )
+        else:
+            _LOGGER.info(
+                f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records"
+            )
 
         # Pod 중복 실행 시 안정성을 위한 처리 지연 추가
         import time
 
         time.sleep(0.1)  # 100ms 지연으로 리소스 경합 방지
 
+        # JSON 로깅 중단 및 파일 저장
+        if is_json_logging_active():
+            stop_json_logging()
+
     except Exception as e:
         _LOGGER.error(f"[cost_get_data] API endpoint failed: {e}")
+        # 예외 발생 시에도 JSON 로깅 중단
+        if is_json_logging_active():
+            stop_json_logging()
         raise
 
 
@@ -925,4 +974,108 @@ def cost_get_linked_accounts(params: dict) -> dict:
 # 사용법:
 # task_options.credits_detail_mode = true
 # task_options.credits_detail_limit = 100 (선택사항)
+
+
+# ============================================================================
+# 성능 최적화 함수들
+# ============================================================================
+
+
+def _estimate_records_size(records: list) -> int:
+    """레코드 리스트의 예상 크기를 바이트 단위로 계산"""
+    if not records:
+        return 0
+
+    try:
+        # 첫 번째 레코드를 기준으로 크기 추정
+        import json
+
+        sample_record = records[0]
+        sample_size = len(json.dumps(sample_record, ensure_ascii=False).encode("utf-8"))
+
+        # 전체 크기 추정 (JSON 구조 오버헤드 포함)
+        estimated_size = sample_size * len(records)
+        estimated_size += 100  # {"results": [...]} 구조 오버헤드
+
+        return estimated_size
+    except Exception:
+        # 추정 실패 시 보수적인 값 반환
+        return len(records) * PERFORMANCE_CONFIG["avg_record_size_bytes"]
+
+
+def _calculate_optimal_batch_size(records: list) -> int:
+    """gRPC 메시지 크기 제한을 고려한 최적 배치 크기 계산"""
+    if not records:
+        return PERFORMANCE_CONFIG["min_batch_size"]
+
+    max_message_size = PERFORMANCE_CONFIG["grpc_message_size_limit"]
+    min_batch_size = PERFORMANCE_CONFIG["min_batch_size"]
+    max_batch_size = PERFORMANCE_CONFIG["max_batch_size"]
+
+    # 단일 레코드 크기 추정
+    try:
+        import json
+
+        sample_record = records[0]
+        single_record_size = len(
+            json.dumps(sample_record, ensure_ascii=False).encode("utf-8")
+        )
+
+        # 안전 마진을 고려한 최적 배치 크기 계산
+        optimal_size = max_message_size // (
+            single_record_size + 50
+        )  # 50바이트 오버헤드
+
+        # 범위 제한 적용
+        optimal_size = max(min_batch_size, min(optimal_size, max_batch_size))
+
+        return optimal_size
+    except Exception:
+        # 계산 실패 시 기본값 반환
+        return PERFORMANCE_CONFIG["grpc_response_batch_size"]
+
+
+def _create_optimized_batches(records: list) -> Generator[dict, None, None]:
+    """레코드 리스트를 최적화된 배치로 분할하여 yield"""
+    if not records:
+        return
+
+    total_records = len(records)
+    optimal_batch_size = _calculate_optimal_batch_size(records)
+
+    # 배치 수 계산
+    batch_count = (total_records + optimal_batch_size - 1) // optimal_batch_size
+
+    if PERFORMANCE_CONFIG["enable_performance_logging"]:
+        _LOGGER.info(
+            f"[성능최적화] {total_records}개 레코드를 {batch_count}개 배치로 처리 (배치당 최대 {optimal_batch_size}개)"
+        )
+
+    # 배치 단위로 레코드 분할
+    for i in range(0, total_records, optimal_batch_size):
+        batch_records = records[i : i + optimal_batch_size]
+        batch_size = len(batch_records)
+
+        # 메시지 크기 검증
+        estimated_size = _estimate_records_size(batch_records)
+        max_size = PERFORMANCE_CONFIG["grpc_message_size_limit"]
+
+        if estimated_size > max_size:
+            # 배치가 너무 큰 경우 더 작게 분할
+            smaller_batch_size = max(1, batch_size // 2)
+            _LOGGER.warning(
+                f"[성능최적화] 배치 크기 자동 조정: {batch_size} → {smaller_batch_size}개 "
+                f"(메시지 크기 제한 초과: {estimated_size:,} > {max_size:,} bytes)"
+            )
+
+            # 재귀적으로 더 작은 배치 생성
+            yield from _create_optimized_batches(batch_records[:smaller_batch_size])
+            if len(batch_records) > smaller_batch_size:
+                yield from _create_optimized_batches(batch_records[smaller_batch_size:])
+        else:
+            # 적절한 크기의 배치 생성
+            batch_result = {"results": batch_records}
+            yield batch_result
+
+
 # =============================================================================
