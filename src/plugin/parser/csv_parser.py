@@ -63,18 +63,27 @@ class CSVParser(BaseParser):
                         mapped_record = field_mapper.map_record(row)
 
                         if "cost" not in mapped_record:
-                            # additional_info에서 cost 복구 시도
-                            cost_value = 0.0
+                            # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
+                            cost_value = 0  # 기본값
                             if "additional_info" in mapped_record and isinstance(
                                 mapped_record["additional_info"], dict
                             ):
                                 cost_after_credits = mapped_record[
                                     "additional_info"
-                                ].get("Cost After Credits", 0)
-                                try:
-                                    cost_value = float(cost_after_credits)
-                                except (ValueError, TypeError):
-                                    cost_value = 0.0
+                                ].get("Cost After Credits")
+                                # 빈 값 처리: "", None, "null" -> 기본값 0
+                                if (
+                                    cost_after_credits is None
+                                    or cost_after_credits == ""
+                                    or (
+                                        isinstance(cost_after_credits, str)
+                                        and cost_after_credits.lower() == "null"
+                                    )
+                                ):
+                                    cost_value = 0
+                                else:
+                                    # 나머지는 원본 데이터 그대로 사용
+                                    cost_value = cost_after_credits
 
                             # 최상위 cost 필드 추가 (첫 번째 위치)
                             new_record = {"cost": cost_value}
@@ -127,18 +136,27 @@ class CSVParser(BaseParser):
                         mapped_record = field_mapper.map_record(row_dict)
 
                         if "cost" not in mapped_record:
-                            # additional_info에서 cost 복구 시도
-                            cost_value = 0.0
+                            # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
+                            cost_value = 0  # 기본값
                             if "additional_info" in mapped_record and isinstance(
                                 mapped_record["additional_info"], dict
                             ):
                                 cost_after_credits = mapped_record[
                                     "additional_info"
-                                ].get("Cost After Credits", 0)
-                                try:
-                                    cost_value = float(cost_after_credits)
-                                except (ValueError, TypeError):
-                                    cost_value = 0.0
+                                ].get("Cost After Credits")
+                                # 빈 값 처리: "", None, "null" -> 기본값 0
+                                if (
+                                    cost_after_credits is None
+                                    or cost_after_credits == ""
+                                    or (
+                                        isinstance(cost_after_credits, str)
+                                        and cost_after_credits.lower() == "null"
+                                    )
+                                ):
+                                    cost_value = 0
+                                else:
+                                    # 나머지는 원본 데이터 그대로 사용
+                                    cost_value = cost_after_credits
 
                             # 최상위 cost 필드 추가 (첫 번째 위치)
                             new_record = {"cost": cost_value}

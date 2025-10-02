@@ -783,20 +783,25 @@ def _ensure_spaceone_record_format(record):
 
 
 def _safe_numeric_convert(value):
-    """안전한 숫자 변환"""
-    if value is None:
-        return 0.0
+    """안전한 숫자 변환: 빈 값은 기본값으로, 나머지는 원본 보존"""
+    # 빈 값 처리: "", None, "null" -> 기본값 0
+    if (
+        value is None
+        or value == ""
+        or (isinstance(value, str) and value.lower() in ("null", "none", "nan"))
+    ):
+        return 0
+
+    # 나머지는 원본 그대로 보존 (극소값도 보존)
     try:
         if isinstance(value, (int, float)):
-            return float(value) if abs(float(value)) >= 1e-10 else 0.0
+            return value  # 원본 그대로
         elif isinstance(value, str):
-            if value.lower() in ("", "null", "none", "nan"):
-                return 0.0
-            return float(value)
+            return float(value)  # 문자열 숫자만 변환
         else:
-            return 0.0
+            return value  # 원본 그대로
     except (ValueError, TypeError):
-        return 0.0
+        return 0
 
 
 def _safe_string_convert(value):

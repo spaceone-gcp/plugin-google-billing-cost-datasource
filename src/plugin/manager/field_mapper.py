@@ -67,16 +67,16 @@ class FieldMapper:
         try:
             # 기본 필드 매핑
             cost_value = self._get_cost_by_option(source_data)
-            # cost 값 원본 보존
+            # cost 값 빈 값 처리: "", None, "null" -> 기본값 0
             if (
                 cost_value is None
                 or cost_value == ""
-                or str(cost_value).lower() == "null"
+                or (isinstance(cost_value, str) and cost_value.lower() == "null")
             ):
                 _LOGGER.debug(
-                    "[FieldMapper] Cost value is None/empty/null, preserving as None"
+                    "[FieldMapper] Cost value is None/empty/null, setting to default value 0"
                 )
-                cost_value = None
+                cost_value = 0
             # NaN이나 inf 체크 (원본 보존)
             try:
                 if isinstance(cost_value, float) and (
@@ -99,8 +99,8 @@ class FieldMapper:
             # 주요 필드들 매핑
             mapped_fields = self._map_core_fields(source_data)
 
-            # 응답 생성 직전 최종 null 체크
-            final_cost = cost_value if cost_value is not None else 0.0
+            # 응답 생성 직전 최종 체크 (이미 위에서 빈 값 처리됨)
+            final_cost = cost_value
 
             # 매핑된 데이터 구성
             mapped_data = {
@@ -263,36 +263,9 @@ class FieldMapper:
         return data
 
     def _decimal_to_clean_float(self, decimal_value):
-        """Decimal을 적절한 정밀도로 반올림하여 깨끗한 float로 변환"""
-        from decimal import ROUND_HALF_UP, Decimal
-
-        if not isinstance(decimal_value, Decimal):
-            return float(decimal_value)
-
-        # 값의 크기에 따라 적절한 정밀도 결정
-        abs_value = abs(decimal_value)
-
-        if abs_value == 0:
-            return decimal_value  # 원본 0 값 보존 (0.0, 0.00 등 정확한 형태 유지)
-        elif abs_value >= 1000:
-            # 큰 값: 소수점 2자리까지
-            precision = 2
-        elif abs_value >= 1:
-            # 중간 값: 소수점 6자리까지
-            precision = 6
-        elif abs_value >= 0.001:
-            # 작은 값: 소수점 9자리까지
-            precision = 9
-        else:
-            # 매우 작은 값: 소수점 12자리까지
-            precision = 12
-
-        # 지정된 정밀도로 반올림
-        quantize_exp = Decimal("0.1") ** precision
-        rounded_decimal = decimal_value.quantize(quantize_exp, rounding=ROUND_HALF_UP)
-
-        # float로 변환
-        return float(rounded_decimal)
+        """금액 데이터는 원본 그대로 보존 (반올림 및 변환 없음)"""
+        # 금액 관련 데이터는 어떠한 변경도 없이 순수한 원본 데이터 사용
+        return decimal_value
 
     def _log_debug_info_once(self, source_data: dict):
         """디버깅 정보를 첫 번째 레코드에서만 로깅"""
@@ -1297,7 +1270,14 @@ class FieldMapper:
             # GCP 빌링 데이터의 Usage Amount 필드 확인
             usage_amount = additional_info.get("Usage Amount")
             # _LOGGER.debug(f"[FieldMapper] DEBUG: Usage Amount value: {usage_amount}")
-            if usage_amount is not None and usage_amount != "":
+            # 빈 값 처리: "", None, "null" -> 기본값 0
+            if (
+                usage_amount is not None
+                and usage_amount != ""
+                and not (
+                    isinstance(usage_amount, str) and usage_amount.lower() == "null"
+                )
+            ):
                 try:
                     usage_value = float(usage_amount)
                     # _LOGGER.debug(f"[FieldMapper] Found Usage Amount in additional_info: {usage_value}")
@@ -1308,21 +1288,32 @@ class FieldMapper:
 
             # Usage Amount In Pricing Units도 확인
             usage_pricing_amount = additional_info.get("Usage Amount In Pricing Units")
-            if usage_pricing_amount is not None and usage_pricing_amount != "":
+            # 빈 값 처리: "", None, "null" -> 기본값 0
+            if (
+                usage_pricing_amount is not None
+                and usage_pricing_amount != ""
+                and not (
+                    isinstance(usage_pricing_amount, str)
+                    and usage_pricing_amount.lower() == "null"
+                )
+            ):
                 try:
                     usage_value = float(usage_pricing_amount)
                     # _LOGGER.debug(f"[FieldMapper] Found Usage Amount In Pricing Units: {usage_value}")
-                    pass
                     return usage_value
                 except (ValueError, TypeError):
                     # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
                     pass
         # 2단계: 기존 usage_quantity 필드 확인 (fallback)
         usage_quantity = source_data.get("usage_quantity")
+        # 빈 값 처리: "", None, "null" -> 기본값 0
         if (
             usage_quantity is not None
             and usage_quantity != ""
-            and str(usage_quantity).lower() != "nan"
+            and not (
+                isinstance(usage_quantity, str)
+                and usage_quantity.lower() in ("null", "nan")
+            )
         ):
             try:
                 usage_value = float(usage_quantity)
@@ -1333,11 +1324,18 @@ class FieldMapper:
                 pass
         # 3단계: usage_amount 필드 확인 (추가 fallback)
         usage_amount_field = source_data.get("usage_amount")
-        if usage_amount_field is not None and usage_amount_field != "":
+        # 빈 값 처리: "", None, "null" -> 기본값 0
+        if (
+            usage_amount_field is not None
+            and usage_amount_field != ""
+            and not (
+                isinstance(usage_amount_field, str)
+                and usage_amount_field.lower() == "null"
+            )
+        ):
             try:
                 usage_value = float(usage_amount_field)
                 # _LOGGER.debug(f"[FieldMapper] Found usage_amount field: {usage_value}")
-                pass
                 return usage_value
             except (ValueError, TypeError):
                 # _LOGGER.warning(f"[FieldMapper] Invalid usage_amount value: {usage_amount_field}")

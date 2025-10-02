@@ -64,21 +64,19 @@ class BaseParser(ABC):
         # data 필드에 list_price와 cost 정보가 포함되었는지 최종 확인
         final_results = []
         for record in validated_records:
-            # cost 필드 절대 보장
+            # cost 필드 보장 (빈 값은 기본값 처리)
             if "cost" not in record:
-                record["cost"] = 0.0
-            elif record["cost"] is None:
-                record["cost"] = 0.0
+                record["cost"] = 0  # 기본값
 
             # data 필드가 올바르게 설정되었는지 확인하고 보장
             if "data" not in record or not isinstance(record["data"], dict):
                 list_price = self._get_list_price_from_record(record)
                 record["data"] = self._create_spaceone_billing_data(record, list_price)
 
-            # data 필드에도 cost가 있는지 확인
+            # data 필드에도 cost가 있는지 확인 (원본 데이터 보존)
             if isinstance(record.get("data"), dict):
                 if "cost" not in record["data"]:
-                    record["data"]["cost"] = record.get("cost", 0.0)
+                    record["data"]["cost"] = record.get("cost")  # 원본 그대로
 
             final_results.append(record)
 
@@ -183,27 +181,17 @@ class BaseParser(ABC):
         return data_structure
 
     def _convert_to_numeric(self, value):
-        """값을 적절한 숫자 타입으로 변환"""
-        if value is None or value == "":
-            return 0.0
+        """금액 데이터 처리: 빈 값은 기본값으로, 나머지는 원본 보존"""
+        # 빈 값 처리: "", None, "null" -> 숫자 타입 기본값 0
+        if (
+            value is None
+            or value == ""
+            or (isinstance(value, str) and value.lower() == "null")
+        ):
+            return 0
 
-        try:
-            # 이미 숫자인 경우 그대로 반환
-            if isinstance(value, (int, float)):
-                return float(value)
-
-            # 문자열인 경우 숫자로 변환
-            if isinstance(value, str):
-                cleaned_value = value.strip()
-                if not cleaned_value:
-                    return 0.0
-                return float(cleaned_value)
-
-            # 기타 타입은 float로 변환 시도
-            return float(value)
-
-        except (ValueError, TypeError):
-            return 0.0
+        # 나머지 금액 관련 데이터는 원본 그대로 보존
+        return value
 
     def _sanitize_record_for_serialization(self, record: dict) -> dict:
         """레코드를 JSON 직렬화 가능한 타입으로 변환"""

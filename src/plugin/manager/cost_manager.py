@@ -1482,10 +1482,16 @@ class CostManager(BaseManager):
         """완전히 단순화된 SpaceONE 빌링 응답 생성 (test_correct_format.json 기준)"""
         try:
             cost_value = getattr(row, "cost", None)
-            if cost_value is None or cost_value == "":
+            # 빈 값 처리: "", None, "null" -> 기본값 0
+            if (
+                cost_value is None
+                or cost_value == ""
+                or (isinstance(cost_value, str) and cost_value.lower() == "null")
+            ):
                 _LOGGER.info(
-                    "[_make_cost_data] Cost was None/empty, preserving as None for transparency"
+                    "[_make_cost_data] Cost was None/empty/null, setting to default value 0"
                 )
+                cost_value = 0
 
             # cost_value는 어떠한 변환도 없이 원본 그대로 유지
             # _LOGGER.debug(f"[_make_cost_data] Cost value preserved as absolute original: {cost_value}")

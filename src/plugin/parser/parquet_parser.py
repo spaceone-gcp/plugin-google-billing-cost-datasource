@@ -89,18 +89,27 @@ class ParquetParser(BaseParser):
                     mapped_record = field_mapper.map_record(row_dict)
 
                     if "cost" not in mapped_record:
-                        # additional_info에서 cost 복구 시도
-                        cost_value = 0.0
+                        # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
+                        cost_value = 0  # 기본값
                         if "additional_info" in mapped_record and isinstance(
                             mapped_record["additional_info"], dict
                         ):
                             cost_after_credits = mapped_record["additional_info"].get(
-                                "Cost After Credits", 0
+                                "Cost After Credits"
                             )
-                            try:
-                                cost_value = float(cost_after_credits)
-                            except (ValueError, TypeError):
-                                cost_value = 0.0
+                            # 빈 값 처리: "", None, "null" -> 기본값 0
+                            if (
+                                cost_after_credits is None
+                                or cost_after_credits == ""
+                                or (
+                                    isinstance(cost_after_credits, str)
+                                    and cost_after_credits.lower() == "null"
+                                )
+                            ):
+                                cost_value = 0
+                            else:
+                                # 나머지는 원본 데이터 그대로 사용
+                                cost_value = cost_after_credits
 
                         # 최상위 cost 필드 추가 (첫 번째 위치)
                         new_record = {"cost": cost_value}
@@ -115,10 +124,10 @@ class ParquetParser(BaseParser):
                     if "data" not in mapped_record or not isinstance(
                         mapped_record["data"], dict
                     ):
-                        # data 필드에 cost 정보 포함
+                        # data 필드에 cost 정보 포함 (원본 데이터 보존)
                         mapped_record["data"] = {
-                            "cost": str(mapped_record.get("cost", 0.0)),
-                            "list_price": str(mapped_record.get("cost", 0.0)),
+                            "cost": mapped_record.get("cost"),
+                            "list_price": mapped_record.get("cost"),
                         }
                     batch_records.append(mapped_record)
                     current_count += 1
@@ -338,23 +347,27 @@ class ParquetParser(BaseParser):
             return str(value) if value is not None else ""
 
     def _convert_to_numeric_safe(self, value):
-        """값을 안전하게 숫자로 변환"""
-        if value is None or value == "":
-            return 0.0
+        """값을 안전하게 숫자로 변환: 빈 값은 기본값으로, 나머지는 원본 보존"""
+        # 빈 값 처리: "", None, "null" -> 기본값 0
+        if (
+            value is None
+            or value == ""
+            or (isinstance(value, str) and value.lower() in ("null", "nan"))
+        ):
+            return 0
 
+        # 나머지는 원본 그대로 보존
         try:
             if isinstance(value, (int, float)):
-                return float(value)
-
+                return value  # 원본 그대로
             if isinstance(value, str):
                 cleaned_value = value.strip()
-                if not cleaned_value or cleaned_value.lower() == "nan":
-                    return 0.0
-                return float(cleaned_value)
-
-            return float(value)
+                if not cleaned_value:
+                    return 0
+                return float(cleaned_value)  # 문자열 숫자만 변환
+            return value  # 원본 그대로
         except (ValueError, TypeError):
-            return 0.0
+            return 0
 
     def _convert_to_string_safe(self, value):
         """값을 안전하게 문자열로 변환"""
