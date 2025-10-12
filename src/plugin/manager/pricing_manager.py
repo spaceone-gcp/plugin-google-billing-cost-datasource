@@ -6,7 +6,6 @@ Google Cloud Pricing Data 분석을 위한 매니저
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from spaceone.core.manager import BaseManager
 
@@ -51,10 +50,6 @@ class PricingManager(BaseManager):
 
             start_date = task_options.get("start", "")
             project_id = task_options.get("project_id", "*")
-
-            _LOGGER.info(
-                f"[PricingManager] Starting discount analysis for {start_date}"
-            )
 
             # 실제 청구 데이터 조회
             billing_data = self._get_billing_data(task_options)
@@ -115,7 +110,7 @@ class PricingManager(BaseManager):
 
         except Exception as e:
             _LOGGER.error(f"[PricingManager] Error in discount analysis: {str(e)}")
-            raise ERROR_INVALID_ARGUMENT(key="discount_analysis", value=str(e))
+            raise ERROR_INVALID_ARGUMENT(key="discount_analysis", value=str(e)) from e
 
     def forecast_costs(
         self, options: dict, secret_data: dict, usage_scenarios: list[dict]
@@ -134,10 +129,6 @@ class PricingManager(BaseManager):
         """
         try:
             self._initialize_connectors(options, secret_data)
-
-            _LOGGER.info(
-                f"[PricingManager] Starting cost forecasting for {len(usage_scenarios)} scenarios"
-            )
 
             forecast_results = []
 
@@ -204,10 +195,10 @@ class PricingManager(BaseManager):
 
         except Exception as e:
             _LOGGER.error(f"[PricingManager] Error in cost forecasting: {str(e)}")
-            raise ERROR_INVALID_ARGUMENT(key="cost_forecasting", value=str(e))
+            raise ERROR_INVALID_ARGUMENT(key="cost_forecasting", value=str(e)) from e
 
     def get_service_pricing_report(
-        self, options: dict, secret_data: dict, service_filter: Optional[str] = None
+        self, options: dict, secret_data: dict, service_filter: str | None = None
     ) -> dict:
         """
         서비스별 가격 정보 리포트 생성
@@ -269,7 +260,7 @@ class PricingManager(BaseManager):
 
         except Exception as e:
             _LOGGER.error(f"[PricingManager] Error generating pricing report: {str(e)}")
-            raise ERROR_INVALID_ARGUMENT(key="pricing_report", value=str(e))
+            raise ERROR_INVALID_ARGUMENT(key="pricing_report", value=str(e)) from e
 
     def _initialize_connectors(self, options: dict, secret_data: dict):
         """커넥터 초기화"""

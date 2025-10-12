@@ -63,8 +63,7 @@ class CSVParser(BaseParser):
                         mapped_record = field_mapper.map_record(row)
 
                         if "cost" not in mapped_record:
-                            # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
-                            cost_value = 0  # 기본값
+                            cost_value = 0
                             if "additional_info" in mapped_record and isinstance(
                                 mapped_record["additional_info"], dict
                             ):
@@ -136,8 +135,7 @@ class CSVParser(BaseParser):
                         mapped_record = field_mapper.map_record(row_dict)
 
                         if "cost" not in mapped_record:
-                            # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
-                            cost_value = 0  # 기본값
+                            cost_value = 0
                             if "additional_info" in mapped_record and isinstance(
                                 mapped_record["additional_info"], dict
                             ):
@@ -199,7 +197,9 @@ class CSVParser(BaseParser):
 
         except Exception as e:
             _LOGGER.error(f"[CSVParser] Failed to parse CSV stream: {e}")
-            raise ERROR_FILE_PARSING_FAILED(file_path="csv_stream", reason=str(e))
+            raise ERROR_FILE_PARSING_FAILED(
+                file_path="csv_stream", reason=str(e)
+            ) from e
         finally:
             # TextIOWrapper 정리 (원본 스트림은 닫지 않음)
             if hasattr(text_stream, "detach"):

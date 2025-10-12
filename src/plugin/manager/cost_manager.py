@@ -36,8 +36,8 @@ class CostManager(BaseManager):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.bigquery_connector = BigqueryConnector()
-        self.gcs_connector = GcsConnector()  # 추가
-        self.field_mapper = None  # 추가
+        self.gcs_connector = GcsConnector()
+        self.field_mapper = None
         self.billing_export_project_id = None
         self.billing_dataset = None
         self.billing_table = None
@@ -64,28 +64,15 @@ class CostManager(BaseManager):
 
         # JobManager에서 계산된 start 값이 있으면 사용, 없으면 자체 계산
         start_month = options.get("start") or self._get_start_month()
-        if options.get("start"):
-            _LOGGER.info(
-                f"[get_linked_accounts] JobManager에서 전달된 start 사용: {start_month}"
-            )
-        else:
-            _LOGGER.info(f"[get_linked_accounts] 자체 계산된 start 사용: {start_month}")
 
         query = self._create_linked_accounts_google_sql(start_month)
 
-        # get_linked_accounts 쿼리 실행 로깅
-        _LOGGER.info("=" * 80)
-        _LOGGER.info("[QUERY #0] CostManager - 링크된 계정(프로젝트) 목록 조회")
-        _LOGGER.info(f"[get_linked_accounts] 시작일: {start_month}")
-        _LOGGER.info(
-            f"[get_linked_accounts] PARTITIONDATE 범위: {self._get_partition_date_range(start_month)}"
-        )
-        _LOGGER.info(f"[get_linked_accounts] Query: {query}")
-        _LOGGER.info("=" * 80)
+        # 쿼리 디버깅용 로깅 (DEBUG 레벨)
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(f"[get_linked_accounts] Query: {query}")
 
         response_stream = self.bigquery_connector.read_df_from_bigquery(query)
 
-        _LOGGER.info(f"[QUERY #0 완료] 링크된 계정 수: {len(response_stream)}개")
         for _, row in response_stream.iterrows():
             if row.id is not None:
                 linked_accounts.append({"account_id": row.id, "name": row.project_name})
@@ -172,7 +159,6 @@ class CostManager(BaseManager):
             # 기존 방식: 시작일만 사용 (하위 호환성)
             start = self._normalize_date_to_month(original_start)
             end = None
-            _LOGGER.info(f"[Re-sync] 기존 방식 - 시작일만: {original_start} -> {start}")
         self.billing_export_project_id = task_options["billing_export_project_id"]
         self.billing_dataset = self._extract_dataset_id(
             task_options["billing_dataset_id"]
@@ -187,11 +173,12 @@ class CostManager(BaseManager):
 
         query = self._create_google_sql(start, end)
 
-        # BigQuery 쿼리 실행 로깅 (간소화)
-        _LOGGER.info(
-            f"[BigQuery] 프로젝트: {self.target_project_id}, 기간: {start}"
-            + (f"~{end}" if end else "")
-        )
+        # 프로젝트 및 기간 정보는 DEBUG 레벨로 이동
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                f"[BigQuery] 프로젝트: {self.target_project_id}, 기간: {start}"
+                + (f"~{end}" if end else "")
+            )
         validated_start = self._validate_and_fix_date_range(start)
         validated_end = self._validate_and_fix_date_range(end) if end else None
         partition_range = self._get_partition_date_range(validated_start, validated_end)
@@ -211,17 +198,9 @@ class CostManager(BaseManager):
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
             query_execution_time = time.time() - query_start_time
 
-            # 쿼리 완료 로깅
-            _LOGGER.info(
-                f"[QUERY 완료] 프로젝트 '{self.target_project_id}' - 실행시간: {query_execution_time:.2f}초, 조회 건수: {len(response_stream)}건"
-            )
-
             # 결과 데이터 건수 확인을 위한 카운터
             row_count = 0
 
-            _LOGGER.info(
-                f"[BigQuery] 쿼리 실행 완료 (소요시간: {query_execution_time:.2f}초)"
-            )
             _LOGGER.info(f"[BigQuery] 반환된 DataFrame 크기: {len(response_stream)} 행")
 
             # 빈 결과 처리 개선
@@ -347,8 +326,6 @@ class CostManager(BaseManager):
                     pass
                 yield batch_result
 
-            _LOGGER.info(f"[BigQuery] 처리 완료 - 총 {row_count}건의 데이터 처리됨")
-
         except Exception as e:
             query_execution_time = time.time() - query_start_time
             _LOGGER.error(
@@ -431,9 +408,6 @@ class CostManager(BaseManager):
 
                 # 각 파일을 순차적으로 처리 (동시성 제어 적용)
                 total_files = len(files_to_process)
-                _LOGGER.info(
-                    f"[CostManager] Starting GCS file processing: {total_files} files to process"
-                )
 
                 for file_index, file_info in enumerate(files_to_process, 1):
                     file_name = file_info.get("name", "unknown")
@@ -685,7 +659,6 @@ class CostManager(BaseManager):
                 parsing_options = task_options.get("parsing_options", {})
 
                 # 데이터 스트림 처리 - BigQuery results 구조로 변환
-                _LOGGER.info("[CostManager] Starting HTTP file processing")
                 total_processed_count = 0
 
                 for batch_result in parser.parse_stream(
@@ -703,25 +676,20 @@ class CostManager(BaseManager):
                             batch_result
                         )
 
-                        # HTTP 배치 응답 레코드 로깅 (모든 레코드)
+                        # HTTP 배치 처리 완료 (성공 시 조용히)
                         if converted_result and "results" in converted_result:
                             response_size = len(converted_result["results"])
-                            _LOGGER.info(
-                                f"[HTTP-Response] 배치 응답 레코드 수: {response_size}"
-                            )
-                            for i, record in enumerate(
-                                converted_result["results"]
-                            ):  # 모든 레코드 로깅
-                                _LOGGER.info(
-                                    f"[HTTP-Response] 레코드 {i + 1}: {record}"
+                            # 성공적인 처리는 DEBUG 레벨로 이동
+                            if _LOGGER.isEnabledFor(logging.DEBUG):
+                                _LOGGER.debug(
+                                    f"[HTTP] 배치 처리 완료: {response_size}건"
                                 )
 
                         yield converted_result
 
-                _LOGGER.info(
-                    f"[CostManager] Completed HTTP file processing: "
-                    f"Total {total_processed_count:,} records processed"
-                )
+                # HTTP 파일 처리 완료 (성공 시 조용히)
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug(f"[HTTP] 파일 처리 완료: {total_processed_count:,}건")
 
                 # 최종 일별 카운트 요약 로깅
                 if hasattr(self, "field_mapper") and self.field_mapper:
@@ -860,7 +828,6 @@ class CostManager(BaseManager):
 
     def _get_credits_total_from_record(self, record: dict):
         """레코드에서 크레딧 총합 금액 추출"""
-        # additional_info에서 Credits Total Amount 찾기
         additional_info = record.get("additional_info", {})
         credits_total = additional_info.get("Credits Total Amount")
 
@@ -871,7 +838,6 @@ class CostManager(BaseManager):
 
     def _get_usage_amount_from_record(self, record: dict):
         """레코드에서 사용량 추출"""
-        # additional_info에서 Usage Amount 찾기
         additional_info = record.get("additional_info", {})
         usage_amount = additional_info.get("Usage Amount")
 
@@ -882,7 +848,6 @@ class CostManager(BaseManager):
 
     def _get_usage_pricing_amount_from_record(self, record: dict):
         """레코드에서 가격 단위 사용량 추출"""
-        # additional_info에서 Usage Amount in Pricing Units 찾기
         additional_info = record.get("additional_info", {})
         usage_pricing_amount = additional_info.get("Usage Amount in Pricing Units")
 
@@ -1544,7 +1509,6 @@ class CostManager(BaseManager):
             #     if isinstance(record.get(key), float):
             #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record[key]}")
 
-            # # additional_info의 극소값도 원본 그대로 보존
             # for key in ["Cost After Credits", "Cost At List"]:
             #     if isinstance(record["additional_info"].get(key), float):
             #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record['additional_info'][key]}")

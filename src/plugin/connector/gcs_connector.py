@@ -301,7 +301,7 @@ class GcsConnector(BaseConnector):
         format_type = self._detect_file_format(file_name)
         return format_type in GCS_CONFIG["supported_formats"]
 
-    def _detect_file_format(self, file_name: str) -> Optional[str]:
+    def _detect_file_format(self, file_name: str) -> str | None:
         """파일명으로 파일 형식 감지"""
         # 압축 확장자 제거 후 파일 형식 감지
         name_lower = file_name.lower()
@@ -319,7 +319,7 @@ class GcsConnector(BaseConnector):
 
         return None
 
-    def _detect_compression(self, file_name: str) -> Optional[str]:
+    def _detect_compression(self, file_name: str) -> str | None:
         """파일명으로 압축 형식 감지"""
         name_lower = file_name.lower()
         for compression in GCS_CONFIG["supported_compressions"]:

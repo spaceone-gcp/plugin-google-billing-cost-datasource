@@ -363,8 +363,6 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
             ):
                 yield record
 
-            _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드 조회 완료")
-
         else:
             # 기본 모드: 기존 최적화된 집계 데이터 조회
             _LOGGER.info("[_cost_get_data_logic] 기본 모드로 실행")
@@ -426,14 +424,13 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         if missing_params:
             raise ValueError(f"Missing required parameters: {missing_params}")
 
-        # JSON 로깅 시작 (환경변수로 제어)
+        # JSON 로깅 시작 (환경변수로 제어) - 간소화
         json_logging_env = os.getenv("ENABLE_JSON_LOGGING", "false")
-        _LOGGER.info(f"[cost_get_data] ENABLE_JSON_LOGGING = {json_logging_env}")
         if json_logging_env.lower() == "true":
-            _LOGGER.info("[cost_get_data] Starting JSON logging")
+            _LOGGER.debug("[cost_get_data] Starting JSON logging")
             start_json_logging()
         else:
-            _LOGGER.info("[cost_get_data] JSON logging disabled")
+            _LOGGER.debug("[cost_get_data] JSON logging disabled")
 
         result_generator = _cost_get_data_logic(params)
 
@@ -506,7 +503,7 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             _LOGGER.warning("[cost_get_data] No results to yield")
             # 빈 결과도 개별 레코드 형태로 처리하지 않음 (SpaceONE 프레임워크가 자동 처리)
 
-        # 처리 완료 프로젝트 수 검증 로깅 (JobManager와 동일한 형태)
+        # 처리 완료 프로젝트 수 검증
         task_options = params.get("task_options", {})
         processed_project = task_options.get("project_id", "unknown")
 
@@ -517,20 +514,9 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
             _processed_projects.add(processed_project)
 
-        # 성능 최적화 효과 로깅
+        # 성능 최적화 효과 로깅 (간소화됨)
         if PERFORMANCE_CONFIG["enable_performance_logging"]:
-            if PERFORMANCE_CONFIG["enable_dynamic_batch_sizing"]:
-                _LOGGER.info(
-                    f"[성능최적화] 배치 처리 완료 - 총 {batch_count}개 BigQuery 배치, "
-                    f"{total_records}개 레코드 (최적화된 gRPC 배치로 전송)"
-                )
-            else:
-                _LOGGER.info(
-                    f"[기존방식] 개별 처리 완료 - 총 {batch_count}개 BigQuery 배치, "
-                    f"{total_records}개 레코드 (개별 gRPC 호출로 전송)"
-                )
-        else:
-            _LOGGER.info(
+            _LOGGER.debug(
                 f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records"
             )
 
@@ -598,7 +584,6 @@ def _convert_to_spaceone_format(batch_result, batch_count):
         for record in results:
             if isinstance(record, dict):
                 if "cost" not in record:
-                    # additional_info에서 cost 복구 시도
                     cost_value = 0.0
                     if "additional_info" in record and isinstance(
                         record["additional_info"], dict
@@ -676,7 +661,6 @@ def _ensure_spaceone_record_format(record):
 
         currency_value = record.get("currency")
         if currency_value is None or currency_value == "":
-            # additional_info에서 Currency 필드 추출 시도
             currency_value = record.get("additional_info", {}).get("Currency", "USD")
             if currency_value != "USD":
                 _LOGGER.debug(

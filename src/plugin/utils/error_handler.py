@@ -8,7 +8,7 @@
 import logging
 import time
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def retry_on_failure(
     delay: float = 1.0,
     backoff_factor: float = 2.0,
     exceptions: tuple[Exception, ...] = (Exception,),
-    on_retry: Optional[Callable[[int, Exception], None]] = None,
+    on_retry: Callable[[int, Exception], None] | None = None,
 ) -> Callable:
     """
     함수 실행 실패 시 재시도하는 데코레이터
@@ -193,7 +193,6 @@ def validate_job_response(response: dict) -> bool:
         _LOGGER.error("[validate_job_response] 'changed' field is not a list")
         return False
 
-    # changed 필드의 start 값 길이 검증 (SpaceONE Job 스키마 요구사항)
     for changed_item in response["changed"]:
         if isinstance(changed_item, dict) and "start" in changed_item:
             start_value = changed_item["start"]

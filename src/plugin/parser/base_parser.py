@@ -160,7 +160,6 @@ class BaseParser(ABC):
             "cost": self._convert_to_numeric(record.get("cost", 0)),
         }
 
-        # 추가 비용 정보 (Google Cloud Billing 특화)
         cost_after_credits = record.get("cost_after_credits")
         if cost_after_credits is not None and cost_after_credits != "":
             data_structure["cost_after_credits"] = self._convert_to_numeric(

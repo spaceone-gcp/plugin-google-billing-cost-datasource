@@ -310,8 +310,8 @@ class JobManager(BaseManager):
 
         try:
             return datetime.strptime(start_str, date_format)
-        except Exception:
-            raise ERROR_INVALID_PARAMETER_TYPE(key="start", type=date_format)
+        except Exception as e:
+            raise ERROR_INVALID_PARAMETER_TYPE(key="start", type=date_format) from e
 
     @staticmethod
     def _check_options(options):
@@ -603,7 +603,6 @@ class JobManager(BaseManager):
 
                 tasks.append({"task_options": task_options})
 
-            # 변경 사항 기록 - start 필드 포함 (TasksResponse 스키마 요구사항)
             current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
             # start 파라미터 처리 - BigQuery 모드와 동일한 _get_start_month 함수 사용

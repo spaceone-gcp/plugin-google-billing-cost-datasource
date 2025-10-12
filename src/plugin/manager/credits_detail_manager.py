@@ -38,9 +38,6 @@ class CreditsDetailManager(BaseManager):
         self.billing_export_project_id = billing_export_project_id
         self.billing_dataset = billing_dataset
         self.billing_table = billing_table
-        _LOGGER.info(
-            f"[CreditsDetailManager] 초기화 완료 - 테이블: {billing_export_project_id}.{billing_dataset}.{billing_table}"
-        )
 
     def get_credits_detail(
         self,
@@ -65,9 +62,6 @@ class CreditsDetailManager(BaseManager):
         Yields:
             Credits Detail 정보가 포함된 레코드들
         """
-        _LOGGER.info(
-            f"[CreditsDetailManager] Credits Detail 조회 시작 - {start_date} ~ {end_date or start_date}"
-        )
 
         try:
             # SQL 쿼리 생성
@@ -79,9 +73,6 @@ class CreditsDetailManager(BaseManager):
 
             # BigQuery 실행
             response_stream = self.bigquery_connector.read_df_from_bigquery(query)
-            _LOGGER.info(
-                f"[CreditsDetailManager] 쿼리 실행 완료 - {len(response_stream)} 행 조회"
-            )
 
             # 결과 처리 및 반환
             for _, row in response_stream.iterrows():
@@ -112,7 +103,6 @@ class CreditsDetailManager(BaseManager):
 
         date_condition = f"usage_start_time >= '{start_date}-01' AND usage_start_time < '{end_date}-32'"
 
-        # 추가 필터 조건들
         where_conditions = [date_condition]
 
         if project_id:
@@ -260,10 +250,6 @@ class CreditsDetailManager(BaseManager):
                 "period": f"{start_date} ~ {end_date or start_date}",
                 "project_id": project_id or "ALL",
             }
-
-            _LOGGER.info(
-                f"[CreditsDetailManager] Credits 요약 완료: {summary['total_records_with_credits']}건, 총액 {summary['total_credits_amount']}"
-            )
 
             return summary
 

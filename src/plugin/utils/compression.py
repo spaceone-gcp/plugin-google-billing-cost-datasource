@@ -1,7 +1,7 @@
 import gzip
 import logging
 from io import BytesIO
-from typing import IO, Optional
+from typing import IO
 
 from ..conf.cost_conf import GCS_CONFIG
 from ..error.cost import ERROR_UNSUPPORTED_FILE_FORMAT
@@ -13,9 +13,7 @@ class CompressionHandler:
     """파일 압축 처리 유틸리티"""
 
     @staticmethod
-    def detect_compression(
-        file_name: str, content_sample: bytes = None
-    ) -> Optional[str]:
+    def detect_compression(file_name: str, content_sample: bytes = None) -> str | None:
         """파일명과 내용으로 압축 형식 감지
 
         Args:
@@ -158,7 +156,7 @@ class CompressionHandler:
                 stream.seek(0)
                 return stream
             except Exception:
-                raise e
+                raise e from None
         except Exception as e:
             _LOGGER.error(f"[CompressionHandler] GZIP decompression failed: {e}")
             # 압축 해제 실패 시 원본 스트림 반환 시도
@@ -166,7 +164,7 @@ class CompressionHandler:
                 stream.seek(0)
                 return stream
             except Exception:
-                raise e
+                raise e from None
 
     @staticmethod
     def _decompress_snappy(stream: IO) -> IO:
@@ -221,7 +219,7 @@ class CompressionHandler:
                 stream.seek(0)
                 return stream
             except Exception:
-                raise e
+                raise e from None
 
     @staticmethod
     def _decompress_zstd(stream: IO) -> IO:
@@ -273,7 +271,7 @@ class CompressionHandler:
                 stream.seek(0)
                 return stream
             except Exception:
-                raise e
+                raise e from None
 
     @staticmethod
     def is_compressed_file(file_name: str, content_sample: bytes = None) -> bool:

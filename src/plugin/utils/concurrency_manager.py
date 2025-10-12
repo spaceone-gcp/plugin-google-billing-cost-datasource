@@ -8,6 +8,7 @@ from typing import Optional
 
 _LOGGER = logging.getLogger("spaceone")
 
+
 class ConcurrencyManager:
     """파일 처리 동시성 제어 및 중복 요청 관리"""
 
@@ -91,7 +92,7 @@ class ConcurrencyManager:
 
     def get_cached_session(
         self, project_id: str, bucket_name: str, max_age: float = 300.0
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """캐시된 GCS 세션 조회 (기본 5분 TTL)"""
         session_key = self._get_session_key(project_id, bucket_name)
 

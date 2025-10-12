@@ -81,8 +81,7 @@ class JSONParser(BaseParser):
                 mapped_record = field_mapper.map_record(record)
 
                 if "cost" not in mapped_record:
-                    # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
-                    cost_value = 0  # 기본값
+                    cost_value = 0
                     if "additional_info" in mapped_record and isinstance(
                         mapped_record["additional_info"], dict
                     ):
@@ -192,7 +191,7 @@ class JSONParser(BaseParser):
         except json.JSONDecodeError as e:
             raise ERROR_FILE_PARSING_FAILED(
                 file_path="json_stream", reason=f"Invalid JSON format: {e}"
-            )
+            ) from e
 
     def _detect_json_lines_format(self, text_stream: IO) -> bool:
         """JSON Lines 형식 자동 감지"""

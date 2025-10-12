@@ -87,7 +87,6 @@ class BigqueryConnector(BaseConnector):
         BigqueryConnector._query_counter += 1
         current_query_num = BigqueryConnector._query_counter
 
-        _LOGGER.info(f"[BigQuery 커넥터] 쿼리 #{current_query_num} 실행 시작")
         _LOGGER.debug(f"[BigqueryConnector] 프로젝트 ID: {self.project_id}")
 
         try:
@@ -98,9 +97,6 @@ class BigqueryConnector(BaseConnector):
                 credentials=self.credentials,
                 max_results=None,  # 결과 수 제한 없음 (지원됨)
                 progress_bar_type=None,  # 프로그레스바 비활성화 (기본값: 'tqdm', None으로 비활성화)
-            )
-            _LOGGER.info(
-                f"[BigQuery 커넥터] 쿼리 #{current_query_num} 실행 완료 - {len(result_df)}행 조회"
             )
             _LOGGER.debug(
                 f"[BigqueryConnector] 쿼리 실행 성공 - DataFrame 크기: {len(result_df)} 행, {len(result_df.columns)} 열"
@@ -262,9 +258,6 @@ class BigqueryConnector(BaseConnector):
                 # 실패한 경우 원본 값 유지
                 continue
 
-        _LOGGER.debug(
-            f"[BigqueryConnector] 데이터 타입 표준화 완료 - {len(standardized_df)} 행"
-        )
         return standardized_df
 
     def _clean_float_precision(self, value):

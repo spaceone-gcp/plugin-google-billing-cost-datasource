@@ -29,7 +29,7 @@ class JSONLogCollector:
         with self.lock:
             self.collected_responses = []
             self.is_collecting = True
-            _LOGGER.info(
+            _LOGGER.debug(
                 f"[JSONLogCollector] Started collecting JSON responses to {self.output_file}"
             )
 
@@ -73,7 +73,7 @@ class JSONLogCollector:
 
                 _LOGGER.info(
                     f"[JSONLogCollector] Saved {len(self.collected_responses)} responses "
-                    f"to {self.output_file} in valid JSON array format"
+                    f"to {self.output_file}"
                 )
 
             except Exception as e:

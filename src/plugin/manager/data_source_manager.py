@@ -94,7 +94,7 @@ class DataSourceManager(BaseManager):
     """
 
     @staticmethod
-    def init_response(options: dict, domain_id: Optional[str] = None) -> dict:
+    def init_response(options: dict, domain_id: str | None = None) -> dict:
         """데이터 소스 초기화 응답을 생성합니다.
 
         Args:
@@ -143,7 +143,6 @@ class DataSourceManager(BaseManager):
             ValueError: 필수 파라미터가 누락되거나 잘못된 경우
             Exception: 검증 과정에서 오류가 발생한 경우
         """
-        _LOGGER.info("[DataSourceManager.verify_plugin] Starting plugin verification")
 
         try:
             # 1. 기본 파라미터 검증

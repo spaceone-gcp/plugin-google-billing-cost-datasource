@@ -28,7 +28,7 @@ class ParquetParser(BaseParser):
             매핑된 비용 데이터 레코드
         """
         columns = kwargs.get("columns", None)
-        # filters = kwargs.get("filters", None)  # TODO: 향후 필터링 기능 구현 시 사용
+        # filters = kwargs.get("filters", None)
 
         try:
             # pyarrow 동적 임포트 (선택적 의존성)
@@ -51,7 +51,7 @@ class ParquetParser(BaseParser):
             processed_count = 0
 
             # 배치 크기 조정 (Parquet은 일반적으로 큰 배치가 효율적)
-            batch_size = max(self.chunk_size, 500)
+            batch_size = max(self.chunk_size, 1000)
 
             for batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=columns, use_pandas_metadata=True
@@ -89,8 +89,7 @@ class ParquetParser(BaseParser):
                     mapped_record = field_mapper.map_record(row_dict)
 
                     if "cost" not in mapped_record:
-                        # additional_info에서 cost 복구 시도 (빈 값은 기본값 처리)
-                        cost_value = 0  # 기본값
+                        cost_value = 0
                         if "additional_info" in mapped_record and isinstance(
                             mapped_record["additional_info"], dict
                         ):

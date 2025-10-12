@@ -6,7 +6,7 @@ Google Cloud의 cloud_pricing_export 테이블에서 가격 정보를 조회하�
 import logging
 from collections.abc import Generator
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 import pandas_gbq
 from google.oauth2 import service_account
@@ -60,9 +60,9 @@ class PricingConnector(BaseConnector):
 
     def get_pricing_data(
         self,
-        service_id: Optional[str] = None,
-        sku_id: Optional[str] = None,
-        date: Optional[str] = None,
+        service_id: str | None = None,
+        sku_id: str | None = None,
+        date: str | None = None,
     ) -> Generator[dict, None, None]:
         """
         cloud_pricing_export 테이블에서 가격 정보 조회
@@ -92,10 +92,10 @@ class PricingConnector(BaseConnector):
 
         except Exception as e:
             _LOGGER.error(f"[PricingConnector] Error getting pricing data: {str(e)}")
-            raise ERROR_INVALID_ARGUMENT(key="pricing_query", value=str(e))
+            raise ERROR_INVALID_ARGUMENT(key="pricing_query", value=str(e)) from e
 
     def get_service_pricing_summary(
-        self, date: Optional[str] = None
+        self, date: str | None = None
     ) -> dict[str, list[dict]]:
         """
         서비스별 가격 정보 요약 조회
@@ -138,10 +138,12 @@ class PricingConnector(BaseConnector):
             _LOGGER.error(
                 f"[PricingConnector] Error getting service pricing summary: {str(e)}"
             )
-            raise ERROR_INVALID_ARGUMENT(key="service_summary_query", value=str(e))
+            raise ERROR_INVALID_ARGUMENT(
+                key="service_summary_query", value=str(e)
+            ) from e
 
     def compare_billing_vs_pricing(
-        self, billing_data: dict, pricing_date: Optional[str] = None
+        self, billing_data: dict, pricing_date: str | None = None
     ) -> dict:
         """
         실제 청구 데이터와 정가 비교 분석
@@ -206,7 +208,7 @@ class PricingConnector(BaseConnector):
             }
 
     def _build_pricing_query(
-        self, service_id: Optional[str], sku_id: Optional[str], date: Optional[str]
+        self, service_id: str | None, sku_id: str | None, date: str | None
     ) -> str:
         """Pricing Data 조회 쿼리 생성"""
 
@@ -245,7 +247,7 @@ class PricingConnector(BaseConnector):
 
         return query
 
-    def _build_service_summary_query(self, date: Optional[str]) -> str:
+    def _build_service_summary_query(self, date: str | None) -> str:
         """서비스별 가격 요약 쿼리 생성"""
 
         if date:
@@ -365,4 +367,4 @@ class PricingConnector(BaseConnector):
 
         except Exception as e:
             _LOGGER.error(f"[PricingConnector] Error listing pricing tables: {str(e)}")
-            raise ERROR_INVALID_ARGUMENT(key="list_tables", value=str(e))
+            raise ERROR_INVALID_ARGUMENT(key="list_tables", value=str(e)) from e
