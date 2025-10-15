@@ -279,11 +279,15 @@ class BaseParser(ABC):
             # 청크 크기를 줄여야 함
             new_chunk_size = max(50, int(self.chunk_size * 0.5))  # 더 적극적으로 감소
             if new_chunk_size != self.chunk_size:
+                old_chunk_size = self.chunk_size
                 self.chunk_size = new_chunk_size
-                _LOGGER.warning(
-                    f"[BaseParser] Chunk size reduced to {new_chunk_size} "
-                    f"(estimated message size: {estimated_size:,} bytes)"
-                )
+                # 첫 번째 변경 시에만 로깅
+                if not hasattr(self, "_chunk_size_reduced_logged"):
+                    _LOGGER.warning(
+                        f"[BaseParser] Chunk size reduced from {old_chunk_size} to {new_chunk_size} "
+                        f"(estimated message size: {estimated_size:,} bytes)"
+                    )
+                    self._chunk_size_reduced_logged = True
         elif (
             estimated_size < self.grpc_message_limit * 0.2  # 20%로 더욱 보수적
             and self.chunk_size < self.max_chunk_size
@@ -322,19 +326,18 @@ class BaseParser(ABC):
                     del record["data"]["cost"]
                     removed_count += 1
 
-        if removed_count > 0:
-            _LOGGER.debug(
-                f"[{self.__class__.__name__}] Removed data.cost from {removed_count} records in response"
-            )
+        # data.cost 제거 로깅 제거 (불필요한 반복 로깅)
 
         return response
 
     def _log_batch_processing(
         self, batch_size: int, total_processed: int, file_name: str = ""
     ):
-        """배치 처리 로깅 - 페이징 단위 카운트 추가"""
-        file_info = f" from {file_name}" if file_name else ""
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] Processing batch: {batch_size:,} records "
-            f"(Total processed: {total_processed:,}){file_info}"
-        )
+        """배치 처리 로깅 - 1000건 단위로만 로깅"""
+        # 1000건 단위로만 로깅 (반복 로깅 최소화)
+        if total_processed % 1000 == 0:
+            file_info = f" from {file_name}" if file_name else ""
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Processing batch: {batch_size:,} records "
+                f"(Total processed: {total_processed:,}){file_info}"
+            )

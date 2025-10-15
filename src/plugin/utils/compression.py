@@ -1,7 +1,7 @@
 import gzip
 import logging
 from io import BytesIO
-from typing import IO
+from typing import IO, Optional
 
 from ..conf.cost_conf import GCS_CONFIG
 from ..error.cost import ERROR_UNSUPPORTED_FILE_FORMAT
@@ -13,7 +13,9 @@ class CompressionHandler:
     """파일 압축 처리 유틸리티"""
 
     @staticmethod
-    def detect_compression(file_name: str, content_sample: bytes = None) -> str | None:
+    def detect_compression(
+        file_name: str, content_sample: bytes = None
+    ) -> Optional[str]:
         """파일명과 내용으로 압축 형식 감지
 
         Args:

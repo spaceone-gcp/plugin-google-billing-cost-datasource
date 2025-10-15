@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from spaceone.core.error import ERROR_INVALID_ARGUMENT
 
@@ -151,26 +151,17 @@ class FieldMapper:
                         result["additional_info"]["Project Ancestry Numbers"] = (
                             json.dumps(parts)
                         )
-                        _LOGGER.error(
-                            f"[DEBUG] Post-processed Project Ancestry Numbers: {result['additional_info']['Project Ancestry Numbers']}"
-                        )
 
             if "cost" not in result:
                 _LOGGER.warning(
                     f"[FieldMapper] Cost field missing from result! Keys: {list(result.keys())}"
                 )
                 result["cost"] = None  # None으로 보존
-            else:
-                # _LOGGER.debug(f"[FieldMapper] map_record result has cost: {result['cost']}")
-                pass
 
             # 일별 카운트 추적 (map_record에서도 호출)
             self._track_daily_count(result.get("billed_date", "unknown"))
 
-            # DEBUG: 최종 결과에서 cost 필드 확인
-            # _LOGGER.debug(
-            #     f"[FieldMapper] Final result cost field: {result.get('cost', 'MISSING')}"
-            # )
+            # 최종 결과에서 cost 필드 확인 완료
 
             return result
 
@@ -249,9 +240,6 @@ class FieldMapper:
         for field, default_value in required_fields.items():
             if field not in data or data[field] is None:
                 data[field] = default_value
-                # _LOGGER.debug(
-                #     f"[FieldMapper] Added missing required field '{field}' with default value: {default_value}"
-                # )
 
         return data
 
@@ -263,37 +251,14 @@ class FieldMapper:
     def _log_debug_info_once(self, source_data: dict):
         """디버깅 정보를 첫 번째 레코드에서만 로깅"""
         if not hasattr(self, "_debug_record_logged"):
-            _LOGGER.info(
-                f"[FieldMapper] DEBUG: BigQuery source data keys: {list(source_data.keys())}"
-            )
-            # BigQuery 중첩 필드들 확인
-            for key in [
-                "service",
-                "sku",
-                "project",
-                "usage",
-                "invoice",
-                "location",
-                "price",
-            ]:
-                if key in source_data:
-                    _LOGGER.info(
-                        f"[FieldMapper] DEBUG: {key} = {repr(source_data[key])}"
-                    )
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(f"BigQuery source data keys: {list(source_data.keys())}")
             self._debug_record_logged = True
 
     def _process_billed_date(self, source_data: dict) -> str:
         """billed_date 필드 처리 - 실제 청구 관련 날짜만 사용"""
         # 1순위: 매핑된 billed_date 필드
         billed_date_value = self._map_field("billed_date", source_data, "")
-
-        # 디버깅: billed_date 매핑 과정 로깅 (더 자세히)
-        if not hasattr(self, "_debug_billed_date_count"):
-            self._debug_billed_date_count = 0
-
-        # 처음 20개 레코드에 대해서만 상세 로깅
-        if self._debug_billed_date_count < 20:
-            self._debug_billed_date_count += 1
 
         if billed_date_value and billed_date_value != "":
             # 유효한 날짜 값이 있으면 형식 변환
@@ -495,15 +460,7 @@ class FieldMapper:
         usage_type_value = self._map_field("usage_type", source_data, "")
         resource_value = self._map_field("resource", source_data, "")
 
-        # 첫 번째 레코드만 매핑 결과 확인 (간소화)
-        if not hasattr(self, "_debug_mapping_logged"):
-            _LOGGER.debug(
-                f"[FieldMapper] Mapping results - "
-                f"product: {product_value[:50] if product_value else 'None'}..., "
-                f"usage_type: {usage_type_value[:50] if usage_type_value else 'None'}..., "
-                f"resource: {resource_value[:50] if resource_value else 'None'}..."
-            )
-            self._debug_mapping_logged = True
+        # Mapping results 로깅 제거 (불필요한 반복 로깅)
 
         return {
             "product": product_value,
@@ -1255,12 +1212,10 @@ class FieldMapper:
         """
         # 1단계: GCP additional_info에서 Usage Amount 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
-        # _LOGGER.debug(f"[FieldMapper] DEBUG: additional_info type: {type(additional_info)}, keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
 
         if isinstance(additional_info, dict):
             # GCP 빌링 데이터의 Usage Amount 필드 확인
             usage_amount = additional_info.get("Usage Amount")
-            # _LOGGER.debug(f"[FieldMapper] DEBUG: Usage Amount value: {usage_amount}")
             # 빈 값 처리: "", None, "null" -> 기본값 0
             if (
                 usage_amount is not None
@@ -1271,7 +1226,6 @@ class FieldMapper:
             ):
                 try:
                     usage_value = float(usage_amount)
-                    # _LOGGER.debug(f"[FieldMapper] Found Usage Amount in additional_info: {usage_value}")
                     return usage_value
                 except (ValueError, TypeError):
                     # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount value: {usage_amount}")
@@ -1290,7 +1244,6 @@ class FieldMapper:
             ):
                 try:
                     usage_value = float(usage_pricing_amount)
-                    # _LOGGER.debug(f"[FieldMapper] Found Usage Amount In Pricing Units: {usage_value}")
                     return usage_value
                 except (ValueError, TypeError):
                     # _LOGGER.warning(f"[FieldMapper] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
@@ -1308,7 +1261,6 @@ class FieldMapper:
         ):
             try:
                 usage_value = float(usage_quantity)
-                # _LOGGER.debug(f"[FieldMapper] Found usage_quantity field: {usage_value}")
                 return usage_value
             except (ValueError, TypeError):
                 # _LOGGER.warning(f"[FieldMapper] Invalid usage_quantity value: {usage_quantity}")
@@ -1326,13 +1278,11 @@ class FieldMapper:
         ):
             try:
                 usage_value = float(usage_amount_field)
-                # _LOGGER.debug(f"[FieldMapper] Found usage_amount field: {usage_value}")
                 return usage_value
             except (ValueError, TypeError):
                 # _LOGGER.warning(f"[FieldMapper] Invalid usage_amount value: {usage_amount_field}")
                 pass
         # 4단계: 최후의 수단 - 전체 source_data에서 Usage Amount 검색
-        # _LOGGER.debug("[FieldMapper] DEBUG: Searching entire source_data for Usage Amount patterns")
 
         # 전체 데이터를 문자열로 변환해서 Usage Amount 찾기
         data_str = str(source_data)
@@ -1354,7 +1304,6 @@ class FieldMapper:
                 # _LOGGER.error(f"[FieldMapper] Emergency search failed: {e}")
                 pass
         # 5단계: 모든 방법이 실패한 경우 0 반환
-        # _LOGGER.debug("[FieldMapper] No valid usage quantity found, returning 0")
         return 0
 
     def _safe_get_usage_unit(self, source_data: dict):
@@ -1371,12 +1320,10 @@ class FieldMapper:
         """
         # 1단계: GCP additional_info에서 Usage Unit 추출 (최우선)
         additional_info = source_data.get("additional_info", {})
-        # _LOGGER.debug(f"[FieldMapper] DEBUG: usage_unit additional_info keys: {list(additional_info.keys()) if isinstance(additional_info, dict) else 'not dict'}")
 
         if isinstance(additional_info, dict):
             # GCP 빌링 데이터의 Usage Unit 필드 확인
             usage_unit = additional_info.get("Usage Unit")
-            # _LOGGER.debug(f"[FieldMapper] DEBUG: Usage Unit value: {usage_unit}")
             if usage_unit is not None and usage_unit != "":
                 _LOGGER.debug(
                     f"[FieldMapper] Found Usage Unit in additional_info: {usage_unit}"
@@ -1386,23 +1333,19 @@ class FieldMapper:
             # Usage Pricing Unit도 확인
             usage_pricing_unit = additional_info.get("Usage Pricing Unit")
             if usage_pricing_unit is not None and usage_pricing_unit != "":
-                # _LOGGER.debug(f"[FieldMapper] Found Usage Pricing Unit: {usage_pricing_unit}")
                 return str(usage_pricing_unit)
 
         # 2단계: 기존 usage_unit 필드 확인 (fallback)
         usage_unit_field = source_data.get("usage_unit")
         if usage_unit_field is not None and usage_unit_field != "":
-            # _LOGGER.debug(f"[FieldMapper] Found usage_unit field: {usage_unit_field}")
             return str(usage_unit_field)
 
         # 3단계: pricing_unit 필드 확인 (추가 fallback)
         pricing_unit = source_data.get("pricing_unit")
         if pricing_unit is not None and pricing_unit != "":
-            # _LOGGER.debug(f"[FieldMapper] Found pricing_unit field: {pricing_unit}")
             return str(pricing_unit)
 
         # 4단계: 모든 방법이 실패한 경우 빈 문자열 반환
-        # _LOGGER.debug("[FieldMapper] No valid usage unit found, returning empty string")
         return ""
 
     def _get_cost_by_option(self, source_data: dict):
@@ -1456,10 +1399,6 @@ class FieldMapper:
         # Google Cloud labels 배열 형태 처리
         if isinstance(tags_value, list):
             return self._process_labels_array(tags_value)
-
-        # 문자열인 경우 JSON 파싱 시도
-        if isinstance(tags_value, str) and tags_value.strip():
-            return self._process_tags_string(tags_value)
 
         # 기타 모든 경우 빈 딕셔너리 반환
         return {}
@@ -1530,9 +1469,6 @@ class FieldMapper:
             elif isinstance(tags_data, dict):
                 # 이미 딕셔너리인 경우 그대로 반환
                 return tags_data
-            elif isinstance(tags_data, str):
-                # 문자열인 경우 기존 문자열 처리 메서드 사용
-                return self._process_tags_string(tags_data)
             else:
                 _LOGGER.warning(
                     f"[FieldMapper] Unexpected tags data type: {type(tags_data)}"
@@ -1540,171 +1476,6 @@ class FieldMapper:
                 return {}
         except Exception as e:
             _LOGGER.warning(f"[FieldMapper] Failed to process tags data: {e}")
-            return {}
-
-    def _process_tags_string(self, tags_value: str) -> dict:
-        """문자열 형태의 tags를 딕셔너리로 변환"""
-        # 이미 처리한 잘린 문자열인지 캐시 확인 (성능 최적화)
-        if not hasattr(self, "_truncated_cache"):
-            self._truncated_cache = set()
-
-        tags_hash = hash(tags_value[:100])  # 처음 100자로 해시 생성
-        if tags_hash in self._truncated_cache:
-            return {}  # 이미 잘린 것으로 확인된 문자열
-
-        # 디버깅을 위한 로깅 (처음 몇 개만)
-        if not hasattr(self, "_debug_logged"):
-            _LOGGER.debug(f"[FieldMapper] Raw tags_value: {repr(tags_value[:100])}")
-            self._debug_logged = True
-
-        # JSON 파싱 시도
-        json_result = self._try_parse_json_tags(tags_value)
-        if json_result is not None:
-            return json_result
-
-        # JSON 파싱 실패 시 key=value 형태 파싱 시도
-        return self._parse_key_value_pairs(tags_value)
-
-    def _try_parse_json_tags(self, tags_value: str) -> dict:
-        """JSON 형태의 tags 파싱 시도"""
-        try:
-            import json
-
-            parsed_tags = json.loads(tags_value)
-
-            # 파싱된 결과가 딕셔너리인 경우
-            if isinstance(parsed_tags, dict):
-                return parsed_tags
-
-            # 파싱된 결과가 Google Cloud labels 배열인 경우
-            elif isinstance(parsed_tags, list):
-                return self._process_labels_array(parsed_tags)
-            else:
-                _LOGGER.warning(
-                    f"[FieldMapper] Parsed tags is not a dict or labels array: {type(parsed_tags)}"
-                )
-                return {}
-
-        except (json.JSONDecodeError, ValueError) as e:
-            return self._handle_json_parse_error(tags_value, e)
-
-    def _handle_json_parse_error(self, tags_value: str, error: Exception) -> dict:
-        """JSON 파싱 오류 처리"""
-        # 잘린 JSON 문자열인지 확인
-        if self._is_truncated_json(tags_value):
-            # 잘린 문자열로 보이는 경우 - 캐시에 추가하고 빈 딕셔너리 반환
-            if hasattr(self, "_truncated_cache"):
-                tags_hash = hash(tags_value[:100])
-                self._truncated_cache.add(tags_hash)
-            return {}
-
-        # 로깅 빈도 제한 - 같은 오류는 최대 5번만 로깅
-        self._log_json_error_limited(error, tags_value)
-
-        # 일반적인 잘못된 JSON 형식들을 수정 시도
-        return self._try_fix_and_parse_json(tags_value)
-
-    def _is_truncated_json(self, tags_value: str) -> bool:
-        """JSON 문자열이 잘렸는지 확인"""
-        truncated_patterns = [
-            "', 'value': '",  # 잘린 key-value 패턴
-            "'key':",  # 시작만 있는 패턴
-            '"key":',  # 시작만 있는 패턴
-            "'value': '",  # value만 있는 패턴
-            '"value": "',  # value만 있는 패턴
-        ]
-
-        return (
-            len(tags_value) > 50
-            and not tags_value.strip().endswith(("}", "]", '"', "'"))
-        ) or any(pattern in tags_value[:50] for pattern in truncated_patterns)
-
-    def _log_json_error_limited(self, error: Exception, tags_value: str):
-        """JSON 오류 로깅 (빈도 제한)"""
-        if not hasattr(self, "_json_error_count"):
-            self._json_error_count = {}
-        error_key = str(error)[:50]  # 오류 메시지의 처음 50자로 키 생성
-        if self._json_error_count.get(error_key, 0) < 5:
-            self._json_error_count[error_key] = (
-                self._json_error_count.get(error_key, 0) + 1
-            )
-            _LOGGER.debug(
-                f"[FieldMapper] JSON parsing failed for: {repr(tags_value[:50])}, error: {error}"
-            )
-
-    def _try_fix_and_parse_json(self, tags_value: str) -> dict:
-        """잘못된 JSON 형식을 수정하고 다시 파싱 시도"""
-        cleaned_value = self._try_fix_malformed_json(tags_value)
-        if cleaned_value != tags_value:
-            try:
-                import json
-
-                parsed_tags = json.loads(cleaned_value)
-                if isinstance(parsed_tags, dict):
-                    return parsed_tags
-                elif isinstance(parsed_tags, list):
-                    return self._process_labels_array(parsed_tags)
-            except (json.JSONDecodeError, ValueError):
-                pass
-        return {}
-
-    def _try_fix_malformed_json(self, json_str: str) -> str:
-        """잘못된 JSON 형식을 수정 시도"""
-        try:
-            # 일반적인 문제들 수정
-            cleaned = json_str.strip()
-
-            # 잘린 문자열인 경우 조기 반환 (수정 불가능)
-            if len(cleaned) > 50 and not cleaned.endswith(("}", "]", '"')):
-                return json_str
-
-            # 1. 작은따옴표를 큰따옴표로 변경
-            if "'" in cleaned and '"' not in cleaned:
-                cleaned = cleaned.replace("'", '"')
-
-            # 2. 키에 따옴표가 없는 경우 추가 (간단한 경우만)
-            import re
-
-            # {key: "value"} -> {"key": "value"}
-            cleaned = re.sub(r"{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'{"\1":', cleaned)
-            cleaned = re.sub(r",\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r', "\1":', cleaned)
-
-            # 3. Python-style True/False를 JSON true/false로 변경
-            cleaned = (
-                cleaned.replace("True", "true")
-                .replace("False", "false")
-                .replace("None", "null")
-            )
-
-            return cleaned
-        except Exception:
-            return json_str
-
-    def _parse_key_value_pairs(self, text: str) -> dict:
-        """key=value 형태의 문자열을 딕셔너리로 파싱"""
-        try:
-            result = {}
-
-            # 다양한 구분자 시도
-            separators = [",", ";", "&", " "]
-
-            for sep in separators:
-                if sep in text:
-                    pairs = text.split(sep)
-                    for pair in pairs:
-                        if "=" in pair:
-                            key, value = pair.split("=", 1)
-                            result[key.strip()] = value.strip()
-                    if result:  # 성공적으로 파싱된 경우
-                        return result
-
-            # 단일 key=value 형태
-            if "=" in text and len(text.split("=")) == 2:
-                key, value = text.split("=", 1)
-                return {key.strip(): value.strip()}
-
-            return {}
-        except Exception:
             return {}
 
     def _compile_mappings(self):
@@ -1815,9 +1586,8 @@ class FieldMapper:
                 "service_id",
                 "sku_id",
             ] and not hasattr(self, f"_debug_{target_field}_logged"):
-                _LOGGER.info(
-                    f"[FieldMapper] DEBUG: {target_field} = '{source_config}' -> '{value}'"
-                )
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug(f"{target_field} = '{source_config}' -> '{value}'")
                 setattr(self, f"_debug_{target_field}_logged", True)
 
             return value
@@ -1840,11 +1610,7 @@ class FieldMapper:
                 result = self.compiled_mappings[field_name](source_data)
 
                 # billed_date 필드에 대한 특별 디버깅 (간소화)
-                if field_name == "billed_date" and not hasattr(
-                    self, "_debug_billed_date_mapping_logged"
-                ):
-                    _LOGGER.debug(f"[FieldMapper] billed_date mapping: {result}")
-                    self._debug_billed_date_mapping_logged = True
+                # billed_date mapping 로깅 제거 (불필요한 반복 로깅)
 
                 # 결과가 빈 문자열이고 default_value가 있으면 default_value 사용
                 # 하지만 빈 딕셔너리나 빈 리스트는 유효한 값으로 간주
@@ -1864,7 +1630,8 @@ class FieldMapper:
         if field_name == "billed_date" and not hasattr(
             self, "_debug_billed_date_fallback_logged"
         ):
-            _LOGGER.debug("[FieldMapper] billed_date fallback mapping used")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("billed_date fallback mapping used")
             self._debug_billed_date_fallback_logged = True
 
         return self._get_nested_value(source_data, field_name, default_value)
@@ -1969,23 +1736,9 @@ class FieldMapper:
 
     def _log_nested_result(self, path: str, result):
         """중첩 경로 결과 로깅"""
-        important_paths = [
-            "project.id",
-            "service.id",
-            "sku.id",
-            "service.description",
-            "sku.description",
-            "project.name",
-            "invoice.month",
-        ]
+        # Nested field 로깅 제거 (불필요한 반복 로깅)
 
-        if path in important_paths:
-            log_key = f"_nested_log_{path.replace('.', '_')}"
-            if not hasattr(self, log_key):
-                _LOGGER.debug(f"[FieldMapper] Nested '{path}': {str(result)[:100]}...")
-                setattr(self, log_key, True)
-
-    def _apply_transform(self, value: Any, transform: str | None) -> Any:
+    def _apply_transform(self, value: Any, transform: Optional[str]) -> Any:
         """값 변환 함수 적용"""
         if not transform or value is None:
             return value
@@ -2349,6 +2102,10 @@ class FieldMapper:
 
     def _log_date_debug_info(self, value: Any):
         """날짜 변환 디버깅 정보 로깅"""
+        # DEBUG 레벨에서만 처리
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+
         if not hasattr(self, "_debug_format_date_count"):
             self._debug_format_date_count = 0
 
@@ -2676,13 +2433,7 @@ class FieldMapper:
         )
         self.total_processed_count += 1
 
-        # 100개마다 중간 요약 로깅
-        if self.total_processed_count % 100 == 0:
-            self._log_daily_count_summary(is_intermediate=True)
-
-        # 1000개마다 상세 로깅
-        if self.total_processed_count % 1000 == 0:
-            self._log_daily_count_summary(is_intermediate=False)
+        # 반복적인 중간 로깅 제거 (성능 향상)
 
     def _log_daily_count_summary(self, is_intermediate: bool = False):
         """일별 카운트 요약 로깅"""

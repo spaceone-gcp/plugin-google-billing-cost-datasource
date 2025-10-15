@@ -173,21 +173,17 @@ class CostManager(BaseManager):
 
         query = self._create_google_sql(start, end)
 
-        # 프로젝트 및 기간 정보는 DEBUG 레벨로 이동
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                f"[BigQuery] 프로젝트: {self.target_project_id}, 기간: {start}"
-                + (f"~{end}" if end else "")
-            )
         validated_start = self._validate_and_fix_date_range(start)
         validated_end = self._validate_and_fix_date_range(end) if end else None
         partition_range = self._get_partition_date_range(validated_start, validated_end)
-        _LOGGER.debug(
-            f"[BigQuery] PARTITIONDATE: {partition_range[0]}~{partition_range[1]}"
-        )
-        _LOGGER.debug(
-            f"[BigQuery] 테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
-        )
+
+        # DEBUG 레벨에서만 상세 정보 로깅
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                f"프로젝트: {self.target_project_id}, 기간: {start}"
+                + (f"~{end}" if end else "")
+                + f", 파티션: {partition_range[0]}~{partition_range[1]}"
+            )
 
         # 쿼리 실행 시간 측정 시작
         import time
@@ -201,12 +197,10 @@ class CostManager(BaseManager):
             # 결과 데이터 건수 확인을 위한 카운터
             row_count = 0
 
-            _LOGGER.info(f"[BigQuery] 반환된 DataFrame 크기: {len(response_stream)} 행")
-
             # 빈 결과 처리 개선
             if len(response_stream) == 0:
                 _LOGGER.info(
-                    f"[BigQuery] 프로젝트 '{self.target_project_id}' - 필터 조건에 맞는 데이터 없음"
+                    f"프로젝트 '{self.target_project_id}' - 필터 조건에 맞는 데이터 없음"
                 )
                 _LOGGER.info("[BigQuery] 필터 조건: cost > 0 OR usage.amount > 0")
                 return
@@ -294,11 +288,9 @@ class CostManager(BaseManager):
 
                         # BigQuery 배치 응답 레코드 로깅 (모든 레코드)
                         if batch_records:
-                            # _LOGGER.info(f"[BigQuery-Response] 배치 응답 레코드 수: {len(batch_records)}")
                             for i, record in enumerate(
                                 batch_records
                             ):  # 모든 레코드 로깅
-                                # _LOGGER.info(f"[BigQuery-Response] 레코드 {i+1}: {record}")
                                 pass
                         yield batch_result
                         batch_records = []
@@ -310,20 +302,10 @@ class CostManager(BaseManager):
                 #  응답 직전에 data.cost 제거
                 batch_result = self._remove_data_cost_from_response(batch_result)
 
-                _LOGGER.info(
-                    f"[BigQuery] Yielding final batch with {len(batch_records)} records"
-                )
-                _LOGGER.debug(
-                    f"[BigQuery] Final batch result keys: {list(batch_result.keys())}"
-                )
+                # DEBUG 레벨에서만 상세 정보 로깅
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug(f"최종 배치: {len(batch_records)}개 레코드")
 
-                # BigQuery 최종 배치 응답 레코드 로깅 (모든 레코드)
-                _LOGGER.info(
-                    f"[BigQuery-FinalResponse] 최종 배치 응답 레코드 수: {len(batch_records)}"
-                )
-                for i, record in enumerate(batch_records):  # 모든 레코드 로깅
-                    # _LOGGER.info(f"[BigQuery-FinalResponse] 레코드 {i+1}: {record}")
-                    pass
                 yield batch_result
 
         except Exception as e:
@@ -422,26 +404,22 @@ class CostManager(BaseManager):
                         if batch_result and "results" in batch_result:
                             batch_size = len(batch_result["results"])
                             file_processed_count += batch_size
-                            _LOGGER.info(
-                                f"[CostManager] File {file_index}/{total_files} ({file_name}): "
-                                f"Processed batch of {batch_size:,} records "
-                                f"(File total: {file_processed_count:,})"
-                            )
+
+                            # 1000건 단위로만 로깅 (반복 로깅 최소화)
+                            if (
+                                file_processed_count % 1000 == 0
+                                or file_processed_count == batch_size
+                            ):
+                                _LOGGER.info(
+                                    f"[CostManager] File {file_index}/{total_files} ({file_name}): "
+                                    f"Processed batch of {batch_size:,} records "
+                                    f"(File total: {file_processed_count:,})"
+                                )
 
                             #  응답 직전에 data.cost 제거
                             batch_result = self._remove_data_cost_from_response(
                                 batch_result
                             )
-
-                            # GCS 배치 응답 레코드 로깅 (모든 레코드)
-                            _LOGGER.info(
-                                f"[GCS-Response] File {file_index} 배치 응답 레코드 수: {batch_size}"
-                            )
-                            for i, record in enumerate(
-                                batch_result["results"]
-                            ):  # 모든 레코드 로깅
-                                # _LOGGER.info(f"[GCS-Response] 레코드 {i+1}: {record}")
-                                pass
                         yield batch_result
 
                     _LOGGER.info(
@@ -667,10 +645,12 @@ class CostManager(BaseManager):
                     if batch_result and "results" in batch_result:
                         batch_size = len(batch_result["results"])
                         total_processed_count += batch_size
-                        _LOGGER.info(
-                            f"[CostManager] HTTP file: Processed batch of {batch_size:,} records "
-                            f"(Total: {total_processed_count:,})"
-                        )
+                        # 배치 처리 로깅을 DEBUG 레벨로 이동 (반복 로깅 최소화)
+                        if _LOGGER.isEnabledFor(logging.DEBUG):
+                            _LOGGER.debug(
+                                f"[CostManager] HTTP file: Processed batch of {batch_size:,} records "
+                                f"(Total: {total_processed_count:,})"
+                            )
                         # 응답을 BigQuery results 구조로 변환
                         converted_result = self._convert_to_bigquery_structure(
                             batch_result
@@ -1444,7 +1424,7 @@ class CostManager(BaseManager):
             return value
 
     def _make_cost_data(self, row) -> dict:
-        """완전히 단순화된 SpaceONE 빌링 응답 생성 (test_correct_format.json 기준)"""
+        """완전히 단순화된 SpaceONE 빌링 응답 생성"""
         try:
             cost_value = getattr(row, "cost", None)
             # 빈 값 처리: "", None, "null" -> 기본값 0
@@ -1459,13 +1439,11 @@ class CostManager(BaseManager):
                 cost_value = 0
 
             # cost_value는 어떠한 변환도 없이 원본 그대로 유지
-            # _LOGGER.debug(f"[_make_cost_data] Cost value preserved as absolute original: {cost_value}")
 
             # 모든 cost 값을 원본 그대로 보존 (0으로 강제 처리 제거)
             if isinstance(cost_value, float):
                 pass
                 # 극소값도 포함하여 모든 값을 원본 그대로 보존
-                # _LOGGER.debug(f"[_make_cost_data] Cost value preserved as-is: {cost_value}")
                 # 반올림도 제거하여 원본 정확도 유지
 
             usage_quantity = getattr(row, "usage_amount", None)
@@ -1479,7 +1457,7 @@ class CostManager(BaseManager):
                     "[_make_cost_data] CRITICAL: currency was empty, enforced to USD"
                 )
 
-            # STEP 3: 순수 SpaceONE 응답 구조 생성 (test_correct_format.json 기준)
+            # STEP 3: 순수 SpaceONE 응답 구조 생성
             record = {
                 "cost": cost_value,
                 "currency": currency_value,
@@ -1507,20 +1485,16 @@ class CostManager(BaseManager):
             # 극소값도 원본 그대로 보존 (0으로 강제 변환 제거)
             # for key in ["cost", "usage_quantity"]:
             #     if isinstance(record.get(key), float):
-            #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record[key]}")
 
             # for key in ["Cost After Credits", "Cost At List"]:
             #     if isinstance(record["additional_info"].get(key), float):
-            #         _LOGGER.debug(f"[_make_cost_data] Preserving original {key} value: {record['additional_info'][key]}")
 
             # # STEP 5: 필수 필드 검증 (0으로 강제 처리 제거)
             # if "cost" not in record:
             #     record["cost"] = cost_value  # 원본 값 사용
-            #     _LOGGER.warning(f"[_make_cost_data] Cost field missing after creation, added original value: {cost_value}")
 
             # if "currency" not in record:
             #     record["currency"] = "USD"
-            #     _LOGGER.error(f"[_make_cost_data] CRITICAL: currency field missing after creation, force added USD")
 
             cost_val = record.pop("cost")
             currency_val = record.pop("currency")
@@ -1964,25 +1938,17 @@ class CostManager(BaseManager):
 
         이 메서드는 실제로 호출되지 않으며, 수학 연산 사용법을 보여주는 예시입니다.
         """
+        # 나눗셈 (원본 타입 유지): 100.0 / 3.0
+        _ = self._safe_divide(100.0, 3.0)
 
-        # 나눗셈 (원본 타입 유지)
-        cost_per_unit = self._safe_divide(100.0, 3.0)
+        # 덧셈 (원본 타입 유지): 50.25 + 25.75
+        _ = self._safe_add(50.25, 25.75)
 
-        # 덧셈 (원본 타입 유지)
-        total_cost = self._safe_add(50.25, 25.75)  # float + float = float
+        # 뺄셈 (원본 타입 유지): 100 - 10
+        _ = self._safe_subtract(100, 10)
 
-        # 뺄셈 (원본 타입 유지)
-        discount = self._safe_subtract(100, 10)  # int - int = int
-
-        # 곱셈 (원본 타입 유지)
-        extended_cost = self._safe_multiply(12.5, 4)  # float * int = float
-
-        _LOGGER.debug(f"[EXAMPLE] Division result (original types): {cost_per_unit}")
-        _LOGGER.debug(f"[EXAMPLE] Addition result (original types): {total_cost}")
-        _LOGGER.debug(f"[EXAMPLE] Subtraction result (original types): {discount}")
-        _LOGGER.debug(
-            f"[EXAMPLE] Multiplication result (original types): {extended_cost}"
-        )
+        # 곱셈 (원본 타입 유지): 12.5 * 4
+        _ = self._safe_multiply(12.5, 4)
 
     def _process_credits_detail(self, row) -> list:
         """Credits 배열 데이터 처리 (BigQuery 스키마 준수)
@@ -2316,10 +2282,6 @@ class CostManager(BaseManager):
 
     def _create_google_sql(self, start, end=None):
         """BigQuery용 SQL 쿼리를 생성합니다."""
-        # SQL 생성 로그 간소화 (DEBUG 레벨에서만)
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(f"[SQL] 생성 시작: {start}~{end}")
-
         # 날짜 범위 검증 및 안전한 처리
         validated_start = self._validate_and_fix_date_range(start)
 
@@ -2329,11 +2291,8 @@ class CostManager(BaseManager):
 
             current_month = datetime.now().strftime("%Y-%m")
             validated_end = current_month
-            _LOGGER.debug(f"[SQL] 종료일 자동 설정: {validated_end}")
         else:
             validated_end = self._validate_and_fix_date_range(end)
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(f"[SQL] 종료일 검증: {validated_end}")
 
         # PARTITIONDATE 범위 계산 (Data Sources Re-Sync 최적화)
         from ..utils.date_transformer import calculate_partition_date_range
@@ -2346,27 +2305,14 @@ class CostManager(BaseManager):
           AND usage_start_time < TIMESTAMP(DATE_ADD(DATE('{validated_end}-01'), INTERVAL 1 MONTH))
           AND _PARTITIONDATE BETWEEN '{partition_start}' AND '{partition_end}'
         """
-        # SQL 생성 로그 간소화 (DEBUG 레벨에서만)
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                f"[SQL] 날짜: {validated_start}~{validated_end}, 파티션: {partition_start}~{partition_end}"
-            )
 
         if self.target_project_id != "*":
             where_condition += f" AND project.id = '{self.target_project_id}'"
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(f"[SQL] 프로젝트 필터: {self.target_project_id}")
-        else:
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("[SQL] 모든 프로젝트 조회")
 
         where_condition += """
           AND cost > 0
           AND project.id IS NOT NULL
         """
-        # 비용 필터 로그는 DEBUG 레벨에서만
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("[SQL] 비용 필터: cost > 0")
 
         # 상세 사용량 데이터인 경우 리소스 정보 포함
         if hasattr(self, "is_detailed_usage") and self.is_detailed_usage:
@@ -2377,8 +2323,6 @@ class CostManager(BaseManager):
             # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING
             # 23-25: ANY_VALUE(REPEATED JSON) - GROUP BY 제외, 26: credits 원본 - GROUP BY 제외, 27-28: 리소스 NULL
             group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("[SQL] 상세 사용량 모드")
         else:
             resource_fields = """
               NULL as resource_name,
@@ -2387,8 +2331,6 @@ class CostManager(BaseManager):
             # 1-2: 기본 식별, 3-6: 서비스/SKU, 7-10: 프로젝트, 11-14: 위치, 15-16: 사용량, 17-18: 인보이스, 19-22: 기타 STRING
             # 23-25: ANY_VALUE(REPEATED JSON) - GROUP BY 제외, 26: credits 원본 - GROUP BY 제외
             group_by_fields = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22"
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("[SQL] 표준 모드")
 
         query = f"""
             SELECT
@@ -2450,10 +2392,10 @@ class CostManager(BaseManager):
             ORDER BY billed_at desc
             ;
         """
-        # SQL 쿼리 로그는 DEBUG 레벨에서만 필요시 출력
+        # DEBUG 레벨에서만 쿼리 정보 로깅
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
-                f"[SQL] 쿼리 길이: {len(query)} chars, 테이블: {self.billing_table}"
+                f"SQL 쿼리 길이: {len(query)} chars, 테이블: {self.billing_table}"
             )
 
         return query
@@ -2472,9 +2414,10 @@ class CostManager(BaseManager):
           AND _PARTITIONDATE BETWEEN '{partition_start}' AND '{partition_end}'
         """
 
-        _LOGGER.debug(
-            f"[Linked Accounts SQL] PARTITIONDATE 필터 추가: {partition_start} ~ {partition_end}"
-        )
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                f"Linked Accounts PARTITIONDATE: {partition_start} ~ {partition_end}"
+            )
 
         query = f"""
             SELECT
@@ -2718,7 +2661,9 @@ class CostManager(BaseManager):
                 key=f"source (invalid value: {source}. Supported values: {', '.join(valid_sources)})"
             )
 
-        _LOGGER.info(f"[_get_source_value] 최종 source 값: {source}")
+        # DEBUG 레벨에서만 로깅
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(f"Source 값: {source}")
         return source
 
     def _process_labels_data(self, labels_data) -> dict:
@@ -2885,8 +2830,5 @@ class CostManager(BaseManager):
                     removed_count += 1
 
         if removed_count > 0:
-            # _LOGGER.debug(
-            #     f"[CostManager] Removed data.cost from {removed_count} records in response"
-            # )
             pass
         return response

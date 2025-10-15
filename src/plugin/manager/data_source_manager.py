@@ -94,7 +94,7 @@ class DataSourceManager(BaseManager):
     """
 
     @staticmethod
-    def init_response(options: dict, domain_id: str | None = None) -> dict:
+    def init_response(options: dict, domain_id: Optional[str] = None) -> dict:
         """데이터 소스 초기화 응답을 생성합니다.
 
         Args:

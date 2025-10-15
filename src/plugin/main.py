@@ -1,8 +1,6 @@
 import logging
 import os
 from collections.abc import Generator
-from threading import Lock
-from typing import Set
 
 from spaceone.cost_analysis.plugin.data_source.lib.server import (
     DataSourcePluginServer,
@@ -69,11 +67,6 @@ def setup_logging():
 setup_logging()
 
 _LOGGER = logging.getLogger("spaceone")
-
-# 전역 프로젝트 처리 추적 시스템
-_processed_projects: Set[str] = set()
-_processing_lock = Lock()
-_expected_total_projects = 0  # JobManager에서 실제 생성된 태스크 수 (동적 설정)
 
 app = DataSourcePluginServer()
 
@@ -241,10 +234,6 @@ def job_get_tasks(params: dict) -> dict:
         }
 
     """
-    # 전역 프로젝트 처리 추적 시스템 초기화
-    with _processing_lock:
-        _processed_projects.clear()
-
     try:
         # 파라미터 기본 검증
         if not params:
@@ -262,11 +251,7 @@ def job_get_tasks(params: dict) -> dict:
 
         # 태스크 생성 결과 검증 및 로깅
         actual_tasks = len(result.get("tasks", []))
-
-        # 전역 변수에 실제 생성된 태스크 수 저장
-        global _expected_total_projects
-        with _processing_lock:
-            _expected_total_projects = actual_tasks
+        _LOGGER.info(f"[job_get_tasks] Created {actual_tasks} tasks for processing")
 
         return result
 
@@ -297,13 +282,10 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
         # Credits Detail 모드 확인
         credits_detail_mode = task_options.get("credits_detail_mode", False)
 
-        _LOGGER.info(
-            f"[_cost_get_data_logic] Credits Detail 모드: {credits_detail_mode}"
-        )
-
         if credits_detail_mode:
             # Credits Detail 모드: 원본 데이터 조회
-            _LOGGER.info("[_cost_get_data_logic] Credits Detail 모드로 실행")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Credits Detail 모드로 실행")
 
             from plugin.connector.bigquery_connector import BigqueryConnector
             from plugin.manager.credits_detail_manager import CreditsDetailManager
@@ -349,9 +331,11 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
             if not start_date:
                 raise ValueError("start date is required for credits detail mode")
 
-            _LOGGER.info(
-                f"[_cost_get_data_logic] Credits Detail 조회: {start_date} ~ {end_date}, 프로젝트: {project_id}, 제한: {limit}"
-            )
+            # DEBUG 레벨에서만 상세 정보 로깅
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    f"Credits Detail 조회: {start_date} ~ {end_date}, 프로젝트: {project_id}, 제한: {limit}"
+                )
 
             # Credits Detail 조회
             for record in credits_mgr.get_credits_detail(
@@ -365,7 +349,6 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
 
         else:
             # 기본 모드: 기존 최적화된 집계 데이터 조회
-            _LOGGER.info("[_cost_get_data_logic] 기본 모드로 실행")
 
             # CostManager 인스턴스 생성
             cost_mgr = CostManager()
@@ -503,27 +486,16 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             _LOGGER.warning("[cost_get_data] No results to yield")
             # 빈 결과도 개별 레코드 형태로 처리하지 않음 (SpaceONE 프레임워크가 자동 처리)
 
-        # 처리 완료 프로젝트 수 검증
+        # 처리 완료 로깅
         task_options = params.get("task_options", {})
         processed_project = task_options.get("project_id", "unknown")
 
-        # 전역 처리된 프로젝트 추적 업데이트 (Pod 중복 실행 대응)
-        with _processing_lock:
-            if processed_project in _processed_projects:
-                return  # 중복 처리 방지
-
-            _processed_projects.add(processed_project)
-
         # 성능 최적화 효과 로깅 (간소화됨)
         if PERFORMANCE_CONFIG["enable_performance_logging"]:
-            _LOGGER.debug(
-                f"[cost_get_data] Completed processing {batch_count} batches, {total_records} total records"
-            )
-
-        # Pod 중복 실행 시 안정성을 위한 처리 지연 추가
-        import time
-
-        time.sleep(0.1)  # 100ms 지연으로 리소스 경합 방지
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    f"프로젝트 '{processed_project}' 처리 완료: {batch_count}개 배치, {total_records}건"
+                )
 
         # JSON 로깅 중단 및 파일 저장
         if is_json_logging_active():
@@ -683,9 +655,7 @@ def _ensure_spaceone_record_format(record):
                 if usage_amount:
                     try:
                         usage_quantity_value = float(usage_amount)
-                        # _LOGGER.warning(f"[EMERGENCY] Extracted usage_quantity from additional_info: {usage_quantity_value}")
                     except (ValueError, TypeError):
-                        # _LOGGER.error(f"[EMERGENCY] Invalid Usage Amount: {usage_amount}")
                         pass
 
                 # Usage Amount In Pricing Units도 시도
@@ -696,10 +666,8 @@ def _ensure_spaceone_record_format(record):
                     if usage_pricing_amount:
                         try:
                             usage_quantity_value = float(usage_pricing_amount)
-                            # _LOGGER.warning(f"[EMERGENCY] Extracted usage_quantity from Usage Amount In Pricing Units: {usage_quantity_value}")
                             pass
                         except (ValueError, TypeError):
-                            # _LOGGER.error(f"[EMERGENCY] Invalid Usage Amount In Pricing Units: {usage_pricing_amount}")
                             pass
         # usage_unit도 마찬가지로 처리
         if usage_unit_value == "":
@@ -708,7 +676,6 @@ def _ensure_spaceone_record_format(record):
                 usage_unit = additional_info.get("Usage Unit")
                 if usage_unit:
                     usage_unit_value = str(usage_unit)
-                    # _LOGGER.warning(f"[EMERGENCY] Extracted usage_unit from additional_info: {usage_unit_value}")
                     pass
         # SpaceONE Cost 모델 정확한 순서로 필드 배치 (cost_response.py 기준)
         spaceone_record = {
@@ -1035,9 +1002,12 @@ def _create_optimized_batches(records: list) -> Generator[dict, None, None]:
     # 배치 수 계산
     batch_count = (total_records + optimal_batch_size - 1) // optimal_batch_size
 
-    if PERFORMANCE_CONFIG["enable_performance_logging"]:
-        _LOGGER.info(
-            f"[성능최적화] {total_records}개 레코드를 {batch_count}개 배치로 처리 (배치당 최대 {optimal_batch_size}개)"
+    # DEBUG 레벨에서만 성능 정보 로깅
+    if PERFORMANCE_CONFIG["enable_performance_logging"] and _LOGGER.isEnabledFor(
+        logging.DEBUG
+    ):
+        _LOGGER.debug(
+            f"{total_records}개 레코드를 {batch_count}개 배치로 처리 (배치당 최대 {optimal_batch_size}개)"
         )
 
     # 배치 단위로 레코드 분할
@@ -1053,8 +1023,8 @@ def _create_optimized_batches(records: list) -> Generator[dict, None, None]:
             # 배치가 너무 큰 경우 더 작게 분할
             smaller_batch_size = max(1, batch_size // 2)
             _LOGGER.warning(
-                f"[성능최적화] 배치 크기 자동 조정: {batch_size} → {smaller_batch_size}개 "
-                f"(메시지 크기 제한 초과: {estimated_size:,} > {max_size:,} bytes)"
+                f"배치 크기 자동 조정: {batch_size} → {smaller_batch_size}개 "
+                f"(메시지 크기: {estimated_size:,} bytes 초과)"
             )
 
             # 재귀적으로 더 작은 배치 생성

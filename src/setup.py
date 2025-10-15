@@ -31,9 +31,9 @@ setup(
     license="Apache License 2.0",
     packages=find_packages(),
     install_requires=[
-        "spaceone-core",
+        "spaceone-core>=2.0",
         "spaceone-api",
-        "spaceone-cost-analysis",
+        "spaceone-cost-analysis==2.0.dev207",
         "schematics",
         "google-api-python-client",
         "google-cloud-storage",

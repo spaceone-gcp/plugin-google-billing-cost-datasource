@@ -8,7 +8,7 @@
 import logging
 import time
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def retry_on_failure(
     delay: float = 1.0,
     backoff_factor: float = 2.0,
     exceptions: tuple[Exception, ...] = (Exception,),
-    on_retry: Callable[[int, Exception], None] | None = None,
+    on_retry: Optional[Callable[[int, Exception], None]] = None,
 ) -> Callable:
     """
     함수 실행 실패 시 재시도하는 데코레이터

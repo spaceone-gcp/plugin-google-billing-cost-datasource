@@ -1,6 +1,6 @@
-spaceone-core
+spaceone-core>=2.0
 spaceone-api
-spaceone-cost-analysis
+spaceone-cost-analysis==2.0.dev207
 schematics
 google-api-python-client
 google-cloud-storage

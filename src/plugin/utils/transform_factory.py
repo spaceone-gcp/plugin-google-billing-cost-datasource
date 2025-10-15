@@ -23,7 +23,7 @@ class TransformFactory:
             "date": DateTransformer(),
         }
 
-    def get_transformer(self, transform_type: str) -> Any | None:
+    def get_transformer(self, transform_type: str) -> Optional[Any]:
         """변환기 타입에 따라 적절한 변환기 반환"""
         return self._transformers.get(transform_type)
 

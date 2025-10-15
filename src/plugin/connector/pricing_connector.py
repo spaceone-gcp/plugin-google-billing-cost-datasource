@@ -6,7 +6,7 @@ Google Cloud의 cloud_pricing_export 테이블에서 가격 정보를 조회하�
 import logging
 from collections.abc import Generator
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 import pandas_gbq
 from google.oauth2 import service_account
@@ -60,9 +60,9 @@ class PricingConnector(BaseConnector):
 
     def get_pricing_data(
         self,
-        service_id: str | None = None,
-        sku_id: str | None = None,
-        date: str | None = None,
+        service_id: Optional[str] = None,
+        sku_id: Optional[str] = None,
+        date: Optional[str] = None,
     ) -> Generator[dict, None, None]:
         """
         cloud_pricing_export 테이블에서 가격 정보 조회
@@ -95,7 +95,7 @@ class PricingConnector(BaseConnector):
             raise ERROR_INVALID_ARGUMENT(key="pricing_query", value=str(e)) from e
 
     def get_service_pricing_summary(
-        self, date: str | None = None
+        self, date: Optional[str] = None
     ) -> dict[str, list[dict]]:
         """
         서비스별 가격 정보 요약 조회
@@ -143,7 +143,7 @@ class PricingConnector(BaseConnector):
             ) from e
 
     def compare_billing_vs_pricing(
-        self, billing_data: dict, pricing_date: str | None = None
+        self, billing_data: dict, pricing_date: Optional[str] = None
     ) -> dict:
         """
         실제 청구 데이터와 정가 비교 분석

@@ -92,7 +92,7 @@ class ConcurrencyManager:
 
     def get_cached_session(
         self, project_id: str, bucket_name: str, max_age: float = 300.0
-    ) -> dict | None:
+    ) -> Optional[dict]:
         """캐시된 GCS 세션 조회 (기본 5분 TTL)"""
         session_key = self._get_session_key(project_id, bucket_name)
 

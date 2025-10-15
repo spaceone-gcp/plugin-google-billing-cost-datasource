@@ -194,39 +194,15 @@ class JobManager(BaseManager):
                     _LOGGER.warning(
                         "활성 프로젝트가 발견되지 않았습니다! 빌링 데이터나 필터 조건을 확인하세요."
                     )
-
-                # 특정 프로젝트들이 포함되었는지 확인 (누락되기 쉬운 프로젝트들)
-                key_projects_to_check = [
-                    "mkkang-project",
-                    "dev-project-1-465407",
-                    "inventory-project-465506",
-                    "iron-man-2-465309",
-                    "marvels-the-avengers-465309",
-                    "the-incredible-hulk-465309",
-                    "thor-465309",
-                ]
-
-                # 핵심 프로젝트 포함 확인 (WARNING만 출력)
-                missing_projects = [
-                    p for p in key_projects_to_check if p not in project_list
-                ]
-                if missing_projects:
-                    _LOGGER.warning(
-                        f"핵심 프로젝트 누락: {', '.join(missing_projects)}"
-                    )
+                else:
+                    _LOGGER.info(f"총 {actual_projects}개 프로젝트 발견")
 
             else:
-                _LOGGER.error("[심각] 활성 프로젝트가 전혀 발견되지 않았습니다!")
-                _LOGGER.error("   문제 해결 체크리스트:")
                 _LOGGER.error(
-                    "   1. 필터 조건을 확인하세요: cost > 0 OR usage.amount > 0"
+                    f"활성 프로젝트가 발견되지 않았습니다. "
+                    f"테이블: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}, "
+                    f"기간: {start_month}-01 이후"
                 )
-                _LOGGER.error(f"   2. 조회 기간을 확인하세요: {start_month}-01 이후")
-                _LOGGER.error(
-                    f"   3. 테이블 경로를 확인하세요: {self.billing_export_project_id}.{self.billing_dataset}.{self.billing_table}"
-                )
-                _LOGGER.error("   4. BigQuery 테이블에 데이터가 있는지 확인하세요")
-                _LOGGER.error("   5. 서비스 계정 권한을 확인하세요")
 
             # 프로젝트별 작업 생성
             for index, row in response_stream.iterrows():
@@ -283,18 +259,34 @@ class JobManager(BaseManager):
         Returns:
             str: 시작 월 (YYYY-MM 형식)
         """
+        _LOGGER.debug(
+            "[_get_start_month] 시작 월 결정 시작",
+            extra={
+                "start": start,
+                "last_synchronized_at": last_synchronized_at.isoformat()
+                if last_synchronized_at
+                else None,
+            },
+        )
 
         if start:
             # 1순위: 사용자 지정 start 시점 사용
             start_time: datetime = self._parse_start_time(start)
+            _LOGGER.info(f"[_get_start_month] 사용자 지정 시작 시점 사용: {start}")
         elif last_synchronized_at:
             # 2순위: 마지막 동기화에서 10일 이전 (데이터 누락 방지)
             start_time: datetime = last_synchronized_at - timedelta(days=10)
+            _LOGGER.info(
+                f"[_get_start_month] 마지막 동기화 시점 기준 사용 (10일 이전): {last_synchronized_at.isoformat()} -> {start_time.isoformat()}"
+            )
         else:
             # 3순위: 현재에서 12개월 이전 (최초 연동)
             current_utc = datetime.utcnow()
             start_time: datetime = current_utc - relativedelta(months=12)
             start_time = start_time.replace(day=1)
+            _LOGGER.info(
+                f"[_get_start_month] 최초 연동 - 12개월 이전부터 수집: {start_time.isoformat()}"
+            )
 
         # 시간 정보 정규화 (월 단위로 처리하기 위해)
         start_time = start_time.replace(
@@ -302,6 +294,7 @@ class JobManager(BaseManager):
         )
 
         result = start_time.strftime("%Y-%m")
+        _LOGGER.info(f"[_get_start_month] 최종 시작 월 결정: {result}")
         return result
 
     @staticmethod
@@ -408,7 +401,13 @@ class JobManager(BaseManager):
         if not data_source_type:
             data_source_type = self._get_data_source_type(options)
 
-        # 디버깅을 위한 추가 출력 (기존 코드 유지)
+        # 입력 파라미터 로깅 (GCS/HTTP 모드)
+        _LOGGER.info(
+            f"[JobManager._get_http_file_tasks] Task generation started - "
+            f"data_source_type: {data_source_type}, "
+            f"start: {start}, "
+            f"last_synchronized_at: {last_synchronized_at.isoformat() if last_synchronized_at else None}"
+        )
 
         try:
             # HTTP 파일 커넥터 세션 생성 - 재시도 로직 추가
@@ -517,35 +516,6 @@ class JobManager(BaseManager):
                             "[JobManager._get_http_file_tasks] Continuing with empty file list due to access error"
                         )
 
-                    # start 파라미터 기반 파일 필터링
-
-                    if start:
-                        validated_start = self._validate_and_fix_date_range(start)
-                        _LOGGER.info(
-                            f"[JobManager._get_http_file_tasks] Validated start date: {validated_start}"
-                        )
-                        # 날짜 및 프로젝트 ID 기반 필터링
-                        original_count = len(files)
-                        files = self._filter_files_by_date(
-                            files, validated_start, project_id
-                        )
-                        filter_info = f"date: {validated_start}"
-                        if project_id:
-                            filter_info += f", project_id: {project_id}"
-                        _LOGGER.info(
-                            f"[JobManager._get_http_file_tasks] After filtering: {len(files)}/{original_count} "
-                            f"files matched ({filter_info})"
-                        )
-                    elif project_id:
-                        # start 파라미터가 없어도 project_id가 있으면 필터링 적용
-                        _LOGGER.info(
-                            f"[JobManager._get_http_file_tasks] No start parameter provided, but filtering by project_id: {project_id}"
-                        )
-                        original_count = len(files)
-                        files = self._filter_files_by_project_id(files, project_id)
-                    else:
-                        pass
-
                 # 파일별 작업 생성
 
                 if not files:
@@ -608,12 +578,50 @@ class JobManager(BaseManager):
             # start 파라미터 처리 - BigQuery 모드와 동일한 _get_start_month 함수 사용
             start_month = self._get_start_month(start, last_synchronized_at)
 
+            # 계산된 start_month를 사용하여 파일 필터링 적용 (start 파라미터가 없어도)
+            if "bucket_name" in options and len(tasks) > 0:
+                # start 파라미터 또는 계산된 start_month 기반 파일 필터링
+                filter_start = start if start else start_month
+                if filter_start:
+                    validated_start = self._validate_and_fix_date_range(filter_start)
+                    _LOGGER.info(
+                        f"[JobManager._get_http_file_tasks] Applying date filter: {validated_start} "
+                        f"(source: {'start parameter' if start else 'calculated start_month'})"
+                    )
+
+                    # 태스크 목록에서 날짜 기준 필터링
+                    original_count = len(tasks)
+                    filtered_tasks = []
+
+                    for task in tasks:
+                        file_path = task["task_options"]["file_path"]
+                        if self._file_matches_date_filter(
+                            file_path, validated_start, project_id
+                        ):
+                            filtered_tasks.append(task)
+
+                    tasks = filtered_tasks
+                    filter_info = f"date: {validated_start}"
+                    if project_id:
+                        filter_info += f", project_id: {project_id}"
+                    _LOGGER.info(
+                        f"[JobManager._get_http_file_tasks] After date filtering: {len(tasks)}/{original_count} "
+                        f"tasks matched ({filter_info})"
+                    )
+
             if start:
                 start_value = self._validate_and_fix_date_range(start)
             else:
                 start_value = (
                     start_month  # _get_start_month에서 계산된 기본값 사용 (1년 전)
                 )
+
+            _LOGGER.info(
+                f"[JobManager._get_http_file_tasks] Task generation completed - "
+                f"start_month: {start_month}, "
+                f"start_value: {start_value}, "
+                f"tasks_count: {len(tasks)}"
+            )
 
             changed_item = {
                 "start": start_value,
@@ -818,6 +826,9 @@ class JobManager(BaseManager):
             target_month = month.zfill(2)  # 01, 02, ... 형식으로 변환
 
             filtered_files = []
+            invalid_path_count = 0
+            invalid_month_count = 0
+            invalid_year_count = 0
 
             for file_info in files:
                 file_path = file_info.get("name", "")
@@ -829,9 +840,7 @@ class JobManager(BaseManager):
                 if (
                     len(path_parts) < 4
                 ):  # 최소 4개 부분이 필요 (project/year/month/file)
-                    _LOGGER.debug(
-                        f"[_filter_files_by_date]  Invalid path structure: {file_path}"
-                    )
+                    invalid_path_count += 1
                     continue
 
                 file_project_id = path_parts[0]
@@ -840,16 +849,12 @@ class JobManager(BaseManager):
 
                 # 월 형식 검증: 정확히 2자리 숫자여야 함 (09-backup 등 방지)
                 if not (file_month.isdigit() and len(file_month) == 2):
-                    _LOGGER.debug(
-                        f"[_filter_files_by_date]  Invalid month format: {file_month} in {file_path}"
-                    )
+                    invalid_month_count += 1
                     continue
 
                 # 년도 형식 검증: 정확히 4자리 숫자여야 함
                 if not (file_year.isdigit() and len(file_year) == 4):
-                    _LOGGER.debug(
-                        f"[_filter_files_by_date]  Invalid year format: {file_year} in {file_path}"
-                    )
+                    invalid_year_count += 1
                     continue
 
                 # 날짜 매칭 검증
@@ -876,9 +881,21 @@ class JobManager(BaseManager):
             filter_summary = f"date={start_date}"
             if project_id:
                 filter_summary += f", project_id={project_id}"
+
+            # 요약 정보 로깅
             _LOGGER.info(
                 f"[_filter_files_by_date] Filtered {len(filtered_files)}/{len(files)} files for {filter_summary}"
             )
+
+            # 잘못된 파일 정보 요약 (DEBUG 레벨)
+            if invalid_path_count + invalid_month_count + invalid_year_count > 0:
+                _LOGGER.debug(
+                    f"[_filter_files_by_date] Skipped files - "
+                    f"invalid path: {invalid_path_count}, "
+                    f"invalid month: {invalid_month_count}, "
+                    f"invalid year: {invalid_year_count}"
+                )
+
             return filtered_files
 
         except Exception as e:
@@ -887,6 +904,46 @@ class JobManager(BaseManager):
             )
             # 오류 시 원본 파일 목록 반환
             return files
+
+    @staticmethod
+    def _file_matches_date_filter(
+        file_path: str, start_date: str, project_id: str = None
+    ) -> bool:
+        """단일 파일이 날짜 필터와 매치되는지 확인"""
+        try:
+            # start_date를 년/월로 파싱
+            target_year, target_month = start_date.split("-")[:2]
+
+            # 파일 경로에서 날짜 정보 추출
+            # 예: "aramco/2025/08/billing_data_202508-000000000000.parquet"
+            path_parts = file_path.split("/")
+
+            if len(path_parts) >= 3:
+                # 경로 기반 날짜 추출 (project_id/year/month/filename)
+                file_project_id = path_parts[0]
+                file_year = path_parts[1]
+                file_month = path_parts[2]
+
+                # 날짜 매치 확인 (start_date 이후)
+                date_match = int(file_year) > int(target_year) or (
+                    int(file_year) == int(target_year)
+                    and int(file_month) >= int(target_month)
+                )
+
+                # 프로젝트 ID 매치 확인 (지정된 경우)
+                project_match = True
+                if project_id:
+                    project_match = file_project_id == project_id
+
+                return date_match and project_match
+
+            return False
+
+        except Exception as e:
+            _LOGGER.debug(
+                f"[_file_matches_date_filter] Failed to parse file path {file_path}: {e}"
+            )
+            return False
 
     @staticmethod
     def _validate_and_fix_date_range(start_date: str) -> str:

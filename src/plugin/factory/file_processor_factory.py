@@ -109,7 +109,7 @@ class FileProcessorFactory:
         )
 
     @staticmethod
-    def _detect_format_by_content(content_sample: bytes) -> str | None:
+    def _detect_format_by_content(content_sample: bytes) -> Optional[str]:
         """파일 내용으로 형식 감지"""
         try:
             # 첫 1KB 샘플 사용
