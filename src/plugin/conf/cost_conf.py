@@ -30,10 +30,8 @@ GCS_CONFIG = {
         "snappy",  # Snappy 압축 (Parquet와 함께 주로 사용)
         "zstd",  # Zstandard 압축
     ],
-    # 기본 청크 크기 - 고정값으로 설정
+    # 기본 청크 크기 - 기본값으로 설정
     "default_chunk_size": 1000,
-    # 최대 청크 크기 제한 - 기본값과 동일
-    "max_chunk_size": 1000,
     # 최대 파일 크기 제한 (1GB)
     "max_file_size": 1024 * 1024 * 1024,
     # 파일 다운로드 타임아웃 (5분)

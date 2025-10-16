@@ -117,13 +117,13 @@ class JSONParser(BaseParser):
 
                 # 배치 단위로 yield
                 if len(batch_records) >= self.chunk_size:
-                    # 페이징 단위 처리 로깅
-                    self._log_batch_processing(
-                        len(batch_records), processed_count, "json_lines_stream"
-                    )
+                    # 페이징 단위 처리 로깅 (5000건 단위로만 - 성능 최적화)
+                    if processed_count % 5000 == 0:
+                        self._log_batch_processing(
+                            len(batch_records), processed_count, "json_lines_stream"
+                        )
                     yield self._create_batch_result(batch_records)
                     batch_records = []
-                    self._log_parsing_progress(processed_count, "json_lines_stream")
 
             except json.JSONDecodeError as e:
                 _LOGGER.warning(f"[JSONParser] Invalid JSON at line {line_num}: {e}")

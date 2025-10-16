@@ -427,20 +427,22 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         if batch_size is None:
             batch_size = PERFORMANCE_CONFIG["grpc_response_batch_size"]
         else:
-            # 타입 변환 및 검증
-            if isinstance(batch_size, (int, float)) and batch_size > 0:
-                batch_size = int(batch_size)
-                # 범위 제한 (1 ~ 10000)
-                batch_size = max(1, min(batch_size, 10000))
-            else:
+            # 타입 변환 및 검증 (문자열 숫자도 처리)
+            try:
+                # 문자열이나 숫자를 int로 변환 시도
+                batch_size_int = int(batch_size)
+                if batch_size_int > 0:
+                    # 범위 제한 (1 ~ 10000)
+                    batch_size = max(1, min(batch_size_int, 10000))
+                else:
+                    raise ValueError("batch_size must be positive")
+            except (ValueError, TypeError):
                 _LOGGER.warning(
                     f"Invalid batch_size: {batch_size}. Using default: {PERFORMANCE_CONFIG['grpc_response_batch_size']}"
                 )
                 batch_size = PERFORMANCE_CONFIG["grpc_response_batch_size"]
 
-        _LOGGER.info(
-            f"[cost_get_data] Using batch_size: {batch_size} (from task_options: {task_options.get('batch_size')}, from options: {options.get('batch_size')})"
-        )
+        # batch_size 로깅 제거 (성능 최적화 - 매 파일마다 반복되는 중복 로깅)
 
         result_generator = _cost_get_data_logic(params, batch_size)
 
@@ -520,12 +522,7 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
             else:
                 processed_project = "unknown"
 
-        # 성능 최적화 효과 로깅 (간소화됨)
-        if PERFORMANCE_CONFIG["enable_performance_logging"]:
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    f"프로젝트 '{processed_project}' 처리 완료: {batch_count}개 배치, {total_records}건"
-                )
+        # 프로젝트 처리 완료 로깅 제거 (성능 최적화 - 매 파일마다 반복되는 중복 로깅)
 
         # JSON 로깅 중단 및 파일 저장
         if is_json_logging_active():
@@ -999,16 +996,21 @@ def _get_batch_size_from_options(options: dict) -> int:
         f"[_get_batch_size_from_options] Raw batch_size from options: {batch_size}"
     )
 
-    # 유효성 검증 (int 또는 float 허용)
-    if not isinstance(batch_size, (int, float)) or batch_size <= 0:
+    # 유효성 검증 (문자열 숫자도 처리)
+    try:
+        # 문자열이나 숫자를 int로 변환 시도
+        batch_size_int = int(batch_size)
+        if batch_size_int <= 0:
+            raise ValueError("batch_size must be positive")
+        batch_size = batch_size_int
+        _LOGGER.debug(
+            f"[_get_batch_size_from_options] Converted batch_size: {batch_size}"
+        )
+    except (ValueError, TypeError):
         _LOGGER.warning(
             f"Invalid batch_size in options: {batch_size}. Using default: {PERFORMANCE_CONFIG['grpc_response_batch_size']}"
         )
         return PERFORMANCE_CONFIG["grpc_response_batch_size"]
-
-    # float을 int로 변환
-    batch_size = int(batch_size)
-    _LOGGER.debug(f"[_get_batch_size_from_options] Converted batch_size: {batch_size}")
 
     # 범위 제한 (1 ~ 10000)
     batch_size = max(1, min(batch_size, 10000))
@@ -1038,16 +1040,9 @@ def _create_fixed_batches(
 
     total_records = len(records)
 
-    # 배치 수 계산
-    batch_count = (total_records + batch_size - 1) // batch_size
+    # 배치 수 계산 제거 (사용하지 않음 - 성능 최적화)
 
-    # DEBUG 레벨에서만 성능 정보 로깅
-    if PERFORMANCE_CONFIG["enable_performance_logging"] and _LOGGER.isEnabledFor(
-        logging.DEBUG
-    ):
-        _LOGGER.debug(
-            f"{total_records}개 레코드를 {batch_count}개 배치로 처리 (배치당 {batch_size}개)"
-        )
+    # 성능 정보 로깅 제거 (성능 최적화)
 
     # 배치 단위로 레코드 분할
     for i in range(0, total_records, batch_size):

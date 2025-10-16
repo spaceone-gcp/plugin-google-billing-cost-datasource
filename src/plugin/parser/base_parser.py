@@ -16,7 +16,6 @@ class BaseParser(ABC):
         self.chunk_size = (
             batch_size or GCS_CONFIG["default_chunk_size"]
         )  # 배치 크기 또는 기본 청크 크기
-        self.max_chunk_size = GCS_CONFIG["max_chunk_size"]  # 최대 청크 크기
         self.grpc_message_limit = GCS_CONFIG[
             "grpc_message_size_limit"
         ]  # gRPC 메시지 크기 제한
@@ -39,7 +38,7 @@ class BaseParser(ABC):
 
     def set_chunk_size(self, chunk_size: int):
         """청크 크기 설정"""
-        self.chunk_size = max(1, min(chunk_size, self.max_chunk_size))
+        self.chunk_size = max(1, chunk_size)
 
     def _create_batch_result(self, records: list) -> dict:
         """배치 결과 생성 - billed_date 필드 검증 및 직렬화 포함"""
@@ -305,9 +304,9 @@ class BaseParser(ABC):
     def _log_batch_processing(
         self, batch_size: int, total_processed: int, file_name: str = ""
     ):
-        """배치 처리 로깅 - 1000건 단위로만 로깅"""
-        # 1000건 단위로만 로깅 (반복 로깅 최소화)
-        if total_processed % 1000 == 0:
+        """배치 처리 로깅 - 5000건 단위로만 로깅 (성능 최적화)"""
+        # 5000건 단위로만 로깅 (반복 로깅 최소화)
+        if total_processed % 5000 == 0:
             file_info = f" from {file_name}" if file_name else ""
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Processing batch: {batch_size:,} records "

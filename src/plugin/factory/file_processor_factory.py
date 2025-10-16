@@ -43,9 +43,8 @@ class FileProcessorFactory:
         if batch_size is None:
             parser.set_chunk_size(GCS_CONFIG["default_chunk_size"])
 
-        _LOGGER.debug(
-            f"[FileProcessorFactory] Created {file_format} parser with batch_size: {batch_size or 'default'}"
-        )
+        # 파서 생성 로깅 제거 (성능 최적화 - 매 파일마다 반복되는 불필요한 로깅)
+        # _LOGGER.debug(f"[FileProcessorFactory] Created {file_format} parser with batch_size: {batch_size or 'default'}")
         return parser
 
     @staticmethod
@@ -73,9 +72,7 @@ class FileProcessorFactory:
         ):
             # Parquet 파일인 경우 압축 확장자 제거 없이 원본 파일명 사용
             clean_name = file_name
-            _LOGGER.info(
-                f"[FileProcessorFactory] Parquet file detected, using original filename: {file_name}"
-            )
+            # 파일 타입 감지 로깅 제거 (성능 최적화 - 매 파일마다 반복되는 중복 로깅)
         else:
             # Parquet이 아닌 경우에만 압축 감지 수행
             compression_type = CompressionHandler.detect_compression(

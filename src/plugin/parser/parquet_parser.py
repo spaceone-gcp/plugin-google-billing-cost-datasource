@@ -142,11 +142,11 @@ class ParquetParser(BaseParser):
 
             # 배치 결과 생성
             if batch_records:
-                # 페이징 단위 처리 로깅
-                self._log_batch_processing(
-                    len(batch_records), current_count, "parquet_stream"
-                )
-                self._log_parsing_progress(current_count, "parquet_stream")
+                # 페이징 단위 처리 로깅 (5000건 단위로만 - 성능 최적화)
+                if current_count % 5000 == 0:
+                    self._log_batch_processing(
+                        len(batch_records), current_count, "parquet_stream"
+                    )
                 return self._create_batch_result(batch_records)
 
             return None

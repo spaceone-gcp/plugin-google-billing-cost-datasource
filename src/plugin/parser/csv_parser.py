@@ -101,13 +101,13 @@ class CSVParser(BaseParser):
 
                         # 배치 단위로 yield
                         if len(batch_records) >= self.chunk_size:
-                            # 페이징 단위 처리 로깅
-                            self._log_batch_processing(
-                                len(batch_records), processed_count, "csv_stream"
-                            )
+                            # 페이징 단위 처리 로깅 (5000건 단위로만 - 성능 최적화)
+                            if processed_count % 5000 == 0:
+                                self._log_batch_processing(
+                                    len(batch_records), processed_count, "csv_stream"
+                                )
                             yield self._create_batch_result(batch_records)
                             batch_records = []
-                            self._log_parsing_progress(processed_count, "csv_stream")
 
                     except Exception as e:
                         _LOGGER.warning(
@@ -169,13 +169,13 @@ class CSVParser(BaseParser):
 
                         # 배치 단위로 yield
                         if len(batch_records) >= self.chunk_size:
-                            # 페이징 단위 처리 로깅
-                            self._log_batch_processing(
-                                len(batch_records), processed_count, "csv_stream"
-                            )
+                            # 페이징 단위 처리 로깅 (5000건 단위로만 - 성능 최적화)
+                            if processed_count % 5000 == 0:
+                                self._log_batch_processing(
+                                    len(batch_records), processed_count, "csv_stream"
+                                )
                             yield self._create_batch_result(batch_records)
                             batch_records = []
-                            self._log_parsing_progress(processed_count, "csv_stream")
 
                     except Exception as e:
                         _LOGGER.warning(

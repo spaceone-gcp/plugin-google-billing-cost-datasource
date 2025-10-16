@@ -107,22 +107,25 @@ class CostManager(BaseManager):
 
             _LOGGER.debug(f"[CostManager] Selected batch_size: {batch_size}")
 
-        # 유효성 검증 (int 또는 float 허용)
-        if not isinstance(batch_size, (int, float)) or batch_size <= 0:
+        # 유효성 검증 (문자열 숫자도 처리)
+        try:
+            # 문자열이나 숫자를 int로 변환 시도
+            batch_size_int = int(batch_size)
+            if batch_size_int <= 0:
+                raise ValueError("batch_size must be positive")
+            batch_size = batch_size_int
+        except (ValueError, TypeError):
             from ..conf.cost_conf import PERFORMANCE_CONFIG
 
             _LOGGER.warning(
                 f"Invalid batch_size: {batch_size}. Using default: {PERFORMANCE_CONFIG['grpc_response_batch_size']}"
             )
             batch_size = PERFORMANCE_CONFIG["grpc_response_batch_size"]
-        else:
-            # float을 int로 변환
-            batch_size = int(batch_size)
 
         # 범위 제한 (1 ~ 10000)
         batch_size = max(1, min(batch_size, 10000))
 
-        _LOGGER.info(f"[CostManager] Using batch_size: {batch_size}")
+        # batch_size 로깅 제거 (성능 최적화 - 매 파일마다 반복되는 중복 로깅)
 
         # source 값 추출 (options에서만)
         source = self._get_source_value(options)
@@ -456,11 +459,8 @@ class CostManager(BaseManager):
                             batch_size = len(batch_result["results"])
                             file_processed_count += batch_size
 
-                            # 1000건 단위로만 로깅 (반복 로깅 최소화)
-                            if (
-                                file_processed_count % 1000 == 0
-                                or file_processed_count == batch_size
-                            ):
+                            # 5000건 단위로만 로깅 (성능 최적화 - 반복 로깅 최소화)
+                            if file_processed_count % 5000 == 0:
                                 _LOGGER.info(
                                     f"[CostManager] File {file_index}/{total_files} ({file_name}): "
                                     f"Processed batch of {batch_size:,} records "
@@ -478,9 +478,7 @@ class CostManager(BaseManager):
                         f"Total {file_processed_count:,} records processed"
                     )
 
-                _LOGGER.info(
-                    f"[CostManager] Completed GCS file processing: {total_files} files processed"
-                )
+                # GCS 파일 처리 완료 로깅 제거 (성능 최적화 - 항상 1개 파일이므로 불필요)
 
                 # 최종 일별 카운트 요약 로깅
                 if hasattr(self, "field_mapper") and self.field_mapper:
@@ -571,13 +569,9 @@ class CostManager(BaseManager):
         # 특정 파일 경로가 지정된 경우 해당 파일만 반환
         file_path = task_options.get("file_path")
         if file_path:
-            _LOGGER.info(f"[CostManager] Specific file_path provided: {file_path}")
-            # 특정 파일만 조회
+            # 특정 파일 처리 (중복 로깅 제거 - 성능 최적화)
             specific_files = self.gcs_connector.list_gcs_files(bucket_name, file_path)
             if specific_files:
-                _LOGGER.info(
-                    f"[CostManager] Found specific file: {specific_files[0]['name']}"
-                )
                 return specific_files
             else:
                 _LOGGER.warning(f"[CostManager] Specified file not found: {file_path}")
