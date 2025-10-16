@@ -531,16 +531,23 @@ class CostManager(BaseManager):
         # 사용자 정의 패턴이 있으면 우선 적용
         custom_pattern = task_options.get("file_pattern")
         if custom_pattern:
-            file_pattern = custom_pattern
-            return self.gcs_connector.list_gcs_files(bucket_name, file_pattern)
+            _LOGGER.info(f"[CostManager] Using custom pattern: {custom_pattern}")
+            return self.gcs_connector.list_gcs_files(bucket_name, custom_pattern)
         elif project_id and start_period:
-            # start부터 현재 월까지의 날짜 범위로 파일 수집
+            # start부터 현재 월까지의 날짜 범위로 파일 수집 (최적화된 방식)
+            _LOGGER.info(
+                f"[CostManager] Using optimized date range search: {project_id}/{start_period}"
+            )
             all_files = []
             date_patterns = self._generate_date_range_patterns(project_id, start_period)
 
             for pattern in date_patterns:
-                pattern_files = self.gcs_connector.list_gcs_files(bucket_name, pattern)
-                all_files.extend(pattern_files)
+                # 패턴이 명확한 경우에만 검색 수행
+                if pattern and len(pattern.strip()) > 0:
+                    pattern_files = self.gcs_connector.list_gcs_files(
+                        bucket_name, pattern
+                    )
+                    all_files.extend(pattern_files)
 
             # 중복 제거 (파일명 기준)
             seen_files = set()
@@ -549,14 +556,24 @@ class CostManager(BaseManager):
                 if file_info["name"] not in seen_files:
                     files.append(file_info)
                     seen_files.add(file_info["name"])
+
+            _LOGGER.info(
+                f"[CostManager] Found {len(files)} unique files after deduplication"
+            )
             return files
 
         elif project_id:
+            # 프로젝트 ID만 있는 경우 해당 프로젝트 폴더 검색
             file_pattern = f"{project_id}/"
+            _LOGGER.info(f"[CostManager] Using project-based pattern: {file_pattern}")
             return self.gcs_connector.list_gcs_files(bucket_name, file_pattern)
         else:
-            # 패턴 없이 모든 파일 검색
-            return self.gcs_connector.list_gcs_files(bucket_name, None)
+            # 패턴 없는 경우 경고 로그와 함께 빈 목록 반환 (대량 스캔 방지)
+            _LOGGER.warning(
+                "[CostManager] No search pattern specified - returning empty list to prevent bulk scanning. "
+                "Please specify project_id or file_pattern for efficient file discovery."
+            )
+            return []
 
     def _get_data_from_http(
         self, options: dict, secret_data: dict, task_options: dict, schema: str = None

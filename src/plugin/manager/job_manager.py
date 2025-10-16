@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
@@ -433,13 +434,9 @@ class JobManager(BaseManager):
                     time.sleep(1)  # 1초 대기 후 재시도
 
             # HTTP 파일 설정 검증
-            _LOGGER.debug(
-                "[JobManager._get_http_file_tasks] Validating HTTP file options"
-            )
+            # HTTP 파일 옵션 검증 (간소화)
+            # DEBUG 로그 제거: 정상 동작시 불필요한 로깅
             self._check_http_file_options(options)
-            _LOGGER.debug(
-                "[JobManager._get_http_file_tasks] HTTP file options validation completed"
-            )
 
             # 작업 생성 초기화
             tasks = []
@@ -498,23 +495,52 @@ class JobManager(BaseManager):
                             "[JobManager._get_http_file_tasks] Continuing with empty file list due to access error"
                         )
                 else:
-                    # 기존 방식: 전체 파일 목록 조회 후 필터링
+                    # 패턴 기반 파일 목록 조회 (최적화된 방식)
                     file_pattern = options.get("file_pattern")
+                    prefix = options.get("prefix")
 
-                    # 파일 목록 조회 - 에러 처리 강화
-                    try:
-                        files = self.gcs_connector.list_gcs_files(
-                            bucket_name, file_pattern
-                        )
-                    except Exception as e:
-                        _LOGGER.error(
-                            f"[JobManager._get_http_file_tasks] Failed to list files from bucket {bucket_name}: {e}"
-                        )
-                        # 빈 파일 목록으로 계속 진행하되, 에러를 기록
-                        files = []
+                    # 검색 패턴 결정
+                    search_pattern = file_pattern or prefix
+
+                    if not search_pattern:
                         _LOGGER.warning(
-                            "[JobManager._get_http_file_tasks] Continuing with empty file list due to access error"
+                            "[JobManager._get_http_file_tasks] No file_pattern or prefix specified. "
+                            "Skipping bulk scan to prevent performance issues."
                         )
+                        files = []
+                    else:
+                        # 날짜 기반 최적화된 검색 사용
+                        try:
+                            if start:
+                                validated_start = self._validate_and_fix_date_range(
+                                    start
+                                )
+                                _LOGGER.info(
+                                    f"[JobManager._get_http_file_tasks] Using optimized date-range search: {search_pattern} from {validated_start}"
+                                )
+                                files = self.gcs_connector.list_gcs_files_by_date_range(
+                                    bucket_name, search_pattern, validated_start
+                                )
+                            else:
+                                # start가 없으면 기본 1년 전부터 검색
+                                start_month = self._get_start_month(
+                                    last_synchronized_at
+                                )
+                                _LOGGER.info(
+                                    f"[JobManager._get_http_file_tasks] Using optimized date-range search: {search_pattern} from {start_month}"
+                                )
+                                files = self.gcs_connector.list_gcs_files_by_date_range(
+                                    bucket_name, search_pattern, start_month
+                                )
+                        except Exception as e:
+                            _LOGGER.error(
+                                f"[JobManager._get_http_file_tasks] Failed to list files from bucket {bucket_name}: {e}"
+                            )
+                            # 빈 파일 목록으로 계속 진행하되, 에러를 기록
+                            files = []
+                            _LOGGER.warning(
+                                "[JobManager._get_http_file_tasks] Continuing with empty file list due to access error"
+                            )
 
                 # 파일별 작업 생성
 
@@ -527,6 +553,13 @@ class JobManager(BaseManager):
                 for index, file_info in enumerate(files):
                     try:
                         file_path = file_info["name"]
+
+                        # 디렉토리 경로인지 확인 (파일 확장자가 없고 '/'로 끝나는 경우 제외)
+                        if self._is_directory_path(file_path):
+                            _LOGGER.debug(
+                                f"[JobManager._get_http_file_tasks] Skipping directory path: {file_path}"
+                            )
+                            continue
 
                         task_options = {
                             "bucket_name": bucket_name,
@@ -575,39 +608,9 @@ class JobManager(BaseManager):
 
             current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-            # start 파라미터 처리 - BigQuery 모드와 동일한 _get_start_month 함수 사용
+            # 날짜 기반 필터링은 이미 GCS 검색 단계에서 처리됨 (중복 제거)
+            # start 파라미터 처리 - 최종 결과 검증용
             start_month = self._get_start_month(start, last_synchronized_at)
-
-            # 계산된 start_month를 사용하여 파일 필터링 적용 (start 파라미터가 없어도)
-            if "bucket_name" in options and len(tasks) > 0:
-                # start 파라미터 또는 계산된 start_month 기반 파일 필터링
-                filter_start = start if start else start_month
-                if filter_start:
-                    validated_start = self._validate_and_fix_date_range(filter_start)
-                    _LOGGER.info(
-                        f"[JobManager._get_http_file_tasks] Applying date filter: {validated_start} "
-                        f"(source: {'start parameter' if start else 'calculated start_month'})"
-                    )
-
-                    # 태스크 목록에서 날짜 기준 필터링
-                    original_count = len(tasks)
-                    filtered_tasks = []
-
-                    for task in tasks:
-                        file_path = task["task_options"]["file_path"]
-                        if self._file_matches_date_filter(
-                            file_path, validated_start, project_id
-                        ):
-                            filtered_tasks.append(task)
-
-                    tasks = filtered_tasks
-                    filter_info = f"date: {validated_start}"
-                    if project_id:
-                        filter_info += f", project_id: {project_id}"
-                    _LOGGER.info(
-                        f"[JobManager._get_http_file_tasks] After date filtering: {len(tasks)}/{original_count} "
-                        f"tasks matched ({filter_info})"
-                    )
 
             if start:
                 start_value = self._validate_and_fix_date_range(start)
@@ -646,6 +649,39 @@ class JobManager(BaseManager):
             )
             # 에러 발생 시에도 빈 결과를 반환하여 전체 프로세스가 중단되지 않도록 함
             return {"tasks": [], "changed": []}
+
+    def _is_directory_path(self, file_path: str) -> bool:
+        """파일 경로가 디렉토리인지 확인"""
+        if not file_path:
+            return False
+
+        # '/'로 끝나는 경우 디렉토리로 판단
+        if file_path.endswith("/"):
+            return True
+
+        # 파일 확장자가 있는지 확인
+        _, ext = os.path.splitext(file_path)
+
+        # 일반적인 빌링 데이터 파일 확장자 목록
+        valid_extensions = {
+            ".csv",
+            ".json",
+            ".parquet",
+            ".gz",
+            ".zip",
+            ".bz2",
+            ".xz",
+            ".snappy",
+            ".sz",
+            ".zst",
+            ".zstd",
+        }
+
+        # 확장자가 없거나 유효하지 않은 확장자인 경우 디렉토리로 판단
+        if not ext or ext.lower() not in valid_extensions:
+            return True
+
+        return False
 
     def _get_data_source_type(self, options: dict) -> str:
         """데이터 소스 타입 결정"""
@@ -909,8 +945,16 @@ class JobManager(BaseManager):
     def _file_matches_date_filter(
         file_path: str, start_date: str, project_id: str = None
     ) -> bool:
-        """단일 파일이 날짜 필터와 매치되는지 확인"""
+        """단일 파일이 날짜 필터와 매치되는지 확인 (사전 필터링 포함)"""
         try:
+            # 사전 필터링: 명백히 잘못된 경로 패턴 제외
+            if (
+                "/test/" in file_path
+                or "/backup/" in file_path
+                or "/archive/" in file_path
+            ):
+                return False
+
             # start_date를 년/월로 파싱
             target_year, target_month = start_date.split("-")[:2]
 
@@ -924,10 +968,23 @@ class JobManager(BaseManager):
                 file_year = path_parts[1]
                 file_month = path_parts[2]
 
+                # 년도/월 형식 사전 검증 (숫자가 아닌 경우 빠른 실패)
+                if not (file_year.isdigit() and file_month.isdigit()):
+                    return False
+
+                # 년도 범위 검증 (2020-2030 범위 외 제외)
+                year_int = int(file_year)
+                if not (2020 <= year_int <= 2030):
+                    return False
+
+                # 월 범위 검증 (1-12 범위 외 제외)
+                month_int = int(file_month)
+                if not (1 <= month_int <= 12):
+                    return False
+
                 # 날짜 매치 확인 (start_date 이후)
-                date_match = int(file_year) > int(target_year) or (
-                    int(file_year) == int(target_year)
-                    and int(file_month) >= int(target_month)
+                date_match = year_int > int(target_year) or (
+                    year_int == int(target_year) and month_int >= int(target_month)
                 )
 
                 # 프로젝트 ID 매치 확인 (지정된 경우)
@@ -939,10 +996,8 @@ class JobManager(BaseManager):
 
             return False
 
-        except Exception as e:
-            _LOGGER.debug(
-                f"[_file_matches_date_filter] Failed to parse file path {file_path}: {e}"
-            )
+        except Exception:
+            # 로그 레벨을 DEBUG에서 제거하여 스팸 방지
             return False
 
     @staticmethod
