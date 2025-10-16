@@ -500,17 +500,30 @@ class JobManager(BaseManager):
                     # 패턴 기반 파일 목록 조회 (최적화된 방식)
                     file_pattern = options.get("file_pattern")
                     prefix = options.get("prefix")
+                    file_prefix = options.get("file_prefix")  # 문서화된 표준 파라미터
+                    project_id = options.get("project_id")
 
-                    # 검색 패턴 결정
-                    search_pattern = file_pattern or prefix
+                    # 검색 패턴 결정 (우선순위: file_pattern > file_prefix > prefix > project_id)
+                    search_pattern = file_pattern or file_prefix or prefix or project_id
 
                     if not search_pattern:
                         _LOGGER.warning(
-                            "[JobManager._get_http_file_tasks] No file_pattern or prefix specified. "
+                            "[JobManager._get_http_file_tasks] No file_pattern, prefix, or project_id specified. "
                             "Skipping bulk scan to prevent performance issues."
                         )
                         files = []
                     else:
+                        # 사용된 패턴 유형에 따른 로깅
+                        if search_pattern == project_id and not (
+                            file_pattern or file_prefix or prefix
+                        ):
+                            _LOGGER.info(
+                                f"[JobManager._get_http_file_tasks] Using project_id as prefix fallback: {project_id}"
+                            )
+                        elif search_pattern == file_prefix:
+                            _LOGGER.info(
+                                f"[JobManager._get_http_file_tasks] Using file_prefix (documented standard): {file_prefix}"
+                            )
                         # 날짜 기반 최적화된 검색 사용
                         try:
                             if start:
@@ -526,7 +539,7 @@ class JobManager(BaseManager):
                             else:
                                 # start가 없으면 기본 1년 전부터 검색
                                 start_month = self._get_start_month(
-                                    last_synchronized_at
+                                    None, last_synchronized_at
                                 )
                                 _LOGGER.info(
                                     f"[JobManager._get_http_file_tasks] Using optimized date-range search: {search_pattern} from {start_month}"
