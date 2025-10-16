@@ -466,14 +466,8 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
                             processed_records.append(record)
 
-                        # 성능 최적화: 배치 단위로 yield (gRPC 메시지 크기 제한 고려)
-                        if PERFORMANCE_CONFIG["enable_dynamic_batch_sizing"]:
-                            # 동적 배치 크기 조정으로 최적화된 yield
-                            yield from _create_optimized_batches(processed_records)
-                        else:
-                            # 기존 방식: 개별 레코드 yield (하위 호환성)
-                            for record in processed_records:
-                                yield {"results": [record]}
+                        # 성능 최적화: 고정 배치 크기로 yield
+                        yield from _create_fixed_batches(processed_records)
 
             except Exception as e:
                 _LOGGER.error(
@@ -959,82 +953,35 @@ def _estimate_records_size(records: list) -> int:
         return len(records) * PERFORMANCE_CONFIG["avg_record_size_bytes"]
 
 
-def _calculate_optimal_batch_size(records: list) -> int:
-    """gRPC 메시지 크기 제한을 고려한 최적 배치 크기 계산"""
-    if not records:
-        return PERFORMANCE_CONFIG["min_batch_size"]
-
-    max_message_size = PERFORMANCE_CONFIG["grpc_message_size_limit"]
-    min_batch_size = PERFORMANCE_CONFIG["min_batch_size"]
-    max_batch_size = PERFORMANCE_CONFIG["max_batch_size"]
-
-    # 단일 레코드 크기 추정
-    try:
-        import json
-
-        sample_record = records[0]
-        single_record_size = len(
-            json.dumps(sample_record, ensure_ascii=False).encode("utf-8")
-        )
-
-        # 안전 마진을 고려한 최적 배치 크기 계산
-        optimal_size = max_message_size // (
-            single_record_size + 50
-        )  # 50바이트 오버헤드
-
-        # 범위 제한 적용
-        optimal_size = max(min_batch_size, min(optimal_size, max_batch_size))
-
-        return optimal_size
-    except Exception:
-        # 계산 실패 시 기본값 반환
-        return PERFORMANCE_CONFIG["grpc_response_batch_size"]
+def _get_fixed_batch_size() -> int:
+    """고정된 배치 크기 반환"""
+    return PERFORMANCE_CONFIG["grpc_response_batch_size"]
 
 
-def _create_optimized_batches(records: list) -> Generator[dict, None, None]:
-    """레코드 리스트를 최적화된 배치로 분할하여 yield"""
+def _create_fixed_batches(records: list) -> Generator[dict, None, None]:
+    """레코드 리스트를 고정된 배치 크기로 분할하여 yield"""
     if not records:
         return
 
     total_records = len(records)
-    optimal_batch_size = _calculate_optimal_batch_size(records)
+    batch_size = _get_fixed_batch_size()
 
     # 배치 수 계산
-    batch_count = (total_records + optimal_batch_size - 1) // optimal_batch_size
+    batch_count = (total_records + batch_size - 1) // batch_size
 
     # DEBUG 레벨에서만 성능 정보 로깅
     if PERFORMANCE_CONFIG["enable_performance_logging"] and _LOGGER.isEnabledFor(
         logging.DEBUG
     ):
         _LOGGER.debug(
-            f"{total_records}개 레코드를 {batch_count}개 배치로 처리 (배치당 최대 {optimal_batch_size}개)"
+            f"{total_records}개 레코드를 {batch_count}개 배치로 처리 (배치당 {batch_size}개)"
         )
 
     # 배치 단위로 레코드 분할
-    for i in range(0, total_records, optimal_batch_size):
-        batch_records = records[i : i + optimal_batch_size]
-        batch_size = len(batch_records)
-
-        # 메시지 크기 검증
-        estimated_size = _estimate_records_size(batch_records)
-        max_size = PERFORMANCE_CONFIG["grpc_message_size_limit"]
-
-        if estimated_size > max_size:
-            # 배치가 너무 큰 경우 더 작게 분할
-            smaller_batch_size = max(1, batch_size // 2)
-            _LOGGER.warning(
-                f"배치 크기 자동 조정: {batch_size} → {smaller_batch_size}개 "
-                f"(메시지 크기: {estimated_size:,} bytes 초과)"
-            )
-
-            # 재귀적으로 더 작은 배치 생성
-            yield from _create_optimized_batches(batch_records[:smaller_batch_size])
-            if len(batch_records) > smaller_batch_size:
-                yield from _create_optimized_batches(batch_records[smaller_batch_size:])
-        else:
-            # 적절한 크기의 배치 생성
-            batch_result = {"results": batch_records}
-            yield batch_result
+    for i in range(0, total_records, batch_size):
+        batch_records = records[i : i + batch_size]
+        batch_result = {"results": batch_records}
+        yield batch_result
 
 
 # =============================================================================

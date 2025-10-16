@@ -269,36 +269,6 @@ class BaseParser(ABC):
             # 안전한 기본값 반환
             return len(records) * 1000  # 레코드당 1KB로 추정
 
-    def _adjust_chunk_size_dynamically(self, current_batch_size: int, records: list):
-        """동적 청크 크기 조정 - 더욱 보수적인 접근"""
-        estimated_size = self._estimate_message_size(records)
-
-        if (
-            estimated_size > self.grpc_message_limit * 0.6
-        ):  # 60% 임계값으로 더욱 보수적 접근
-            # 청크 크기를 줄여야 함
-            new_chunk_size = max(50, int(self.chunk_size * 0.5))  # 더 적극적으로 감소
-            if new_chunk_size != self.chunk_size:
-                old_chunk_size = self.chunk_size
-                self.chunk_size = new_chunk_size
-                # 첫 번째 변경 시에만 로깅
-                if not hasattr(self, "_chunk_size_reduced_logged"):
-                    _LOGGER.warning(
-                        f"[BaseParser] Chunk size reduced from {old_chunk_size} to {new_chunk_size} "
-                        f"(estimated message size: {estimated_size:,} bytes)"
-                    )
-                    self._chunk_size_reduced_logged = True
-        elif (
-            estimated_size < self.grpc_message_limit * 0.2  # 20%로 더욱 보수적
-            and self.chunk_size < self.max_chunk_size
-        ):
-            # 청크 크기를 늘릴 수 있음 (천천히)
-            new_chunk_size = min(
-                self.max_chunk_size, int(self.chunk_size * 1.1)
-            )  # 10%씩만 증가
-            if new_chunk_size != self.chunk_size:
-                self.chunk_size = new_chunk_size
-
     def _log_parsing_progress(self, processed_count: int, file_name: str = ""):
         """파싱 진행 상황 로깅"""
         if processed_count > 0 and processed_count % 1000 == 0:

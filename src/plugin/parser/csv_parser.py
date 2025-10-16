@@ -102,10 +102,6 @@ class CSVParser(BaseParser):
                             self._log_batch_processing(
                                 len(batch_records), processed_count, "csv_stream"
                             )
-                            # 동적 청크 크기 조정
-                            self._adjust_chunk_size_dynamically(
-                                len(batch_records), batch_records
-                            )
                             yield self._create_batch_result(batch_records)
                             batch_records = []
                             self._log_parsing_progress(processed_count, "csv_stream")
@@ -173,10 +169,6 @@ class CSVParser(BaseParser):
                             # 페이징 단위 처리 로깅
                             self._log_batch_processing(
                                 len(batch_records), processed_count, "csv_stream"
-                            )
-                            # 동적 청크 크기 조정
-                            self._adjust_chunk_size_dynamically(
-                                len(batch_records), batch_records
                             )
                             yield self._create_batch_result(batch_records)
                             batch_records = []

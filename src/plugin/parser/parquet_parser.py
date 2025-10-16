@@ -50,8 +50,8 @@ class ParquetParser(BaseParser):
             # 배치 단위로 데이터 읽기
             processed_count = 0
 
-            # 배치 크기 조정 (Parquet은 일반적으로 큰 배치가 효율적)
-            batch_size = max(self.chunk_size, 1000)
+            # 고정 배치 크기 사용
+            batch_size = 1000
 
             for batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=columns, use_pandas_metadata=True
@@ -143,8 +143,6 @@ class ParquetParser(BaseParser):
                 self._log_batch_processing(
                     len(batch_records), current_count, "parquet_stream"
                 )
-                # 동적 청크 크기 조정
-                self._adjust_chunk_size_dynamically(len(batch_records), batch_records)
                 self._log_parsing_progress(current_count, "parquet_stream")
                 return self._create_batch_result(batch_records)
 

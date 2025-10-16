@@ -207,7 +207,7 @@ class CostManager(BaseManager):
 
             # 배치 처리를 위한 리스트 - gRPC 메시지 크기 제한 대응 (긴급 감소)
             batch_records = []
-            batch_size = 1000  # 성능 최적화를 위해 배치 크기 증가
+            batch_size = 1000  # 고정 배치 크기
 
             for _, row in response_stream.iterrows():
                 row_count += 1

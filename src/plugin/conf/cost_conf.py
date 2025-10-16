@@ -30,9 +30,9 @@ GCS_CONFIG = {
         "snappy",  # Snappy 압축 (Parquet와 함께 주로 사용)
         "zstd",  # Zstandard 압축
     ],
-    # 기본 청크 크기 - gRPC 메시지 크기 제한을 고려하여 더욱 감소
-    "default_chunk_size": 500,
-    # 최대 청크 크기 제한 - 안전성 확보
+    # 기본 청크 크기 - 고정값으로 설정
+    "default_chunk_size": 1000,
+    # 최대 청크 크기 제한 - 기본값과 동일
     "max_chunk_size": 1000,
     # 최대 파일 크기 제한 (1GB)
     "max_file_size": 1024 * 1024 * 1024,
@@ -65,17 +65,12 @@ BIGQUERY_CONFIG = {
 
 # 성능 최적화 설정
 PERFORMANCE_CONFIG = {
-    # gRPC 응답 최적화를 위한 배치 크기 설정
-    "grpc_response_batch_size": 100,  # gRPC 응답당 최대 레코드 수
-    # 동적 배치 크기 조정을 위한 설정
-    "min_batch_size": 10,  # 최소 배치 크기
-    "max_batch_size": 200,  # 최대 배치 크기
+    # gRPC 응답 배치 크기 설정 (고정값)
+    "grpc_response_batch_size": 1000,  # gRPC 응답당 레코드 수
     # 레코드당 평균 크기 추정 (바이트)
     "avg_record_size_bytes": 2048,  # 2KB per record (conservative estimate)
     # gRPC 메시지 크기 제한 (3MB에서 안전 마진 20% 확보)
     "grpc_message_size_limit": int(3 * 1024 * 1024 * 0.8),  # 2.4MB
     # 성능 모니터링을 위한 설정
     "enable_performance_logging": True,
-    # 배치 크기 동적 조정 활성화
-    "enable_dynamic_batch_sizing": True,
 }
