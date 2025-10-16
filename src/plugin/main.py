@@ -509,7 +509,16 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
         # 처리 완료 로깅
         task_options = params.get("task_options", {})
-        processed_project = task_options.get("project_id", "unknown")
+
+        # 프로젝트 정보 추출 (우선순위: project_id > file_path에서 추출 > unknown)
+        processed_project = task_options.get("project_id")
+        if not processed_project:
+            file_path = task_options.get("file_path", "")
+            if file_path and "/" in file_path:
+                # file_path에서 첫 번째 경로 세그먼트를 프로젝트명으로 사용
+                processed_project = file_path.split("/")[0]
+            else:
+                processed_project = "unknown"
 
         # 성능 최적화 효과 로깅 (간소화됨)
         if PERFORMANCE_CONFIG["enable_performance_logging"]:
