@@ -12,8 +12,10 @@ _LOGGER = logging.getLogger("spaceone")
 class BaseParser(ABC):
     """파일 파서 기본 클래스"""
 
-    def __init__(self):
-        self.chunk_size = GCS_CONFIG["default_chunk_size"]  # 기본 청크 크기
+    def __init__(self, batch_size: int = None):
+        self.chunk_size = (
+            batch_size or GCS_CONFIG["default_chunk_size"]
+        )  # 배치 크기 또는 기본 청크 크기
         self.max_chunk_size = GCS_CONFIG["max_chunk_size"]  # 최대 청크 크기
         self.grpc_message_limit = GCS_CONFIG[
             "grpc_message_size_limit"

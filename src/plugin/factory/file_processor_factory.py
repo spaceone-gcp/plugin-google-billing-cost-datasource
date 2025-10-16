@@ -15,11 +15,12 @@ class FileProcessorFactory:
     """파일 처리기 팩토리"""
 
     @staticmethod
-    def create_parser(file_format: str) -> BaseParser:
+    def create_parser(file_format: str, batch_size: int = None) -> BaseParser:
         """파일 형식에 맞는 파서 생성
 
         Args:
             file_format: 파일 형식 ('csv', 'json', 'parquet')
+            batch_size: 배치 크기 (선택사항)
 
         Returns:
             해당 형식의 파서 인스턴스
@@ -36,10 +37,15 @@ class FileProcessorFactory:
         if not parser_class:
             raise ERROR_UNSUPPORTED_FILE_FORMAT(format=file_format)
 
-        parser = parser_class()
-        parser.set_chunk_size(GCS_CONFIG["default_chunk_size"])
+        parser = parser_class(batch_size)
 
-        _LOGGER.debug(f"[FileProcessorFactory] Created {file_format} parser")
+        # batch_size가 지정되지 않은 경우에만 기본 청크 크기 설정
+        if batch_size is None:
+            parser.set_chunk_size(GCS_CONFIG["default_chunk_size"])
+
+        _LOGGER.debug(
+            f"[FileProcessorFactory] Created {file_format} parser with batch_size: {batch_size or 'default'}"
+        )
         return parser
 
     @staticmethod

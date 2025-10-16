@@ -260,7 +260,9 @@ def job_get_tasks(params: dict) -> dict:
         raise
 
 
-def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
+def _cost_get_data_logic(
+    params: dict, batch_size: int = None
+) -> Generator[dict, None, None]:
     """get cost data - 실제 로직 (Credits Detail 모드 지원)"""
     try:
         # 필수 파라미터 추출
@@ -354,7 +356,7 @@ def _cost_get_data_logic(params: dict) -> Generator[dict, None, None]:
             cost_mgr = CostManager()
 
             result_generator = cost_mgr.get_data(
-                options, secret_data, task_options, schema
+                options, secret_data, task_options, schema, batch_size
             )
 
             yield from result_generator
@@ -415,7 +417,32 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
         else:
             _LOGGER.debug("[cost_get_data] JSON logging disabled")
 
-        result_generator = _cost_get_data_logic(params)
+        # options와 task_options에서 batch_size 추출
+        options = params.get("options", {})
+        task_options = params.get("task_options", {})
+
+        # task_options 우선, options 차순으로 batch_size 확인
+        batch_size = task_options.get("batch_size") or options.get("batch_size")
+
+        if batch_size is None:
+            batch_size = PERFORMANCE_CONFIG["grpc_response_batch_size"]
+        else:
+            # 타입 변환 및 검증
+            if isinstance(batch_size, (int, float)) and batch_size > 0:
+                batch_size = int(batch_size)
+                # 범위 제한 (1 ~ 10000)
+                batch_size = max(1, min(batch_size, 10000))
+            else:
+                _LOGGER.warning(
+                    f"Invalid batch_size: {batch_size}. Using default: {PERFORMANCE_CONFIG['grpc_response_batch_size']}"
+                )
+                batch_size = PERFORMANCE_CONFIG["grpc_response_batch_size"]
+
+        _LOGGER.info(
+            f"[cost_get_data] Using batch_size: {batch_size} (from task_options: {task_options.get('batch_size')}, from options: {options.get('batch_size')})"
+        )
+
+        result_generator = _cost_get_data_logic(params, batch_size)
 
         # SpaceONE 프레임워크 호환: 개별 레코드 직접 yield 방식
         batch_count = 0
@@ -466,8 +493,8 @@ def cost_get_data(params: dict) -> Generator[dict, None, None]:
 
                             processed_records.append(record)
 
-                        # 성능 최적화: 고정 배치 크기로 yield
-                        yield from _create_fixed_batches(processed_records)
+                        # 성능 최적화: options에서 지정된 배치 크기로 yield
+                        yield from _create_fixed_batches(processed_records, batch_size)
 
             except Exception as e:
                 _LOGGER.error(
@@ -953,18 +980,54 @@ def _estimate_records_size(records: list) -> int:
         return len(records) * PERFORMANCE_CONFIG["avg_record_size_bytes"]
 
 
+def _get_batch_size_from_options(options: dict) -> int:
+    """options에서 batch_size를 추출하고, 없으면 기본값 반환"""
+    batch_size = options.get(
+        "batch_size", PERFORMANCE_CONFIG["grpc_response_batch_size"]
+    )
+
+    _LOGGER.debug(
+        f"[_get_batch_size_from_options] Raw batch_size from options: {batch_size}"
+    )
+
+    # 유효성 검증 (int 또는 float 허용)
+    if not isinstance(batch_size, (int, float)) or batch_size <= 0:
+        _LOGGER.warning(
+            f"Invalid batch_size in options: {batch_size}. Using default: {PERFORMANCE_CONFIG['grpc_response_batch_size']}"
+        )
+        return PERFORMANCE_CONFIG["grpc_response_batch_size"]
+
+    # float을 int로 변환
+    batch_size = int(batch_size)
+    _LOGGER.debug(f"[_get_batch_size_from_options] Converted batch_size: {batch_size}")
+
+    # 범위 제한 (1 ~ 10000)
+    batch_size = max(1, min(batch_size, 10000))
+
+    if batch_size != options.get("batch_size"):
+        _LOGGER.info(
+            f"Batch size adjusted to {batch_size} (within valid range 1-10000)"
+        )
+
+    return batch_size
+
+
 def _get_fixed_batch_size() -> int:
-    """고정된 배치 크기 반환"""
+    """고정된 배치 크기 반환 (하위 호환성)"""
     return PERFORMANCE_CONFIG["grpc_response_batch_size"]
 
 
-def _create_fixed_batches(records: list) -> Generator[dict, None, None]:
-    """레코드 리스트를 고정된 배치 크기로 분할하여 yield"""
+def _create_fixed_batches(
+    records: list, batch_size: int = None
+) -> Generator[dict, None, None]:
+    """레코드 리스트를 지정된 배치 크기로 분할하여 yield"""
     if not records:
         return
 
+    if batch_size is None:
+        batch_size = _get_fixed_batch_size()
+
     total_records = len(records)
-    batch_size = _get_fixed_batch_size()
 
     # 배치 수 계산
     batch_count = (total_records + batch_size - 1) // batch_size

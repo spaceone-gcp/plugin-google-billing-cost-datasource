@@ -12,6 +12,9 @@ _LOGGER = logging.getLogger("spaceone")
 class ParquetParser(BaseParser):
     """Parquet 파일 파서"""
 
+    def __init__(self, batch_size: int = None):
+        super().__init__(batch_size)
+
     def parse_stream(
         self, stream: IO, field_mapper: FieldMapper, **kwargs
     ) -> Generator[dict, None, None]:
@@ -50,8 +53,8 @@ class ParquetParser(BaseParser):
             # 배치 단위로 데이터 읽기
             processed_count = 0
 
-            # 고정 배치 크기 사용
-            batch_size = 1000
+            # 설정된 청크 크기 사용
+            batch_size = self.chunk_size
 
             for batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=columns, use_pandas_metadata=True

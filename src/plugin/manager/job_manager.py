@@ -216,6 +216,7 @@ class JobManager(BaseManager):
                     "billing_dataset_id": self.billing_dataset,
                     "billing_account_id": self.billing_account_id,
                     "data_source_type": DATA_SOURCE_TYPES["bigquery"],  # 명시적 설정
+                    "batch_size": options.get("batch_size"),  # batch_size 전달
                 }
 
                 tasks.append({"task_options": task_options})
@@ -457,6 +458,7 @@ class JobManager(BaseManager):
                         "data_source_type": data_source_type,
                         "field_mapper": options.get("field_mapper", {}),
                         "parsing_options": file_info.get("parsing_options", {}),
+                        "batch_size": options.get("batch_size"),  # batch_size 전달
                     }
 
                     tasks.append({"task_options": task_options})
@@ -567,6 +569,7 @@ class JobManager(BaseManager):
                             "data_source_type": data_source_type,
                             "field_mapper": options.get("field_mapper", {}),
                             "parsing_options": options.get("parsing_options", {}),
+                            "batch_size": options.get("batch_size"),  # batch_size 전달
                         }
 
                         tasks.append({"task_options": task_options})
@@ -602,6 +605,7 @@ class JobManager(BaseManager):
                     "data_source_type": data_source_type,
                     "field_mapper": options.get("field_mapper", {}),
                     "parsing_options": options.get("parsing_options", {}),
+                    "batch_size": options.get("batch_size"),  # batch_size 전달
                 }
 
                 tasks.append({"task_options": task_options})

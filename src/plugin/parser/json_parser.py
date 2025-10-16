@@ -14,6 +14,9 @@ _LOGGER = logging.getLogger("spaceone")
 class JSONParser(BaseParser):
     """JSON 파일 파서 (JSON Lines 및 일반 JSON 배열 지원)"""
 
+    def __init__(self, batch_size: int = None):
+        super().__init__(batch_size)
+
     def parse_stream(
         self, stream: IO, field_mapper: FieldMapper, **kwargs
     ) -> Generator[dict, None, None]:

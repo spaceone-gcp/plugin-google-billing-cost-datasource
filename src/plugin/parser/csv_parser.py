@@ -14,6 +14,9 @@ _LOGGER = logging.getLogger("spaceone")
 class CSVParser(BaseParser):
     """CSV 파일 파서"""
 
+    def __init__(self, batch_size: int = None):
+        super().__init__(batch_size)
+
     def parse_stream(
         self, stream: IO, field_mapper: FieldMapper, **kwargs
     ) -> Generator[dict, None, None]:

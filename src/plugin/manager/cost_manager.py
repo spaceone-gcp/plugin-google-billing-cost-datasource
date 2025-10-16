@@ -80,24 +80,65 @@ class CostManager(BaseManager):
         return {"results": linked_accounts}
 
     def get_data(
-        self, options: dict, secret_data: dict, task_options: dict, schema: str = None
+        self,
+        options: dict,
+        secret_data: dict,
+        task_options: dict,
+        schema: str = None,
+        batch_size: int = None,
     ) -> Generator[dict, None, None]:
         """데이터 소스 타입에 따라 처리 분기"""
+        # batch_size 설정 (task_options 우선, options 차순, 기본값 순)
+        if batch_size is None:
+            from ..conf.cost_conf import PERFORMANCE_CONFIG
+
+            # task_options에서 먼저 확인, 없으면 options에서 확인
+            task_batch_size = task_options.get("batch_size")
+            options_batch_size = options.get("batch_size")
+
+            _LOGGER.debug(f"[CostManager] task_options.batch_size: {task_batch_size}")
+            _LOGGER.debug(f"[CostManager] options.batch_size: {options_batch_size}")
+
+            batch_size = (
+                task_batch_size
+                or options_batch_size
+                or PERFORMANCE_CONFIG["grpc_response_batch_size"]
+            )
+
+            _LOGGER.debug(f"[CostManager] Selected batch_size: {batch_size}")
+
+        # 유효성 검증 (int 또는 float 허용)
+        if not isinstance(batch_size, (int, float)) or batch_size <= 0:
+            from ..conf.cost_conf import PERFORMANCE_CONFIG
+
+            _LOGGER.warning(
+                f"Invalid batch_size: {batch_size}. Using default: {PERFORMANCE_CONFIG['grpc_response_batch_size']}"
+            )
+            batch_size = PERFORMANCE_CONFIG["grpc_response_batch_size"]
+        else:
+            # float을 int로 변환
+            batch_size = int(batch_size)
+
+        # 범위 제한 (1 ~ 10000)
+        batch_size = max(1, min(batch_size, 10000))
+
+        _LOGGER.info(f"[CostManager] Using batch_size: {batch_size}")
+
         # source 값 추출 (options에서만)
         source = self._get_source_value(options)
 
         # source 기반 분기 처리
         if source == "bigquery":
             yield from self._get_data_from_bigquery(
-                options, secret_data, task_options, schema
+                options, secret_data, task_options, schema, batch_size
             )
         elif source == "gcs":
             yield from self._get_data_from_gcs(
-                options, secret_data, task_options, schema
+                options, secret_data, task_options, schema, batch_size
             )
         elif source == "http":
             yield from self._get_data_from_http(
-                options, secret_data, task_options, schema
+                options, secret_data, task_options, schema, batch_size
             )
         else:
             # 지원하지 않는 source 타입에 대한 에러 처리
@@ -106,7 +147,12 @@ class CostManager(BaseManager):
             )
 
     def _get_data_from_bigquery(
-        self, options: dict, secret_data: dict, task_options: dict, schema: str = None
+        self,
+        options: dict,
+        secret_data: dict,
+        task_options: dict,
+        schema: str = None,
+        batch_size: int = None,
     ) -> Generator[dict, None, None]:
         """BigQuery에서 데이터 조회 (기존 로직)"""
         self.bigquery_connector.create_session(options, secret_data, schema)
@@ -205,9 +251,9 @@ class CostManager(BaseManager):
                 _LOGGER.info("[BigQuery] 필터 조건: cost > 0 OR usage.amount > 0")
                 return
 
-            # 배치 처리를 위한 리스트 - gRPC 메시지 크기 제한 대응 (긴급 감소)
+            # 배치 처리를 위한 리스트 - gRPC 메시지 크기 제한 대응
             batch_records = []
-            batch_size = 1000  # 고정 배치 크기
+            # batch_size는 파라미터로 전달받음 (기본값: 1000)
 
             for _, row in response_stream.iterrows():
                 row_count += 1
@@ -318,7 +364,12 @@ class CostManager(BaseManager):
             raise
 
     def _get_data_from_gcs(
-        self, options: dict, secret_data: dict, task_options: dict, schema: str = None
+        self,
+        options: dict,
+        secret_data: dict,
+        task_options: dict,
+        schema: str = None,
+        batch_size: int = None,
     ) -> Generator[dict, None, None]:
         """GCS 버킷에서 데이터 조회 - 중복 요청 검사는 get_data()에서 이미 완료됨"""
         try:
@@ -399,7 +450,7 @@ class CostManager(BaseManager):
 
                     file_processed_count = 0
                     for batch_result in self._process_gcs_file(
-                        bucket_name, file_info, task_options
+                        bucket_name, file_info, task_options, batch_size
                     ):
                         if batch_result and "results" in batch_result:
                             batch_size = len(batch_result["results"])
@@ -442,7 +493,11 @@ class CostManager(BaseManager):
             raise e
 
     def _process_gcs_file(
-        self, bucket_name: str, file_info: dict, task_options: dict
+        self,
+        bucket_name: str,
+        file_info: dict,
+        task_options: dict,
+        batch_size: int = None,
     ) -> Generator[dict, None, None]:
         """개별 GCS 파일 처리"""
         file_name = file_info["name"]
@@ -487,7 +542,7 @@ class CostManager(BaseManager):
                     )
 
                 # 파서 생성 및 데이터 처리
-                parser = FileProcessorFactory.create_parser(file_format)
+                parser = FileProcessorFactory.create_parser(file_format, batch_size)
 
                 # 파싱 옵션 설정
                 parsing_options = task_options.get("parsing_options", {})
@@ -576,7 +631,12 @@ class CostManager(BaseManager):
             return []
 
     def _get_data_from_http(
-        self, options: dict, secret_data: dict, task_options: dict, schema: str = None
+        self,
+        options: dict,
+        secret_data: dict,
+        task_options: dict,
+        schema: str = None,
+        batch_size: int = None,
     ) -> Generator[dict, None, None]:
         """HTTP URL에서 데이터 조회 - 인증 불필요"""
         try:
@@ -648,7 +708,7 @@ class CostManager(BaseManager):
                 )
 
                 # 파서 생성 및 데이터 처리
-                parser = FileProcessorFactory.create_parser(file_format)
+                parser = FileProcessorFactory.create_parser(file_format, batch_size)
 
                 # 파싱 옵션 설정
                 parsing_options = task_options.get("parsing_options", {})
